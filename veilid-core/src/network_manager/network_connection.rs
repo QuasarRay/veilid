@@ -102,7 +102,7 @@ pub(crate) struct NetworkConnection {
     /// Statistics about network traffic
     stats: Arc<Mutex<NetworkConnectionStats>>,
     /// To send data out this connection, it is placed in this channel
-    sender: flume::Sender<(Option<Id>, Bytes)>,
+    sender: flume::Sender<(Option<Id>, Bytes, u16)>,
     /// Drop this when we want to drop the connection
     stop_source: Option<StopSource>,
     /// The node we are responsible for protecting the connection for if it is protected
@@ -311,9 +311,10 @@ impl NetworkConnection {
         protocol_connection: &ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
         message: Bytes,
+        mtu: u16,
     ) -> io::Result<NetworkResult<()>> {
         let ts = Timestamp::now_non_decreasing();
-        network_result_try!(protocol_connection.send(message).await?);
+        network_result_try!(protocol_connection.send(message, mtu).await?);
 
         let mut stats = stats.lock();
         stats.last_message_sent_time.max_assign(Some(ts));
@@ -355,7 +356,7 @@ impl NetworkConnection {
         manager_stop_token: StopToken,
         connection_id: NetworkConnectionId,
         flow: Flow,
-        receiver: flume::Receiver<(Option<Id>, Bytes)>,
+        receiver: flume::Receiver<(Option<Id>, Bytes, u16)>,
         protocol_connection: ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
         is_protected: Arc<AtomicBool>,
@@ -412,7 +413,7 @@ impl NetworkConnection {
                     let sender_fut = receiver.recv_async().then(|res| async {
                         let registry = registry;
                         match res {
-                            Ok((_span_id, message)) => {
+                            Ok((_span_id, message, mtu)) => {
                                 // Touch the LRU for this connection
                                 connection_manager.touch_connection_by_id(connection_id);
 
@@ -421,6 +422,7 @@ impl NetworkConnection {
                                     &protocol_connection,
                                     stats.clone(),
                                     message,
+                                    mtu,
                                 )
                                 .await
                                 {
@@ -501,7 +503,7 @@ impl NetworkConnection {
 
                                     // Pass received messages up to the network manager for processing
                                     if let Err(e) = network_manager
-                                        .on_recv_envelope(message, flow).measure_debug(TimestampDuration::new_ms(500), |x| {
+                                        .on_recv_envelope(message, flow, None).measure_debug(TimestampDuration::new_ms(500), |x| {
                                             // Throttled: this one is per message, not per connection
                                             veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "on_recv_envelope: {:#} for {} ", x, protocol_connection.flow());
                                         })
@@ -578,6 +580,7 @@ impl NetworkConnection {
                     veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close error: {} flow={:#}", e, flow);
                 }
                 Ok(nres) if !matches!(nres, NetworkResult::Value(_)) => {
+                    #[cfg(feature = "verbose-tracing")]
                     veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close incomplete: {} flow={:#}", nres, flow);
                 }
                 Ok(_) => {}

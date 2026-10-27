@@ -76,7 +76,8 @@ from .types import (
     urlsafe_b64decode_no_pad,
 )
 
-_STREAM_LIMIT = 65536 * 4
+# Longest NDJSON line the client reads; a longer one ends the connection
+_STREAM_LIMIT = 1024 * 1024
 
 ##############################################################
 
@@ -222,9 +223,10 @@ class _JsonVeilidAPI(VeilidAPI):
             reqfuture = self.in_flight_requests.pop(id, None)
         finally:
             self.lock.release()
-        # Resolve the request's future to the response json
+        # A caller that timed out already cancelled its future, so its late answer is dropped
         if reqfuture is not None:
-            reqfuture.set_result(j)
+            if not reqfuture.done():
+                reqfuture.set_result(j)
         else:
             print(f"Missing id: {id}, you may be missing a '.release()' or 'async with'")
 

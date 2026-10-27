@@ -241,7 +241,7 @@ impl ClientApiConnection {
         trace!("ClientApiConnection::handle_tcp_connection");
 
         // Connect the TCP socket
-        let stream = connect_async_tcp_stream(None, connect_addr, 10_000)
+        let stream = connect_async_tcp_stream(None, connect_addr, 10_000, None)
             .await
             .map_err(|e| ClientApiConnectionError::ConnectionFailed(e.to_string()))?
             .into_timeout_error()

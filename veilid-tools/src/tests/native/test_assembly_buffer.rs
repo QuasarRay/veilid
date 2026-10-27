@@ -2,6 +2,11 @@ use rand::seq::SliceRandom;
 
 use crate::*;
 
+/// Datagram size the tests send at, frame header included
+const FRAME_LEN: usize = 1280;
+/// Message bytes one frame carries
+const CHUNK_LEN: usize = FRAME_LEN - 8;
+
 fn random_sockaddr() -> SocketAddr {
     if get_random_u32() & 1 == 0 {
         let mut addr = [0u8; 16];
@@ -42,7 +47,7 @@ pub async fn test_single_out_in() {
         // Send single message below fragmentation limit
         assert!(matches!(
             assbuf_out
-                .split_message(message.clone(), remote_addr, sender)
+                .split_message(message.clone(), remote_addr, FRAME_LEN, sender)
                 .await,
             Ok(NetworkResult::Value(()))
         ));
@@ -88,7 +93,7 @@ pub async fn test_one_frag_out_in() {
     info!("sending");
     for _ in 0..10000 {
         let to_send = loop {
-            let random_len = (get_random_u32() % 1000) as usize + FRAGMENT_LEN;
+            let random_len = (get_random_u32() % 1000) as usize + CHUNK_LEN;
             let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
             let message: Bytes = message.into();
@@ -104,7 +109,9 @@ pub async fn test_one_frag_out_in() {
         // Send single message above fragmentation limit
         all_sent.insert(to_send.clone());
         assert!(matches!(
-            assbuf_out.split_message(to_send.0, to_send.1, sender).await,
+            assbuf_out
+                .split_message(to_send.0, to_send.1, FRAME_LEN, sender)
+                .await,
             Ok(NetworkResult::Value(()))
         ));
     }
@@ -176,7 +183,9 @@ pub async fn test_many_frags_out_in() {
         total_sent_size += to_send.0.len();
 
         assert!(matches!(
-            assbuf_out.split_message(to_send.0, to_send.1, sender).await,
+            assbuf_out
+                .split_message(to_send.0, to_send.1, FRAME_LEN, sender)
+                .await,
             Ok(NetworkResult::Value(()))
         ));
     }
@@ -248,7 +257,9 @@ pub async fn test_many_frags_out_in_single_host() {
         all_sent.insert(to_send.clone());
         total_sent_size += to_send.0.len();
         assert!(matches!(
-            assbuf_out.split_message(to_send.0, to_send.1, sender).await,
+            assbuf_out
+                .split_message(to_send.0, to_send.1, FRAME_LEN, sender)
+                .await,
             Ok(NetworkResult::Value(()))
         ));
     }
@@ -313,7 +324,7 @@ pub async fn test_many_frags_with_drops() {
         let to_send = loop {
             let remote_addr = random_sockaddr();
             let random_len = (get_random_u32() % 65536) as usize;
-            if random_len > FRAGMENT_LEN {
+            if random_len > CHUNK_LEN {
                 total_fragged += 1;
             }
             let mut message = BytesMut::zeroed(random_len);
@@ -332,7 +343,9 @@ pub async fn test_many_frags_with_drops() {
         total_sent_size += to_send.0.len();
 
         assert!(matches!(
-            assbuf_out.split_message(to_send.0, to_send.1, sender).await,
+            assbuf_out
+                .split_message(to_send.0, to_send.1, FRAME_LEN, sender)
+                .await,
             Ok(NetworkResult::Value(()))
         ));
 
@@ -406,7 +419,9 @@ pub async fn test_many_frags_reordered() {
         all_sent.insert(to_send.clone());
         total_sent_size += to_send.0.len();
         assert!(matches!(
-            assbuf_out.split_message(to_send.0, to_send.1, sender).await,
+            assbuf_out
+                .split_message(to_send.0, to_send.1, FRAME_LEN, sender)
+                .await,
             Ok(NetworkResult::Value(()))
         ));
 
@@ -450,7 +465,110 @@ pub async fn test_many_frags_reordered() {
     assert_eq!(all_sent.len(), 0);
 }
 
+/// Every frame stays within the frame length asked for, and the message still reassembles
+pub async fn test_frame_len_bounds_every_frame() {
+    info!("-- test_frame_len_bounds_every_frame");
+    let assbuf_out = AssemblyBuffer::new();
+    let assbuf_in = AssemblyBuffer::new();
+    let remote_addr = random_sockaddr();
+    let mut message = BytesMut::zeroed(10_000);
+    random_bytes(&mut message);
+    let message: Bytes = message.into();
+
+    for frame_len in [600usize, 1200, 1472] {
+        let (net_tx, net_rx) = flume::unbounded();
+        let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
+            let net_tx = net_tx.clone();
+            async move {
+                net_tx
+                    .send_async((framed_chunk, remote_addr))
+                    .await
+                    .expect("should send");
+                Ok(NetworkResult::value(()))
+            }
+        };
+        assert!(matches!(
+            assbuf_out
+                .split_message(message.clone(), remote_addr, frame_len, sender)
+                .await,
+            Ok(NetworkResult::Value(()))
+        ));
+        let mut out = None;
+        while let Ok((frame, from)) = net_rx.try_recv() {
+            assert!(
+                frame.len() <= frame_len,
+                "frame of {} > {}",
+                frame.len(),
+                frame_len
+            );
+            if let NetworkResult::Value(Some(m)) = assbuf_in.insert_frame(&frame, from) {
+                out = Some(m);
+            }
+        }
+        assert_eq!(out, Some(message.clone()));
+    }
+
+    // A frame must hold more than its header
+    let sender = |_framed_chunk: Bytes, _remote_addr: SocketAddr| async move {
+        Ok(NetworkResult::value(()))
+    };
+    assert!(assbuf_out
+        .split_message(message, remote_addr, 8, sender)
+        .await
+        .is_err());
+}
+
+/// A frame carrying its whole message says so; fragments, short frames and other versions do not
+pub async fn test_whole_message_frame() {
+    info!("-- test_whole_message_frame");
+    let assbuf_out = AssemblyBuffer::new();
+    let remote_addr = random_sockaddr();
+    for (message_len, whole) in [(CHUNK_LEN, true), (CHUNK_LEN + 1, false)] {
+        let (net_tx, net_rx) = flume::unbounded();
+        let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
+            let net_tx = net_tx.clone();
+            async move {
+                net_tx
+                    .send_async((framed_chunk, remote_addr))
+                    .await
+                    .expect("should send");
+                Ok(NetworkResult::value(()))
+            }
+        };
+        let message: Bytes = vec![0u8; message_len].into();
+        assert!(matches!(
+            assbuf_out
+                .split_message(message, remote_addr, FRAME_LEN, sender)
+                .await,
+            Ok(NetworkResult::Value(()))
+        ));
+        let mut frames = 0;
+        while let Ok((frame, _)) = net_rx.try_recv() {
+            frames += 1;
+            assert_eq!(
+                AssemblyBuffer::is_whole_message_frame(&frame),
+                whole,
+                "message of {message_len}"
+            );
+        }
+        assert_eq!(frames, if whole { 1 } else { 2 });
+    }
+    assert!(!AssemblyBuffer::is_whole_message_frame(&[]));
+    assert!(!AssemblyBuffer::is_whole_message_frame(
+        &[1u8; FRAME_HEADER_LEN]
+    ));
+    // A whole-message header under another version proves nothing
+    let mut other_version = vec![0u8; FRAME_HEADER_LEN + 1];
+    other_version[0] = 2;
+    other_version[7] = 1;
+    assert!(!AssemblyBuffer::is_whole_message_frame(&other_version));
+    other_version[0] = 1;
+    assert!(AssemblyBuffer::is_whole_message_frame(&other_version));
+}
+
 pub async fn test_all() {
+    test_whole_message_frame().await;
+    test_frame_len_bounds_every_frame().await;
     test_single_out_in().await;
     test_one_frag_out_in().await;
     test_many_frags_out_in().await;

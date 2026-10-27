@@ -82,8 +82,9 @@ impl PublicInternetRoutingDomainController {
     fn check_ping_validator_public_internet(state: &RoutingDomainState) -> bool {
         match state.outbound_stage {
             RoutingDomainOutboundStage::Invalid => false,
-            RoutingDomainOutboundStage::NeedsBootstrap => false,
-            RoutingDomainOutboundStage::NeedsPublishedPeerInfo
+            // Missing peers come back on one answer, and bootstrap revives no peer it already knows
+            RoutingDomainOutboundStage::NeedsBootstrap
+            | RoutingDomainOutboundStage::NeedsPublishedPeerInfo
             | RoutingDomainOutboundStage::NeedsMoreTestedNodes
             | RoutingDomainOutboundStage::NeedsSafetyRoutes
             | RoutingDomainOutboundStage::ReadyToOperate => true,
@@ -95,7 +96,9 @@ impl PublicInternetRoutingDomainController {
             RoutingDomainInboundStage::Invalid
             | RoutingDomainInboundStage::NeedsDialInfoConfirmation
             | RoutingDomainInboundStage::Unusable => false,
-            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
+            RoutingDomainInboundStage::NeedsRelays
+            | RoutingDomainInboundStage::NeedsTransportMtus
+            | RoutingDomainInboundStage::ReadyToPublish => {
                 // Tick the relay management task if we need relays at all, or if we have some already but they need to be validated/optimized
                 state.relay_requirements.needs_relays()
                     || state

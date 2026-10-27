@@ -11,29 +11,40 @@ impl StorageManager {
         cur_ts: Timestamp,
         renew_window: TimestampDuration,
     ) {
-        // A stalled or unreachable node cannot complete these, and either answer the
-        // detector gives means wait
+        // Stalls, failure bursts and outages hold these; under loss on our own link they keep their pace
         if registry
             .network_manager()
             .online_detector()
-            .blame_suppressed(RoutingDomain::PublicInternet)
+            .blame_weight(RoutingDomain::PublicInternet)
+            .is_none()
         {
             return;
         }
 
-        // Collect watches needing fallback inspection
         let consensus_count = registry.config().internal().network.dht.get_value_count as usize;
         let max_interval = registry
             .storage_manager()
             .timings()
             .watch_inspect_max_interval;
+        let opt_loss_ended_ts = registry
+            .network_manager()
+            .online_detector()
+            .loss_ended_ts(RoutingDomain::PublicInternet);
+
+        // Collect watches needing fallback inspection
         let inspections: Vec<_> = owm
             .outbound_watches
             .values()
             .filter_map(|ow| {
                 Some((
                     ow.record_key(),
-                    ow.needs_fallback_inspect(cur_ts, consensus_count, renew_window, max_interval)?,
+                    ow.needs_fallback_inspect(
+                        cur_ts,
+                        consensus_count,
+                        renew_window,
+                        max_interval,
+                        opt_loss_ended_ts,
+                    )?,
                 ))
             })
             .collect();
@@ -97,6 +108,45 @@ impl StorageManager {
                 .online_state(RoutingDomain::PublicInternet),
         );
 
+        // A watch on more than consensus nodes gets every change that many times; keep the
+        // closest, outside any watch operation on the record
+        let consensus_count = self.config().internal().network.dht.get_value_count as usize;
+        let over_consensus: Vec<RecordKey> = owm
+            .outbound_watches
+            .values()
+            .filter(|ow| {
+                ow.state()
+                    .is_some_and(|s| s.nodes().len() > consensus_count)
+            })
+            .map(|ow| ow.record_key())
+            .collect();
+        for record_key in over_consensus {
+            if let Some(_record_lock) = self
+                .record_lock_table
+                .try_lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
+            {
+                let dropped = owm.trim_watch_nodes(&record_key, consensus_count, cur_ts);
+                veilid_log!(self debug target: "watch",
+                    "OutboundWatch({}): cancelling {} beyond the {} closest watch nodes",
+                    record_key, dropped.len(), consensus_count
+                );
+            }
+        }
+        if !hold_network_work
+            && owm
+                .pending_watch_cancels
+                .values()
+                .any(|not_before| *not_before <= cur_ts)
+        {
+            let registry = self.registry();
+            self.background_operation_processor.add_future(async move {
+                registry
+                    .storage_manager()
+                    .send_pending_watch_cancels()
+                    .await;
+            });
+        }
+
         // Iterate all outbound watches and determine what work needs doing if any
         for outbound_watch in owm.outbound_watches.values_mut() {
             // Operate on this watch only if it isn't already being operated on.
@@ -122,24 +172,9 @@ impl StorageManager {
             return Ok(());
         }
 
-        // Run queued change inspections that are due, leaving backed-off retries and
-        // records whose inspection is still running queued
-        let due_keys = owm
-            .needs_change_inspection
-            .iter()
-            .filter(|(k, (_, not_before))| {
-                *not_before <= cur_ts && !owm.change_inspects_in_flight.contains(&k.opaque())
-            })
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
-        for k in due_keys {
-            let Some((subkeys, _)) = owm.needs_change_inspection.remove(&k) else {
-                continue;
-            };
+        // Run due change inspections, oldest first and up to the in-flight cap
+        for (k, subkeys) in owm.take_due_change_inspections(cur_ts) {
             let opaque_record_key = k.opaque();
-            owm.change_inspects_in_flight
-                .insert(opaque_record_key.clone());
-
             let op_fut = Self::get_change_inspection_operation_inner(
                 self.registry(),
                 local_record_store.clone(),

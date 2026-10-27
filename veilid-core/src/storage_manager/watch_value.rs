@@ -46,7 +46,7 @@ pub(crate) struct InboundWatchParameters {
     /// The watching schema member key, or an anonymous key
     pub watcher_member_id: MemberId,
     /// The place where updates are sent
-    pub target: Target,
+    pub dest: Destination,
 }
 
 impl InboundWatchParameters {
@@ -659,8 +659,9 @@ impl StorageManager {
                             FanoutDoneDisposition::DoneEarly
                         }
                         FanoutResultKind::Consensus => {
-                            // Signal we're done
-                            FanoutDoneDisposition::DoneEarly
+                            // Let the questions in flight answer: a node that accepts after
+                            // consensus holds a watch too, and pushes until it is cancelled
+                            FanoutDoneDisposition::Done
                         }
                     }
                 },
@@ -895,6 +896,13 @@ impl StorageManager {
                 return;
             };
 
+            // Only the per-node watches that need it, so a silent node retries alone
+            let cur_ts = Timestamp::now();
+            let renew_ts = cur_ts.later(self.timings().renew_outbound_watches);
+            let routing_table = self.routing_table();
+            let rss = routing_table.route_spec_store();
+            let route_is_dead = |route: &PublicKey| rss.get_route_id_for_key(route).is_none();
+            let max_interval = self.timings().watch_inspect_max_interval;
             let mut per_node_states = vec![];
             let mut missing_pnks = BTreeSet::new();
             for pnk in state.nodes() {
@@ -903,10 +911,22 @@ impl StorageManager {
                     missing_pnks.insert(pnk.clone());
                     continue;
                 };
-                per_node_states.push((pnk.clone(), per_node_state));
+                if per_node_state.needs_renewal(cur_ts, renew_ts, route_is_dead) {
+                    per_node_states.push((pnk.clone(), per_node_state));
+                }
             }
+            let lost_a_route = per_node_states.iter().any(|(_, pns)| {
+                pns.opt_value_changed_route
+                    .as_ref()
+                    .is_some_and(route_is_dead)
+            });
             state.edit(&owm.per_node_states, |editor| {
                 editor.retain_nodes(|x| !missing_pnks.contains(x));
+                // Pushes sent over a route that died may never have arrived
+                if lost_a_route {
+                    editor.reset_fallback_inspect_backoff(Some(cur_ts));
+                    editor.record_route_renewal(cur_ts, max_interval);
+                }
             });
 
             let per_node_params = state.get_per_node_params(&desired);
@@ -1072,33 +1092,50 @@ impl StorageManager {
 
             // Regardless of result, set our next possible reconciliation time
             let consensus_count = self.config().internal().network.dht.get_value_count as usize;
-            let below_consensus = owm
+            let opt_state = owm
                 .outbound_watches
                 .get(&opaque_record_key)
-                .and_then(|ow| ow.state())
-                .is_none_or(|s| s.nodes().len() < consensus_count);
-            let next_ts = cur_ts.later(Self::next_reconcile_interval(
+                .and_then(|ow| ow.state());
+            let below_consensus = opt_state.is_none_or(|s| s.nodes().len() < consensus_count);
+            let retries = opt_state.map_or(0, |s| s.reconcile_retries());
+            let survival = self
+                .network_manager()
+                .online_detector()
+                .survival(RoutingDomain::PublicInternet);
+            let (interval, next_retries) = Self::next_reconcile_interval(
                 below_consensus,
                 accepted,
                 rejected,
-            ));
-            owm.set_next_reconcile_ts(opaque_record_key, next_ts);
+                retries,
+                survival,
+            );
+            owm.set_next_reconcile(opaque_record_key, cur_ts.later(interval), next_retries);
         }
     }
 
-    /// How long until a watch reconciles again: soon while below consensus, unless every
+    /// How long until a watch reconciles again, and the retry count after this one: soon while
+    /// below consensus, backing off through `failure_backoff` as retries repeat, unless every
     /// answer was a refusal, a node with no copy, usually because nothing is written yet.
     /// A fanout nobody answered learned nothing about the record and retries.
     pub(super) fn next_reconcile_interval(
         below_consensus: bool,
         accepted: usize,
         rejected: usize,
-    ) -> TimestampDuration {
+        retries: u32,
+        opt_survival: Option<f64>,
+    ) -> (TimestampDuration, u32) {
         let all_refused = accepted == 0 && rejected > 0;
         if below_consensus && !all_refused {
-            RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL
+            let interval = failure_backoff(
+                RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL,
+                RECONCILE_OUTBOUND_WATCHES_INTERVAL,
+                retries,
+                opt_survival,
+            )
+            .unwrap_or(RECONCILE_OUTBOUND_WATCHES_INTERVAL);
+            (interval, retries.saturating_add(1))
         } else {
-            RECONCILE_OUTBOUND_WATCHES_INTERVAL
+            (RECONCILE_OUTBOUND_WATCHES_INTERVAL, 0)
         }
     }
 
@@ -1206,7 +1243,7 @@ impl StorageManager {
             // interval is for, and a watch nobody will accept loses nodes on every
             // reconcile, so resetting on that pins it to the floor forever
             if params_changed || did_add_new_nodes {
-                editor.reset_fallback_inspect_backoff();
+                editor.reset_fallback_inspect_backoff(None);
             }
         });
 
@@ -1427,8 +1464,8 @@ impl StorageManager {
             };
             let remaining_count = state.remaining_count().saturating_sub(1);
             let cur_ts = Timestamp::now_non_decreasing();
-            let missing_value_changes =
-                state.needs_fallback_inspect(cur_ts, self.timings().watch_inspect_max_interval);
+            let missing_value_changes = state.unpushed_since_fallback()
+                || state.needs_fallback_inspect(cur_ts, self.timings().watch_inspect_max_interval);
             let seq = value.seq();
             state.edit(&owm.per_node_states, |editor| {
                 editor.set_remaining_count(remaining_count);
@@ -1712,8 +1749,35 @@ impl StorageManager {
             record_key: record_key.clone(),
             node_id: inbound_node_id.clone(),
         };
+        // A push on a watch we do not hold is a stray: one whose acceptance never reached us, or
+        // one replaced by a newer watch at its node. Cancel it once a fanout still answering has
+        // had time to claim it.
+        let stray_cancel_ts = Timestamp::now().later(TimestampDuration::new_ms(
+            self.config()
+                .internal()
+                .network
+                .dht
+                .get_value_timeout_ms
+                .into(),
+        ));
         if !state.nodes().contains(&pnk) {
-            return Ok(false);
+            // A node left out for an unanswered renewal keeps its per-node state, and a push on
+            // its watch id shows that watch is alive
+            if owm
+                .per_node_states
+                .get(&pnk)
+                .is_none_or(|pns| pns.watch_id != watch_id)
+            {
+                owm.queue_watch_cancel(pnk, watch_id, stray_cancel_ts);
+                return Ok(false);
+            }
+            veilid_log!(self debug target: "watch",
+                "OutboundWatch({}): {} rejoins on a push to watch id {}",
+                record_key, inbound_node_id, watch_id
+            );
+            state.edit(&owm.per_node_states, |editor| {
+                editor.add_nodes([pnk.clone()]);
+            });
         }
 
         // Get per node state
@@ -1726,6 +1790,7 @@ impl StorageManager {
         // If watch id doesn't match it's for an older watch and should be ignored
         if per_node_state.watch_id != watch_id {
             veilid_log!(self debug "Incorrect watch id for per node state in outbound watch: {:?} {} != {}", pnk, per_node_state.watch_id, watch_id);
+            owm.queue_watch_cancel(pnk, watch_id, stray_cancel_ts);
             return Ok(false);
         }
 
@@ -2154,6 +2219,50 @@ impl StorageManager {
         }
     }
 
+    /// Send the watch cancels that are due: watches beyond consensus, and strays
+    pub(super) async fn send_pending_watch_cancels(&self) {
+        let cancels = self
+            .outbound_watch_manager_mut()
+            .take_due_watch_cancels(Timestamp::now());
+        let routing_table = self.routing_table();
+        let mut unord = FuturesUnordered::new();
+        for cancel in cancels {
+            let node_ref = match routing_table.lookup_node_id(cancel.pnk.node_id.clone()) {
+                Ok(Some(node_ref)) => node_ref,
+                Ok(None) => {
+                    self.outbound_watch_manager_mut()
+                        .finish_watch_cancel(&cancel.pnk, cancel.watch_id);
+                    continue;
+                }
+                Err(e) => {
+                    veilid_log!(self debug "Error looking up watch cancel node: {}", e);
+                    self.outbound_watch_manager_mut()
+                        .finish_watch_cancel(&cancel.pnk, cancel.watch_id);
+                    continue;
+                }
+            };
+            unord.push(async move {
+                let res = self
+                    .outbound_watch_value_cancel(
+                        cancel.pnk.record_key.opaque(),
+                        cancel.opt_watcher,
+                        cancel.safety_selection,
+                        node_ref,
+                        cancel.watch_id,
+                    )
+                    .await;
+                (cancel.pnk, cancel.watch_id, res)
+            });
+        }
+        while let Some((pnk, watch_id, res)) = unord.next().await {
+            if let Err(e) = res {
+                veilid_log!(self debug "Watch cancel failed: id={} ({}): {}", watch_id, pnk.node_id, e);
+            }
+            self.outbound_watch_manager_mut()
+                .finish_watch_cancel(&pnk, watch_id);
+        }
+    }
+
     /// Feed a completed change inspection back into its watch's fallback interval.
     /// Finding nothing is the common case and earns a longer wait; finding a missed
     /// change means the watch is not delivering and we want to look again promptly.
@@ -2162,45 +2271,66 @@ impl StorageManager {
         opaque_record_key: &OpaqueRecordKey,
         productive: bool,
     ) {
+        let survival = self
+            .network_manager()
+            .online_detector()
+            .survival(RoutingDomain::PublicInternet);
         let owm = &mut *self.outbound_watch_manager_mut();
         let Some(outbound_watch) = owm.outbound_watches.get_mut(opaque_record_key) else {
             return;
         };
+        outbound_watch.clear_change_inspect_failures();
         let Some(state) = outbound_watch.state_mut() else {
             return;
         };
         let max_interval = self.timings().watch_inspect_max_interval;
         state.edit(&owm.per_node_states, |editor| {
             if productive {
-                editor.reset_fallback_inspect_backoff();
+                editor.reset_fallback_inspect_backoff(None);
             } else {
                 editor.back_off_fallback_inspect(max_interval);
+            }
+            if let Some(survival) = survival {
+                editor.stretch_fallback_inspect(survival, max_interval);
             }
         });
     }
 
     /// Requeue a change inspection that failed or was deferred for foreground activity.
     ///
-    /// A failure learned nothing about the record: its nodes did not answer, or we
-    /// could not reach them. It retries soon, or when a running quiet window ends if that
-    /// is sooner, and while we are offline the queue holds it rather than spending it.
+    /// A failure learned nothing about the record: its nodes did not answer, or we could not
+    /// reach them. It retries through `failure_backoff`, or when a running quiet window ends if
+    /// that is sooner, and while we are offline the queue holds it rather than spending it.
     pub(super) fn requeue_failed_change_inspect(
         &self,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
     ) {
         let cur_ts = Timestamp::now_non_decreasing();
-        let retry_ts = cur_ts.later(CHANGE_INSPECT_RETRY_INTERVAL);
+        let survival = self
+            .network_manager()
+            .online_detector()
+            .survival(RoutingDomain::PublicInternet);
+        let max_interval = self.timings().watch_inspect_max_interval;
         let quiet_until = self.background_quiet_until();
+        let owm = &mut *self.outbound_watch_manager_mut();
+        let Some(outbound_watch) = owm.outbound_watches.get_mut(&record_key.opaque()) else {
+            return;
+        };
+        let failures = outbound_watch.note_change_inspect_failure();
+        let delay = failure_backoff(
+            CHANGE_INSPECT_RETRY_INTERVAL,
+            max_interval,
+            failures,
+            survival,
+        )
+        .unwrap_or(max_interval);
+        let retry_ts = cur_ts.later(delay);
         let not_before = if quiet_until > cur_ts {
             quiet_until.min(retry_ts)
         } else {
             retry_ts
         };
-        let owm = &mut *self.outbound_watch_manager_mut();
-        if !owm.outbound_watches.contains_key(&record_key.opaque()) {
-            return;
-        }
         owm.enqueue_change_inspect_after(record_key, subkeys, not_before);
     }
 

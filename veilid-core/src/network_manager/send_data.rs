@@ -3,12 +3,40 @@ use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("net");
 
+/// Whose advertised sizes govern a hop
+enum HopPeer {
+    /// The node the send is for, reached at its own address
+    Target(TransportMtus),
+    /// A relay, with the sizes the node it relays for copied into its relay info
+    Relay {
+        node_ids: NodeIdGroup,
+        copied_mtus: TransportMtus,
+    },
+}
+
+/// The relay in `relay_info_list` at `remote`, matched by address: a NAT may change the port
+fn relay_at(relay_info_list: &[RelayInfo], remote: IpAddr) -> Option<HopPeer> {
+    relay_info_list
+        .iter()
+        .find(|relay_info| {
+            relay_info
+                .dial_info_detail_list()
+                .iter()
+                .any(|did| did.dial_info.ip_addr() == remote)
+        })
+        .map(|relay_info| HopPeer::Relay {
+            node_ids: relay_info.node_ids().clone(),
+            copied_mtus: *relay_info.receive_mtus(),
+        })
+}
+
 impl NetworkManager {
     /// Send raw data to a dial info
     ///
     /// Sending to a dialinfo does not require determining a NodeContactMethod
     /// Sending directly does not apply any dial info filtering as the direct
     /// dialinfo is already specified.
+    /// `opt_mtu` sizes the packets in place of the node's advertised size, for a probe.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -18,9 +46,13 @@ impl NetworkManager {
         node_ref: NodeRef,
         dial_info: DialInfo,
         data: Bytes,
+        opt_mtu: Option<u16>,
     ) -> EyreResult<SendDataResult> {
         let net = self.net();
-        let nres = pin_future!(net.send_data_to_dial_info(dial_info.clone(), data)).await?;
+        let mtu = opt_mtu.unwrap_or_else(|| {
+            self.hop_mtu(&node_ref, dial_info.transport_type(), dial_info.ip_addr())
+        });
+        let nres = pin_future!(net.send_data_to_dial_info(dial_info.clone(), data, mtu)).await?;
         let sdr = SendDataResult::new(
             NodeContactMethodResult::Resolved(ContactMethod::Direct {
                 target_di: dial_info.clone(),
@@ -50,6 +82,63 @@ impl NetworkManager {
                     .deprioritized_consuming_canary(rd, transport)
             })
             .unwrap_or(false)
+    }
+
+    /// Largest packet to send toward `target` over a hop whose far end is at `remote`: the
+    /// target's own size when the hop reaches it, otherwise the relay's. A TCP connection keeps
+    /// the smallest size ever asked of it, so a relay hop must never carry the target's size.
+    pub(super) fn hop_mtu(
+        &self,
+        target: &NodeRef,
+        transport: TransportType,
+        remote: IpAddr,
+    ) -> u16 {
+        let opt_hop_peer = target
+            .best_routing_domain()
+            .and_then(|routing_domain| {
+                target.operate(|e| {
+                    let node_info = e.node_info(routing_domain)?;
+                    if node_info
+                        .dial_info_detail_list()
+                        .iter()
+                        .any(|did| did.dial_info.ip_addr() == remote)
+                    {
+                        return Some(HopPeer::Target(*node_info.receive_mtus()));
+                    }
+                    relay_at(node_info.relay_info_list(), remote)
+                })
+            })
+            .or_else(|| {
+                // Our own relay carries sends to nodes we reach no other way
+                let own_peer_info = self
+                    .routing_table()
+                    .get_current_peer_info(RoutingDomain::PublicInternet);
+                relay_at(own_peer_info.node_info().relay_info_list(), remote)
+            });
+        let opt_receive_mtus = match opt_hop_peer {
+            Some(HopPeer::Target(receive_mtus)) => Some(receive_mtus),
+            Some(HopPeer::Relay {
+                node_ids,
+                copied_mtus,
+            }) => Some(
+                self.relay_own_receive_mtus(&node_ids)
+                    .unwrap_or(copied_mtus),
+            ),
+            None => None,
+        };
+        self.send_mtu(transport.into(), opt_receive_mtus.as_ref())
+    }
+
+    /// A relay's sizes from its own signed node info when we hold it; the copy in another
+    /// node's relay info is that node's to forge
+    fn relay_own_receive_mtus(&self, node_ids: &NodeIdGroup) -> Option<TransportMtus> {
+        let routing_table = self.routing_table();
+        let relay_nr = node_ids
+            .iter()
+            .find_map(|node_id| routing_table.lookup_node_id(node_id.clone()).ok().flatten())?;
+        relay_nr
+            .node_info(RoutingDomain::PublicInternet)
+            .map(|node_info| *node_info.receive_mtus())
     }
 
     fn report_contact_method_result(
@@ -84,6 +173,8 @@ impl NetworkManager {
     /// include information about the existing connections and network state of our node.
     /// NodeContactMethod calculation requires first calculating the per-RoutingDomain ContactMethod
     /// between the source and destination PeerInfo, which is a stateless operation.
+    /// `opt_mtu` sizes the packets on a reply flow in place of the node's advertised size, for a
+    /// probe's answer.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -92,12 +183,20 @@ impl NetworkManager {
         &self,
         node_ref: FilteredNodeRef,
         data: Bytes,
+        opt_mtu: Option<u16>,
     ) -> EyreResult<SendDataResult> {
         // A reply goes out on its pinned flow; only if that flow is gone does it fall
         // through to the contact method
         if let Some(flow) = node_ref.reply_flow() {
             let net = self.net();
-            match pin_future!(net.send_data_to_existing_flow(flow, data.clone())).await? {
+            let mtu = opt_mtu.unwrap_or_else(|| {
+                self.hop_mtu(
+                    &node_ref.unfiltered(),
+                    flow.transport_type(),
+                    flow.remote_address().ip_addr(),
+                )
+            });
+            match pin_future!(net.send_data_to_existing_flow(flow, data.clone(), mtu)).await? {
                 NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
                     self.set_last_flow_from_send(
                         node_ref.unfiltered(),
@@ -287,27 +386,34 @@ impl NetworkManager {
                 pin_future_closure!(self.send_data_cm_existing(target_node_ref, sequencing, data))
                     .await?
             }
-            NodeContactMethodResult::Resolved(ContactMethod::OutboundRelay { relay_di }) => {
+            NodeContactMethodResult::Resolved(ContactMethod::OutboundRelay { relay_di })
+            | NodeContactMethodResult::Resolved(ContactMethod::InboundRelay { relay_di }) => {
+                let target_node_ref = destination_node_ref.unfiltered();
+                let mtu = self.hop_mtu(
+                    &target_node_ref,
+                    relay_di.transport_type(),
+                    relay_di.ip_addr(),
+                );
                 pin_future_closure!(self.send_data_cm_direct(
-                    destination_node_ref.unfiltered(),
+                    target_node_ref,
                     relay_di.clone(),
                     data,
-                ))
-                .await?
-            }
-            NodeContactMethodResult::Resolved(ContactMethod::InboundRelay { relay_di }) => {
-                pin_future_closure!(self.send_data_cm_direct(
-                    destination_node_ref.unfiltered(),
-                    relay_di.clone(),
-                    data,
+                    mtu,
                 ))
                 .await?
             }
             NodeContactMethodResult::Resolved(ContactMethod::Direct { target_di }) => {
+                let target_node_ref = destination_node_ref.unfiltered();
+                let mtu = self.hop_mtu(
+                    &target_node_ref,
+                    target_di.transport_type(),
+                    target_di.ip_addr(),
+                );
                 pin_future_closure!(self.send_data_cm_direct(
-                    destination_node_ref.unfiltered(),
+                    target_node_ref,
                     target_di.clone(),
                     data,
+                    mtu,
                 ))
                 .await?
             }
@@ -360,26 +466,32 @@ impl NetworkManager {
         };
 
         let net = self.net();
-        let unique_flow =
-            match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
+        let mtu = self.hop_mtu(
+            &target_node_ref.unfiltered(),
+            flow.transport_type(),
+            flow.remote_address().ip_addr(),
+        );
+        let unique_flow = match pin_future!(net
+            .send_data_to_existing_flow(flow, data, mtu)
+            .measure_debug(
                 TimestampDuration::new_secs(1),
                 veilid_log_dbg!(
                     self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                     "NetworkManager::send_data_unreachable send_data_to_existing_flow"
                 )
             ))
-            .await?
-            {
-                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
-                NetworkAttempt::Performed(NetworkResult::Timeout) => {
-                    return Ok(NetworkResult::timeout());
-                }
-                _ => {
-                    return Ok(NetworkResult::no_connection_other(
-                        "failed to send to existing flow",
-                    ));
-                }
-            };
+        .await?
+        {
+            NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
+            NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                return Ok(NetworkResult::timeout());
+            }
+            _ => {
+                return Ok(NetworkResult::no_connection_other(
+                    "failed to send to existing flow",
+                ));
+            }
+        };
 
         // Update timestamp for this last connection since we just sent to it
         self.set_last_flow_from_send(
@@ -415,26 +527,32 @@ impl NetworkManager {
         };
 
         let net = self.net();
-        let unique_flow =
-            match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
+        let mtu = self.hop_mtu(
+            &target_node_ref,
+            flow.transport_type(),
+            flow.remote_address().ip_addr(),
+        );
+        let unique_flow = match pin_future!(net
+            .send_data_to_existing_flow(flow, data, mtu)
+            .measure_debug(
                 TimestampDuration::new_secs(1),
                 veilid_log_dbg!(
                     self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                     "NetworkManager::send_data_cm_existing send_data_to_existing_flow"
                 )
             ))
-            .await?
-            {
-                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
-                NetworkAttempt::Performed(NetworkResult::Timeout) => {
-                    return Ok(NetworkResult::timeout());
-                }
-                _ => {
-                    return Ok(NetworkResult::no_connection_other(
-                        "failed to send to existing flow",
-                    ));
-                }
-            };
+        .await?
+        {
+            NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
+            NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                return Ok(NetworkResult::timeout());
+            }
+            _ => {
+                return Ok(NetworkResult::no_connection_other(
+                    "failed to send to existing flow",
+                ));
+            }
+        };
 
         // Update timestamp for this last connection since we just sent to it
         self.set_last_flow_from_send(target_node_ref, unique_flow.flow, Timestamp::now());
@@ -467,8 +585,13 @@ impl NetworkManager {
                 flow, seq_target_node_ref
             );
             let net = self.net();
+            let mtu = self.hop_mtu(
+                &target_node_ref.unfiltered(),
+                flow.transport_type(),
+                flow.remote_address().ip_addr(),
+            );
             match pin_future!(net
-                .send_data_to_existing_flow(flow, data.clone())
+                .send_data_to_existing_flow(flow, data.clone(), mtu)
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
@@ -548,8 +671,13 @@ impl NetworkManager {
                 flow, target_node_ref
             );
             let net = self.net();
+            let mtu = self.hop_mtu(
+                &target_node_ref.unfiltered(),
+                flow.transport_type(),
+                flow.remote_address().ip_addr(),
+            );
             match pin_future!(net
-                .send_data_to_existing_flow(flow, data.clone())
+                .send_data_to_existing_flow(flow, data.clone(), mtu)
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
@@ -620,6 +748,7 @@ impl NetworkManager {
         node_ref: NodeRef,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Reuse only the existing flow whose remote is the target dial info; a flow that
         // arrived through a relay has the relay's remote and must not carry a direct send
@@ -640,7 +769,7 @@ impl NetworkManager {
 
             let net = self.net();
             match pin_future!(net
-                .send_data_to_existing_flow(flow, data.clone())
+                .send_data_to_existing_flow(flow, data.clone(), mtu)
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
@@ -677,7 +806,7 @@ impl NetworkManager {
         // No matching existing flow, send to the dial info directly which may create a new connection.
         let net = self.net();
         let unique_flow = network_result_try!(
-            pin_future!(net.send_data_to_dial_info(dial_info.clone(), data)).await?
+            pin_future!(net.send_data_to_dial_info(dial_info.clone(), data, mtu)).await?
         );
 
         self.set_last_flow_from_send(node_ref, unique_flow.flow, Timestamp::now());
@@ -1006,7 +1135,12 @@ impl NetworkManager {
         // And now use the existing connection to send over
         if let Some(flow) = inbound_nr.last_flow() {
             let net = self.net();
-            match pin_future!(net.send_data_to_existing_flow(flow, data)).await? {
+            let mtu = self.hop_mtu(
+                &target_nr,
+                flow.transport_type(),
+                flow.remote_address().ip_addr(),
+            );
+            match pin_future!(net.send_data_to_existing_flow(flow, data, mtu)).await? {
                 NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
                     self.set_last_flow_from_send(target_nr, unique_flow.flow, Timestamp::now());
                     Ok(NetworkResult::value(unique_flow))
@@ -1156,9 +1290,14 @@ impl NetworkManager {
         }
 
         // And now send over the punched hole
+        let mtu = self.hop_mtu(
+            &target_nr,
+            inbound_flow.transport_type(),
+            inbound_flow.remote_address().ip_addr(),
+        );
         match self
             .net()
-            .send_data_to_existing_flow(inbound_flow, data)
+            .send_data_to_existing_flow(inbound_flow, data, mtu)
             .await?
         {
             NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {

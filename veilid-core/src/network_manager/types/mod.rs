@@ -18,6 +18,7 @@ mod send_data_result;
 mod signal_info;
 mod socket_address;
 mod socket_type;
+mod transport_mtus;
 mod transport_type;
 
 use super::*;
@@ -42,4 +43,5 @@ pub(crate) use send_data_result::*;
 pub(crate) use signal_info::*;
 pub(crate) use socket_address::*;
 pub(crate) use socket_type::*;
+pub(crate) use transport_mtus::*;
 pub(crate) use transport_type::*;

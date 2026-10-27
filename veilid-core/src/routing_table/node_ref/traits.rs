@@ -289,12 +289,12 @@ pub(crate) trait NodeRefCommonTrait:
 
     fn record_protected_connection_dead(&self, transport: TransportType) {
         // Protected connections are our outbound relay connections: dial evidence
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true);
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true, 1.0);
     }
 
     fn report_failed_route_test(&self, transport: TransportType) {
         // Route tests ride our outbound first-hop sends: dial evidence
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true);
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true, 1.0);
     }
 
     fn report_contact_method_result(&self, cm: &ContactMethod, success: bool) {
@@ -356,9 +356,10 @@ pub(crate) trait NodeRefCommonTrait:
             e.answer_rcvd(send_ts, recv_ts, bytes, transport, dialed);
         })
     }
-    fn stats_lost_question(&self, transport: TransportType, dialed: bool) {
+    /// A lost question, charged at blame `weight` (below 1 under our own loss)
+    fn stats_lost_question(&self, transport: TransportType, dialed: bool, weight: f64) {
         self.operate_mut(|e| {
-            e.lost_question(transport, dialed);
+            e.lost_question(transport, dialed, weight);
         })
     }
     fn stats_routed_up(&self, key: PublicKey, bytes: ByteCount) {
@@ -379,15 +380,17 @@ pub(crate) trait NodeRefCommonTrait:
     fn stats_routed_answer(&self) {
         self.operate_mut(|e| e.record_routed_answer())
     }
+    /// A failed send, charged at blame `weight` (below 1 under our own loss)
     fn stats_failed_to_send(
         &self,
         ts: Timestamp,
         expects_answer: bool,
         transport: TransportType,
         dialed: bool,
+        weight: f64,
     ) {
         self.operate_mut(|e| {
-            e.failed_to_send(ts, expects_answer, transport, dialed);
+            e.failed_to_send(ts, expects_answer, transport, dialed, weight);
         })
     }
     fn stats_unreachable(&self) {

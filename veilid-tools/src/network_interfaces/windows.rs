@@ -94,6 +94,7 @@ impl PlatformSupportWindows {
             let flags = Self::get_interface_flags(&windows_interface);
 
             let mut network_interface = NetworkInterface::new(intf_name.clone(), flags);
+            network_interface.mtu = windows_interface.mtu();
 
             // Go through all addresses and add them if appropriate
             for addr in windows_interface.unicast_addresses() {
@@ -190,6 +191,10 @@ impl IpAdapterAddresses<'_> {
     }
     pub fn get_flag_point_to_point(&self) -> bool {
         self.data.IfType == IF_TYPE_TUNNEL
+    }
+    pub fn mtu(&self) -> Option<u32> {
+        // Zero means the adapter reported none
+        (self.data.Mtu != 0).then_some(self.data.Mtu)
     }
     pub fn gateway_addresses(&self) -> Vec<IpAddr> {
         let mut out = vec![];

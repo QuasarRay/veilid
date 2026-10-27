@@ -50,7 +50,8 @@ impl PublicInternetRoutingDomainController {
             let is_known_valid = v.with_stats(|stats| stats.last_known_valid_ts().is_some());
             // Ordered routes gate readiness; unordered ones are best effort
             let is_ordered = single_ordering(v.orderings()) == Some(SequenceOrdering::Ordered);
-            if is_known_valid && v.is_automatic() && is_ordered {
+            // A dead route awaiting release can carry nothing, though it stays listed while locked
+            if is_known_valid && v.is_automatic() && is_ordered && !v.is_marked_for_release() {
                 if v.hop_count() == rss.get_default_route_hop_count_safe() {
                     safe_route_count += 1;
                 } else if v.hop_count() == rss.get_default_route_hop_count_unsafe() {
@@ -389,16 +390,11 @@ impl PublicInternetRoutingDomainController {
                 .await;
         }
 
-        // Enqueue remote route tests at slightly lower priority
+        // Enqueue remote route tests at slightly lower priority; the store holds only routes the
+        // app imported, since a reply route is good for its one answer
         let remote_routes_needing_testing = rss.list_remote_routes(|k, v| {
-            v.with_stats(|stats| {
-                // Remote route orderings aren't tracked locally; test if any ordering is stale.
-                if stats.needs_testing(SequenceOrderingSet::all(), cur_ts) {
-                    Some(k.clone())
-                } else {
-                    None
-                }
-            })
+            v.with_stats(|stats| stats.remote_needs_testing(cur_ts))
+                .then(|| k.clone())
         });
         if !remote_routes_needing_testing.is_empty() {
             #[cfg(feature = "verbose-tracing")]

@@ -3,10 +3,15 @@ use super::*;
 mod address_check;
 mod address_filter;
 mod bootstrap;
+#[cfg(feature = "debug-api")]
+mod chaos;
+#[cfg(not(feature = "debug-api"))]
+mod chaos_stub;
 mod connection_handle;
 mod connection_manager;
 mod connection_table;
 mod debug;
+mod loss_estimator;
 mod network;
 mod network_connection;
 mod node_contact_method_cache;
@@ -45,7 +50,12 @@ pub(crate) use types::*;
 ////////////////////////////////////////////////////////////////////////////////////////
 use address_check::*;
 use address_filter::*;
+#[cfg(feature = "debug-api")]
+use chaos::*;
+#[cfg(not(feature = "debug-api"))]
+use chaos_stub::*;
 use connection_handle::*;
+use loss_estimator::*;
 use relay_worker::*;
 use routing_table::*;
 use rpc_processor::*;
@@ -174,6 +184,12 @@ pub(crate) struct NetworkManager {
     // Our own outbound send health, per routing domain and transport
     transport_stats: TransportStats,
 
+    // Our largest packets per low-level transport, read on every send
+    own_mtus: OwnMtus,
+
+    // Debug packet loss injection
+    chaos: Chaos,
+
     // Durations derived from the RPC timeout
     timings: NetworkManagerTimings,
 
@@ -301,6 +317,8 @@ impl NetworkManager {
             address_filter,
             online_detector,
             transport_stats,
+            own_mtus: OwnMtus::new(),
+            chaos: Chaos::new(),
             timings,
             components: RwLock::new(None),
             rolling_transfers_task: TickTask::new(
@@ -336,6 +354,26 @@ impl NetworkManager {
 
     pub fn transport_stats(&self) -> &TransportStats {
         &self.transport_stats
+    }
+
+    pub fn own_mtus(&self) -> &OwnMtus {
+        &self.own_mtus
+    }
+
+    /// Largest packet to send a node on a transport: ours, capped by what it advertises it takes
+    pub fn send_mtu(
+        &self,
+        low_level_transport_type: LowLevelTransportType,
+        opt_receive_mtus: Option<&TransportMtus>,
+    ) -> u16 {
+        let theirs = opt_receive_mtus
+            .and_then(|receive_mtus| receive_mtus.get(low_level_transport_type))
+            .unwrap_or(SAFE_TRANSPORT_MTU);
+        self.own_mtus.get(low_level_transport_type).min(theirs)
+    }
+
+    pub fn chaos(&self) -> &Chaos {
+        &self.chaos
     }
 
     /// Durations derived from the RPC timeout
@@ -1059,6 +1097,7 @@ impl NetworkManager {
     /// node_ref is the final destination to which the envelope will be sent
     /// If `opt_dial_info` is specified, then it will be directly sent to this dialinfo
     /// without resolving the contact method
+    /// `opt_mtu` overrides the hop's packet size, for a probe sent to a dial info or a reply flow
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1068,6 +1107,7 @@ impl NetworkManager {
         node_ref: FilteredNodeRef,
         opt_dial_info: Option<DialInfo>,
         body: Bytes,
+        opt_mtu: Option<u16>,
     ) -> EyreResult<SendDataResult> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return Ok(SendDataResult::new(
@@ -1139,10 +1179,10 @@ impl NetworkManager {
         // Send the envelope via whatever means necessary, gated on the shutdown stop token.
         let send_fut = async {
             if let Some(dial_info) = opt_dial_info {
-                self.send_data_direct(node_ref.unfiltered(), dial_info, out)
+                self.send_data_direct(node_ref.unfiltered(), dial_info, out, opt_mtu)
                     .await
             } else {
-                self.send_data(node_ref, out).await
+                self.send_data(node_ref, out, opt_mtu).await
             }
         };
         match send_fut.timeout_at(stop_token).await {
@@ -1178,7 +1218,11 @@ impl NetworkManager {
         // Send receipt directly
         let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_data_unbound_to_dial_info(dial_info.clone(), rcpt_data.clone())
+            .send_data_unbound_to_dial_info(
+                dial_info.clone(),
+                rcpt_data.clone(),
+                SAFE_TRANSPORT_MTU,
+            )
             .await?
         else {
             veilid_log!(self debug "not sending out-of-band receipt to {} because the transport is suppressed", dial_info);
@@ -1198,7 +1242,13 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn on_recv_envelope(&self, data: Bytes, flow: Flow) -> EyreResult<bool> {
+    /// `opt_datagram_len` is the UDP datagram the envelope arrived whole in, if it did
+    async fn on_recv_envelope(
+        &self,
+        data: Bytes,
+        flow: Flow,
+        opt_datagram_len: Option<u16>,
+    ) -> EyreResult<bool> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return Ok(false);
         };
@@ -1474,9 +1524,14 @@ impl NetworkManager {
         self.set_last_flow(sender_noderef.unfiltered(), flow, local_timestamp);
 
         // Pass message to RPC system
-        if let Err(e) =
-            rpc.enqueue_direct_message(envelope, sender_noderef, flow, routing_domain, body)
-        {
+        if let Err(e) = rpc.enqueue_direct_message(
+            envelope,
+            sender_noderef,
+            flow,
+            routing_domain,
+            body,
+            opt_datagram_len,
+        ) {
             // Couldn't enqueue, but not the sender's fault
             veilid_log!(self debug "failed to enqueue direct message: {}", e);
             return Ok(false);

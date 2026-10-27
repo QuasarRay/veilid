@@ -83,6 +83,7 @@ pub async fn test_persisted_entries_round_trip() {
             e.lost_question(
                 TransportType::new(ProtocolType::TCP, AddressType::IPV4),
                 true,
+                1.0,
             );
             e.report_contact_method_result(
                 &ContactMethod::Direct {

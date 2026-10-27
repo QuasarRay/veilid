@@ -151,7 +151,7 @@ pub async fn test_dead_connection_skip() {
     // Dead connections refuse sends even through an existing handle
     c2.close();
     assert!(matches!(
-        c2h.send_async(Bytes::new()).await,
+        c2h.send_async(Bytes::new(), SAFE_TRANSPORT_MTU).await,
         ConnectionHandleSendResult::NotSent
     ));
 
@@ -169,7 +169,7 @@ pub async fn test_dead_connection_skip() {
     table.remove_connection_by_id(1.into()).unwrap().close();
     assert_eq!(table.get_best_connection_by_remote(None, remote), None);
     assert!(matches!(
-        c1h.send_async(Bytes::new()).await,
+        c1h.send_async(Bytes::new(), SAFE_TRANSPORT_MTU).await,
         ConnectionHandleSendResult::NotSent
     ));
 

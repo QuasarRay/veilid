@@ -78,6 +78,29 @@ impl fmt::Display for LastFlowEntry {
     }
 }
 
+/// Fractions of a lost question and of a send failure observed under our own loss, each adding its
+/// blame weight until a whole one is charged
+#[derive(Copy, Clone, Debug, Default)]
+struct UnchargedBlame {
+    /// Lost questions
+    lost_question: f64,
+    /// Failed sends
+    failed_to_send: f64,
+}
+
+/// Adds `weight` to `uncharged`, and whether that makes a whole charge
+fn charge_weighted(uncharged: &mut f64, weight: f64) -> bool {
+    if weight >= 1.0 {
+        return true;
+    }
+    *uncharged += weight.max(0.0);
+    if *uncharged >= 1.0 {
+        *uncharged -= 1.0;
+        return true;
+    }
+    false
+}
+
 /// The data associated with each bucket entry; persisted as a [`BucketEntryPersisted`]
 #[derive(Debug)]
 pub(crate) struct BucketEntryInner {
@@ -155,6 +178,8 @@ pub(crate) struct BucketEntryInner {
     state_stats_accounting: Mutex<StateStatsAccounting>,
     /// The accounting for the answer statistics
     answer_stats_accounting: AnswerStatsAccounting,
+    /// Blame observed under our own loss and not yet charged, per sequence ordering
+    uncharged_blame: BTreeMap<SequenceOrdering, UnchargedBlame>,
 
     ////////////////////////////////////////////////////////////////////////
     // Geolocation Feature
@@ -206,6 +231,7 @@ impl BucketEntryInner {
             transfer_stats_accounting: TransferStatsAccounting::new(),
             state_stats_accounting: Mutex::new(StateStatsAccounting::new()),
             answer_stats_accounting: AnswerStatsAccounting::default(),
+            uncharged_blame: BTreeMap::new(),
         }
     }
 }
@@ -1045,6 +1071,9 @@ impl BucketEntryInner {
         let sequence_ordering = transport.sequence_ordering();
         let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
         so_stats.question_sent(ts, expects_answer);
+        if let Some(uncharged) = self.uncharged_blame.get_mut(&sequence_ordering) {
+            uncharged.failed_to_send = 0.0;
+        }
 
         // Update node-level rpc stats
         self.rpc_stats.question_sent(ts, expects_answer);
@@ -1116,36 +1145,57 @@ impl BucketEntryInner {
         let sequence_ordering = transport.sequence_ordering();
         let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
         so_stats.answer_rcvd(recv_ts);
+        self.uncharged_blame.remove(&sequence_ordering);
 
         // Update node-level rpc stats
         self.rpc_stats.answer_rcvd(recv_ts);
     }
 
-    pub(super) fn lost_question(&mut self, transport: TransportType, dialed: bool) {
+    /// Charge a lost question at blame `weight`: under our own loss fractions add up per ordering,
+    /// and an answer clears them, so a run needs 1/weight times the losses. Only a loss at full
+    /// weight ends the peer's run of steady answers, which paces its pings.
+    pub(super) fn lost_question(&mut self, transport: TransportType, dialed: bool, weight: f64) {
+        let uncharged = self
+            .uncharged_blame
+            .entry(transport.sequence_ordering())
+            .or_default();
+        if !charge_weighted(&mut uncharged.lost_question, weight) {
+            return;
+        }
         let lost_ts = Timestamp::now();
+        let breaks_steady = weight >= 1.0;
 
         // Only dial evidence goes in the per-transport bucket
         if dialed {
             let ts_stats = self.transport_stats_mut(transport);
-            ts_stats.lost_question(lost_ts);
+            ts_stats.lost_question(lost_ts, breaks_steady);
         }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
         let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
-        so_stats.lost_question(lost_ts);
+        so_stats.lost_question(lost_ts, breaks_steady);
 
         // Update node-level rpc stats
-        self.rpc_stats.lost_question(lost_ts);
+        self.rpc_stats.lost_question(lost_ts, breaks_steady);
     }
 
+    /// Charge a failed send at blame `weight`, the same way as a lost question
     pub(super) fn failed_to_send(
         &mut self,
         fail_ts: Timestamp,
         expects_answer: bool,
         transport: TransportType,
         dialed: bool,
+        weight: f64,
     ) {
+        let uncharged = self
+            .uncharged_blame
+            .entry(transport.sequence_ordering())
+            .or_default();
+        if !charge_weighted(&mut uncharged.failed_to_send, weight) {
+            return;
+        }
         // Only dial evidence goes in the per-transport bucket
         if dialed {
             let ts_stats = self.transport_stats_mut(transport);

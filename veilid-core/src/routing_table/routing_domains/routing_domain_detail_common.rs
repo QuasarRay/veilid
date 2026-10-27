@@ -23,6 +23,8 @@ pub struct RoutingDomainDetailCommon {
     dial_info_details: Vec<DialInfoDetail>,
     /// Dial info detail has been confirmed by the network manager as publishable/reachable
     confirmed: bool,
+    /// The largest packets this node takes per transport, None while they are still being detected
+    receive_mtus: Option<TransportMtus>,
     /// The minimum number of nodes in the is routing domain since the last low water mark recording point
     /// Pair of (reset, low water mark)
     low_water_mark: Mutex<(bool, Arc<LowWaterMark>)>,
@@ -53,6 +55,7 @@ impl fmt::Debug for RoutingDomainDetailCommon {
             .field("relay_states", &self.relay_states)
             .field("dial_info_details", &self.dial_info_details)
             .field("confirmed", &self.confirmed)
+            .field("receive_mtus", &self.receive_mtus)
             .field("low_water_mark", &self.low_water_mark)
             .field("current_peer_info_cache", &self.current_peer_info_cache)
             .field("bootstrap_peers", &self.bootstrap_peers)
@@ -68,7 +71,7 @@ impl fmt::Display for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nBootstrap Records: {}\nEntry Summary:\n{}",
+            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nReceive MTUs: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nBootstrap Records: {}\nEntry Summary:\n{}",
             if f.alternate() {
                 format!("\n{}",indent_all_string(f.to_string(&self.network_config)))
             } else {
@@ -78,6 +81,10 @@ impl fmt::Display for RoutingDomainDetailCommon {
             indent_all_string(f.to_multiline_indexed_string(self.relay_states.iter().map(|(k, v)| format!("{}: {}", f.to_string(k), f.to_string(v)))).string_if_empty("None")),
             indent_all_string(f.to_multiline_indexed_string(self.dial_info_details.iter().map(|d| f.to_string(d))).string_if_empty("None")),
             f.to_string(self.confirmed),
+            match &self.receive_mtus {
+                Some(receive_mtus) => f.to_string(receive_mtus),
+                None => "Detecting".to_string(),
+            },
             f.to_string(self.low_water_mark.lock().1.clone()),
             self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
             self.get_served_bootstrap_cache().records().iter().map(|r| f.to_string(r.public_keys())).collect::<Vec<_>>().join(",").string_if_empty("None"),
@@ -98,6 +105,7 @@ impl RoutingDomainDetailCommon {
             relay_states: Default::default(),
             dial_info_details: Default::default(),
             confirmed: false,
+            receive_mtus: None,
             low_water_mark: Mutex::new((true, Default::default())),
             current_peer_info_cache: Mutex::new(Default::default()),
             bootstrap_peers: Mutex::new(Default::default()),
@@ -114,6 +122,10 @@ impl RoutingDomainDetailCommon {
 
     pub fn confirmed(&self) -> bool {
         self.confirmed
+    }
+
+    pub fn receive_mtus(&self) -> Option<TransportMtus> {
+        self.receive_mtus
     }
 
     pub fn network_config(&self) -> &RoutingDomainNetworkConfig {
@@ -299,6 +311,13 @@ impl RoutingDomainDetailCommon {
         self.confirmed = confirmed;
     }
 
+    pub fn set_receive_mtus(&mut self, receive_mtus: Option<TransportMtus>) {
+        if self.receive_mtus != receive_mtus {
+            self.receive_mtus = receive_mtus;
+            self.clear_current_peer_info_cache();
+        }
+    }
+
     pub fn clear_dial_info_details(
         &mut self,
         address_types: Option<AddressTypeSet>,
@@ -442,6 +461,7 @@ impl RoutingDomainDetailCommon {
                 relay_node_info.address_types(),
                 relay.dial_info_details,
                 relay.relay_kind,
+                *relay_node_info.receive_mtus(),
             );
             relay_info_list.push(relay_info);
         }
@@ -471,6 +491,7 @@ impl RoutingDomainDetailCommon {
             self.network_config.address_types,
             self.dial_info_details.clone(),
             relay_info_list,
+            self.receive_mtus.unwrap_or_default(),
         );
 
         PeerInfo::try_new_from_node_info(

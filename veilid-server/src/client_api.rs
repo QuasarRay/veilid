@@ -154,7 +154,7 @@ impl ClientApi {
     }
 
     async fn handle_tcp_incoming(self, bind_addr: SocketAddr) -> std::io::Result<()> {
-        let listener = bind_async_tcp_listener(bind_addr)?
+        let listener = bind_async_tcp_listener(bind_addr, None)?
             .ok_or(std::io::Error::from(std::io::ErrorKind::AddrInUse))?;
         debug!(target: "client_api", "TCPClient API listening on: {:?}", bind_addr);
 

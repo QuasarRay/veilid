@@ -43,6 +43,10 @@ impl RPCProcessor {
         instrument(level = "trace", target = "rpc", skip_all)
     )]
     pub(super) async fn process_value_changed(&self, msg: Message) -> RPCNetworkResult<()> {
+        if self.network_manager().chaos().drop_value_changed() {
+            return Ok(NetworkResult::value(()));
+        }
+
         // Get the statement
         let (_, _, kind) = msg.operation.destructure();
         let (key, subkeys, count, watch_id, value) = match kind {

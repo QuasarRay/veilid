@@ -118,6 +118,45 @@ enum DebugCommand {
         #[arg(value_name = "transport_token")]
         args: Vec<String>,
     },
+    /// lose, delay or rate-limit this node's packets, or lose its pushes, to test bad networks
+    Chaos {
+        /// No arguments prints every setting as JSON, starting from all-zero defaults.
+        ///
+        /// `<path>`: print one subtree, e.g. `net.self.recv`
+        ///
+        /// `<path>=<value> ...`: set, e.g. `net.self.send.loss=100` drops every packet sent
+        /// (the send still reports success) and `net.self.recv.loss=50` discards half of those
+        /// received. `net.ip['1.2.3.4'].send.loss=50` or `net.ip['2001:db8::/64'].recv.loss=25`
+        /// adds loss for an address range; the longest matching range applies, on top of
+        /// `net.self`. Loss is a percentage, 0 to 100.
+        ///
+        /// `max_size`, in `net.self` or a range, loses packets larger than that many bytes. A TCP
+        /// or WS frame crosses it in the connection's segments, and one over it stalls the
+        /// connection, as a path MTU black hole does, until `net.stall_close_ms` closes it.
+        ///
+        /// `net.self.send.rate=250000 net.self.send.queue_ms=800` makes this node's link carry
+        /// 250000 bytes a second (`pps` caps packets a second) behind a queue holding 800 ms of
+        /// that traffic: packets wait their turn, and one that finds the queue full is lost.
+        /// `net.self.weather` changes the link over time: `drift` (percent) takes up to that much
+        /// capacity away, redrawn every `drift_s` seconds, and collapses lasting about
+        /// `collapse_s` seconds, about `collapse_every_s` seconds apart, cut `collapse_cut`
+        /// percent of the capacity and lose `collapse_loss` percent of packets.
+        ///
+        /// `rpc.value_changed.loss=100` discards every ValueChanged statement received, as if the
+        /// pushes went missing while the network works.
+        ///
+        /// `reset [<path>]`: restore every setting, or one subtree, to its default
+        ///
+        /// `preset [<name> ...] [<path>=<value> ...]`: start from defaults, then apply each preset
+        /// and assignment in order, e.g. `preset mobile-bad mtu-blackhole` for a bad cellular link
+        /// through a 464XLAT. No arguments lists the presets: `mobile`, `mobile-bad`,
+        /// `mtu-blackhole`.
+        ///
+        /// `stats`: what each direction lost, held and still has queued, the link's capacity now
+        /// and the collapses so far, and the pushes lost
+        #[arg(value_name = "chaos_token")]
+        args: Vec<String>,
+    },
     /// send a status RPC question to a destination
     Ping {
         /// Destination grammar:
@@ -1380,6 +1419,15 @@ impl VeilidAPI {
         Some(out)
     }
 
+    fn debug_chaos(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+        let registry = self.core_context()?.registry();
+        registry
+            .network_manager()
+            .chaos()
+            .command(&args)
+            .map_err(VeilidAPIError::generic)
+    }
+
     fn debug_transport(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         let network_manager = registry.network_manager();
@@ -1817,7 +1865,7 @@ impl VeilidAPI {
 
         // Send a StatusQ
         let rpc_processor = registry.rpc_processor();
-        let result = Box::pin(rpc_processor.rpc_call_status(dest))
+        let result = Box::pin(rpc_processor.rpc_call_status(dest, None))
             .await
             .map_err(VeilidAPIError::internal)?;
         match result {
@@ -3537,6 +3585,7 @@ impl VeilidAPI {
                 DebugCommand::Txtrecord { keypairs } => self.debug_txtrecord(keypairs).await,
                 DebugCommand::Relay { args } => self.debug_relay(args).await,
                 DebugCommand::Transport { args } => self.debug_transport(args),
+                DebugCommand::Chaos { args } => self.debug_chaos(args),
                 DebugCommand::Ping { destination } => self.debug_ping(destination).await,
                 DebugCommand::Appmessage { destination, data } => {
                     self.debug_app_message(destination, data).await

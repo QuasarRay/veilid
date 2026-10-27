@@ -4,6 +4,8 @@ use super::*;
 pub const MAX_DIAL_INFO_DETAILS: usize = veilid_capnp::MAX_DIAL_INFO_DETAILS as usize;
 /// Most relay infos a node info carries
 pub const MAX_RELAY_INFOS: usize = veilid_capnp::MAX_RELAY_INFOS as usize;
+/// Most transport mtus a node info or relay info carries
+pub const MAX_TRANSPORT_MTUS: usize = veilid_capnp::MAX_TRANSPORT_MTUS as usize;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -15,6 +17,8 @@ pub struct NodeInfo {
     address_types: AddressTypeSet,
     dial_info_detail_list: Vec<DialInfoDetail>,
     relay_info_list: Vec<RelayInfo>,
+    #[serde(default)]
+    receive_mtus: TransportMtus,
 }
 
 impl fmt::Display for NodeInfo {
@@ -36,12 +40,13 @@ impl fmt::Display for NodeInfo {
                 .string_if_empty("None")
         )?;
 
-        write!(
+        writeln!(
             f,
             "relay_info_list:\n{}",
             indent_all_string(f.to_multiline_indexed_string(self.relay_info_list.iter()))
                 .string_if_empty("None")
-        )
+        )?;
+        write!(f, "receive_mtus:       {}", self.receive_mtus)
     }
 }
 
@@ -56,6 +61,7 @@ impl NodeInfo {
         address_types: AddressTypeSet,
         mut dial_info_detail_list: Vec<DialInfoDetail>,
         mut relay_info_list: Vec<RelayInfo>,
+        receive_mtus: TransportMtus,
     ) -> Self {
         envelope_support.sort_unstable();
         crypto_info_list.sort_unstable();
@@ -71,6 +77,7 @@ impl NodeInfo {
             address_types,
             dial_info_detail_list,
             relay_info_list,
+            receive_mtus,
         }
     }
 
@@ -112,6 +119,9 @@ impl NodeInfo {
     }
     pub fn relay_info_list(&self) -> &[RelayInfo] {
         &self.relay_info_list
+    }
+    pub fn receive_mtus(&self) -> &TransportMtus {
+        &self.receive_mtus
     }
 
     pub fn public_keys(&self) -> PublicKeyGroup {
@@ -229,6 +239,7 @@ impl NodeInfo {
             || self.address_types != other.address_types
             || self.dial_info_detail_list != other.dial_info_detail_list
             || self.relay_info_list.len() != other.relay_info_list.len()
+            || self.receive_mtus != other.receive_mtus
         {
             return false;
         }

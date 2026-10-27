@@ -21,6 +21,11 @@ impl NetworkManager {
             "Relay Worker Process Latency:\n{}",
             indent_all_string(format!("{:#}", process_latency))
         );
+        out += "\n";
+        out += &format!(
+            "Online State:\n{}",
+            indent_all_string(self.online_detector().debug_info())
+        );
         out
     }
 

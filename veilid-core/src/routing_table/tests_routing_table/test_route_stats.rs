@@ -32,13 +32,13 @@ pub fn test_loopback_failure_run_kills_ordering() {
     let threshold = loopback_failure_threshold(SequenceOrdering::Unordered);
 
     for n in 1..threshold {
-        let tally = stats.record_loopback_result(SequenceOrdering::Unordered, false, now());
+        let tally = stats.record_loopback_result(SequenceOrdering::Unordered, false, 1.0, now());
         assert_eq!(tally.streak, n);
         assert!(!stats.is_dead_for_ordering(SequenceOrdering::Unordered));
         // A failing ordering wants a retest
         assert!(stats.needs_testing(only(SequenceOrdering::Unordered), now()));
     }
-    let tally = stats.record_loopback_result(SequenceOrdering::Unordered, false, now());
+    let tally = stats.record_loopback_result(SequenceOrdering::Unordered, false, 1.0, now());
     assert_eq!(tally.fail, threshold as u64);
     assert!(stats.is_dead_for_ordering(SequenceOrdering::Unordered));
     assert!(stats.is_dead_for(only(SequenceOrdering::Unordered)));
@@ -54,9 +54,9 @@ pub fn test_loopback_pass_resets_run() {
     let threshold = loopback_failure_threshold(SequenceOrdering::Ordered);
 
     for _ in 1..threshold {
-        stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+        stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
     }
-    let tally = stats.record_loopback_result(SequenceOrdering::Ordered, true, now());
+    let tally = stats.record_loopback_result(SequenceOrdering::Ordered, true, 1.0, now());
     // The pass reports the run it ended
     assert_eq!(tally.streak, threshold - 1);
     assert_eq!(tally.pass, 1);
@@ -64,7 +64,7 @@ pub fn test_loopback_pass_resets_run() {
     assert!(!stats.needs_testing(only(SequenceOrdering::Ordered), now()));
 
     // A fresh run starts from zero
-    let tally = stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+    let tally = stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
     assert_eq!(tally.streak, 1);
     assert!(!stats.is_dead_for_ordering(SequenceOrdering::Ordered));
 }
@@ -75,11 +75,11 @@ pub fn test_send_does_not_clear_loopback_run() {
     let threshold = loopback_failure_threshold(SequenceOrdering::Ordered);
 
     for _ in 1..threshold {
-        stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+        stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
         // Sending over the route is not evidence it works
         stats.record_sent(SequenceOrdering::Ordered, now(), ByteCount::new(100));
     }
-    stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+    stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
     assert!(stats.is_dead_for_ordering(SequenceOrdering::Ordered));
 }
 
@@ -99,7 +99,7 @@ pub fn test_send_failure_does_not_kill_the_route() {
     // A send failure must not pre-empt the loopback threshold
     let mut stats = RouteStats::new(now());
     stats.record_send_failed(SequenceOrdering::Ordered);
-    stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+    stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
     assert!(
         !stats.is_dead_for(only(SequenceOrdering::Ordered)),
         "one bad loopback is not a dead route, whether or not a send failed"
@@ -108,7 +108,7 @@ pub fn test_send_failure_does_not_kill_the_route() {
     // Evidence spanning the route kills it, and blames the hops
     let mut stats = RouteStats::new(now());
     for _ in 0..loopback_failure_threshold(SequenceOrdering::Ordered) {
-        stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+        stats.record_loopback_result(SequenceOrdering::Ordered, false, 1.0, now());
     }
     assert!(stats.is_dead_for(only(SequenceOrdering::Ordered)));
     assert!(stats.death_blames_hops_for(only(SequenceOrdering::Ordered)));
@@ -171,7 +171,7 @@ pub fn test_lost_question_mark_holds_in_its_epoch() {
     let lost_in = epoch(1, 1, 0);
     assert!(!stats.lost_question_to(ordering, &dest, &lost_in));
 
-    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in));
+    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in), 1.0, now());
     assert!(stats.lost_question_to(ordering, &dest, &lost_in));
     assert!(!stats.lost_question_to(ordering, &other, &lost_in));
     assert!(!stats.lost_question_to(SequenceOrdering::Ordered, &dest, &lost_in));
@@ -192,7 +192,7 @@ pub fn test_lost_question_mark_holds_in_its_epoch() {
     );
 
     // A loss judged while blame is suppressed marks nothing
-    stats.record_lost_question_to(ordering, other.clone(), None);
+    stats.record_lost_question_to(ordering, other.clone(), None, 1.0, now());
     assert!(!stats.lost_question_to(ordering, &other, &lost_in));
 }
 
@@ -207,7 +207,7 @@ pub fn test_lost_destination_mark_outlives_other_answers() {
     let other = dest_key(8);
 
     let lost_in = epoch(1, 1, 0);
-    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in));
+    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in), 1.0, now());
     stats.record_answer_received(ordering, now(), ByteCount::new(100), &destination(&other));
     assert!(!stats.needs_testing(only(ordering), now()));
     assert!(
@@ -215,7 +215,7 @@ pub fn test_lost_destination_mark_outlives_other_answers() {
         "another destination's answer cleared the mark"
     );
 
-    stats.record_loopback_result(ordering, true, now());
+    stats.record_loopback_result(ordering, true, 1.0, now());
     assert!(
         stats.lost_question_to(ordering, &dest, &lost_in),
         "a loopback pass cleared the mark"
@@ -298,7 +298,106 @@ pub async fn test_dead_route_hops_hold_in_their_epoch() {
     mock_registry::terminate(registry).await;
 }
 
+pub fn test_failures_under_our_loss_carry_less() {
+    info!("--- test_failures_under_our_loss_carry_less ---");
+    // At survival 0.25 an Ordered run needs four times the failures
+    let ordering = SequenceOrdering::Ordered;
+    let threshold = loopback_failure_threshold(ordering);
+    let mut stats = RouteStats::new(now());
+    for _ in 1..threshold * 4 {
+        stats.record_loopback_result(ordering, false, 0.25, now());
+        assert!(!stats.is_dead_for_ordering(ordering));
+    }
+    stats.record_loopback_result(ordering, false, 0.25, now());
+    assert!(stats.is_dead_for_ordering(ordering));
+    assert!(stats.death_blames_hops_for(only(ordering)));
+
+    // A run gathered while degraded is not condemned at full weight once we recover
+    let mut stats = RouteStats::new(now());
+    for _ in 0..6 {
+        stats.record_loopback_result(ordering, false, 0.25, now());
+    }
+    stats.record_loopback_result(ordering, false, 1.0, now());
+    assert!(!stats.is_dead_for_ordering(ordering));
+    stats.record_loopback_result(ordering, false, 1.0, now());
+    assert!(stats.is_dead_for_ordering(ordering));
+
+    // Failures nothing could tell from our own loss carry nothing
+    let mut stats = RouteStats::new(now());
+    for _ in 0..100 {
+        stats.record_loopback_result(ordering, false, 0.0, now());
+    }
+    assert!(!stats.is_dead_for_ordering(ordering));
+    assert!(stats.needs_testing(only(ordering), now()));
+}
+
+pub fn test_lost_destinations_count_by_evidence() {
+    info!("--- test_lost_destinations_count_by_evidence ---");
+    let ordering = SequenceOrdering::Ordered;
+    let count = ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD as u8;
+
+    let mut stats = RouteStats::new(now());
+    for n in 0..count {
+        stats.record_lost_question_to(ordering, dest_key(n), None, 0.5, now());
+    }
+    assert!(!stats.is_dead_for_ordering(ordering));
+    for n in 0..count {
+        stats.record_lost_question_to(ordering, dest_key(n), None, 0.5, now());
+    }
+    assert!(stats.is_dead_for_ordering(ordering));
+
+    // One destination lost many times is still one destination
+    let mut stats = RouteStats::new(now());
+    for _ in 0..20 {
+        stats.record_lost_question_to(ordering, dest_key(1), None, 1.0, now());
+    }
+    assert!(!stats.is_dead_for_ordering(ordering));
+
+    // A loopback pass clears the evidence with the destinations
+    for n in 0..count {
+        stats.record_lost_question_to(ordering, dest_key(n), None, 1.0, now());
+    }
+    assert!(stats.is_dead_for_ordering(ordering));
+    stats.record_loopback_result(ordering, true, 1.0, now());
+    assert!(!stats.is_dead_for_ordering(ordering));
+}
+
+pub fn test_losses_sent_before_an_answer_carry_nothing() {
+    info!("--- test_losses_sent_before_an_answer_carry_nothing ---");
+    // A fanout's answers arrive in a second and its losses at the timeout; the route answered
+    // after those questions left, so their losses say nothing against it
+    let ordering = SequenceOrdering::Ordered;
+    let count = ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD as u8;
+    let sent = now();
+    let answered = sent.later(TimestampDuration::new_secs(1));
+    let mut stats = RouteStats::new(now());
+    stats.record_answer_received(
+        ordering,
+        answered,
+        ByteCount::new(0),
+        &destination(&dest_key(99)),
+    );
+    for n in 0..count * 2 {
+        stats.record_lost_question_to(ordering, dest_key(n), None, 1.0, sent);
+    }
+    assert!(!stats.is_dead_for_ordering(ordering));
+    // Sent after the answer, the same losses kill it
+    for n in 0..count {
+        stats.record_lost_question_to(
+            ordering,
+            dest_key(n),
+            None,
+            1.0,
+            answered.later(TimestampDuration::new_secs(1)),
+        );
+    }
+    assert!(stats.is_dead_for_ordering(ordering));
+}
+
 pub fn test_all() {
+    test_losses_sent_before_an_answer_carry_nothing();
+    test_failures_under_our_loss_carry_less();
+    test_lost_destinations_count_by_evidence();
     test_lost_question_mark_holds_in_its_epoch();
     test_lost_destination_mark_outlives_other_answers();
     test_send_failure_does_not_kill_the_route();

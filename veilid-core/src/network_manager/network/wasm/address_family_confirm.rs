@@ -360,7 +360,7 @@ impl WasmNetwork {
             );
             let res = match self
                 .rpc_processor()
-                .rpc_call_status(Destination::direct(fnr, None))
+                .rpc_call_status(Destination::direct(fnr, None), None)
                 .timeout_at(stop_token.clone())
                 .await
             {

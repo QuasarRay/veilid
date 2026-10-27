@@ -109,7 +109,9 @@ impl NativeNetwork {
                 // Still need to confirm dial info
                 (true, false)
             }
-            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
+            RoutingDomainInboundStage::NeedsRelays
+            | RoutingDomainInboundStage::NeedsTransportMtus
+            | RoutingDomainInboundStage::ReadyToPublish => {
                 // Already have confirmed dialinfo
                 (false, true)
             }
@@ -454,7 +456,9 @@ impl NativeNetwork {
         // disturb the routing domain unless the result differs
         let is_quorum_upgrade = matches!(
             inbound_stage,
-            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish
+            RoutingDomainInboundStage::NeedsRelays
+                | RoutingDomainInboundStage::NeedsTransportMtus
+                | RoutingDomainInboundStage::ReadyToPublish
         ) && current_node_info.has_dial_info();
 
         // Record the validator pool this attempt gets; a below-quorum confirmation

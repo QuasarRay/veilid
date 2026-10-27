@@ -5,6 +5,8 @@
     feature = "test-util"
 ))]
 mod address_family_confirm_logic;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod family_mtu;
 mod platform_network;
 mod platform_protocol_network_connection;
 
@@ -28,6 +30,8 @@ use super::*;
     feature = "test-util"
 ))]
 pub(crate) use address_family_confirm_logic::*;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) use family_mtu::*;
 pub use platform_network::*;
 pub use platform_protocol_network_connection::*;
 

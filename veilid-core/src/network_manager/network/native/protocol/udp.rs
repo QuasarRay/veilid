@@ -12,6 +12,44 @@ impl_veilid_log_facility!("net");
 /// breaker and the network restart behind it.
 const UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
+/// A message held by debug chaos: its sender, and the datagram it arrived whole in, if one
+type HeldMessage = (Bytes, SocketAddr, Option<u16>);
+
+/// Received messages debug chaos holds until its emulated link has carried them
+#[derive(Debug, Default)]
+struct HeldMessages {
+    /// Release time and message, in the order the link delivers them
+    queue: Mutex<VecDeque<(Timestamp, HeldMessage)>>,
+}
+
+impl HeldMessages {
+    fn push(&self, wait_ms: u32, held_message: HeldMessage) {
+        let release_ts =
+            Timestamp::now_non_decreasing().later(TimestampDuration::new_ms(wait_ms.into()));
+        self.queue.lock().push_back((release_ts, held_message));
+    }
+
+    /// The oldest message, once it is due
+    fn pop_due(&self) -> Option<HeldMessage> {
+        let mut queue = self.queue.lock();
+        if queue.front()?.0 > Timestamp::now_non_decreasing() {
+            return None;
+        }
+        queue.pop_front().map(|(_, held_message)| held_message)
+    }
+
+    /// Milliseconds until the oldest message is due
+    fn wait_ms(&self) -> Option<u32> {
+        let release_ts = self.queue.lock().front()?.0;
+        Some(
+            release_ts
+                .duration_since(Timestamp::now_non_decreasing())
+                .millis_u32()
+                .unwrap_or(u32::MAX),
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct RawUdpProtocolHandler {
     /// Component registry for logging and access to other subsystems
@@ -22,6 +60,8 @@ pub struct RawUdpProtocolHandler {
     socket: Arc<UdpSocket>,
     /// Reassembly buffer for fragmented UDP messages
     assembly_buffer: AssemblyBuffer,
+    /// Received messages debug chaos holds back, shared by every recv-loop on `socket`
+    held: Arc<HeldMessages>,
     /// Bound on one fragmented send; a stalled interface parks send_to forever otherwise
     send_timeout_ms: u32,
     /// Pause between repeated receive failures; the first is ordinary ICMP noise and costs nothing
@@ -48,6 +88,7 @@ impl RawUdpProtocolHandler {
             ttl_sender: Arc::new(UdpTtlSender::new()),
             socket,
             assembly_buffer: AssemblyBuffer::new(),
+            held: Arc::new(HeldMessages::default()),
             send_timeout_ms: timings.send_timeout_ms,
             recv_error_backoff_ms: timings.socket_error_backoff_ms,
             stop_source: Arc::new(Mutex::new(Some(stop_source))),
@@ -77,12 +118,25 @@ impl RawUdpProtocolHandler {
             .is_transport_disabled(LowLevelProtocolType::UDP, address_type)
     }
 
+    /// Receives one message, and the length of the datagram it arrived whole in, if it did
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.len, ret.flow)))]
-    pub async fn recv_message(&self, data: &mut [u8]) -> io::Result<(usize, Flow)> {
+    pub async fn recv_message(&self, data: &mut [u8]) -> io::Result<(usize, Flow, Option<u16>)> {
         let mut consecutive_errors: usize = 0;
-        let (message_len, flow) = loop {
-            // Get a packet
-            let nres = self.socket.recv_from(data).await.into_network_result()?;
+        let (message_len, remote_addr, opt_datagram_len) = loop {
+            if let Some((message, remote_addr, opt_datagram_len)) = self.held.pop_due() {
+                data[0..message.len()].copy_from_slice(&message);
+                break (message.len(), remote_addr, opt_datagram_len);
+            }
+
+            // Get a packet, or wake when a held message is due
+            let nres = match self.held.wait_ms() {
+                None => self.socket.recv_from(data).await,
+                Some(wait_ms) => match timeout(wait_ms, self.socket.recv_from(data)).await {
+                    Ok(res) => res,
+                    Err(_) => continue,
+                },
+            }
+            .into_network_result()?;
             let failure = (!matches!(nres, NetworkResult::Value(_))).then(|| nres.to_string());
             let (size, remote_addr) = network_result_value_or_log!(self nres => {
                 consecutive_errors += 1;
@@ -110,6 +164,21 @@ impl RawUdpProtocolHandler {
                 continue;
             }
 
+            // Debug chaos: lost here, or held until its link has carried it
+            let hold_ms = match self
+                .network_manager()
+                .chaos()
+                .recv_verdict(remote_addr.ip(), size)
+            {
+                ChaosVerdict::Pass => None,
+                ChaosVerdict::Hold(wait_ms) => Some(wait_ms),
+                ChaosVerdict::Drop | ChaosVerdict::Oversize => continue,
+            };
+
+            let opt_datagram_len = AssemblyBuffer::is_whole_message_frame(&data[0..size])
+                .then(|| u16::try_from(size).ok())
+                .flatten();
+
             // Insert into assembly buffer
             let message = match self
                 .assembly_buffer
@@ -136,36 +205,56 @@ impl RawUdpProtocolHandler {
                 continue;
             }
 
+            // The message arrives with its last fragment
+            if let Some(wait_ms) = hold_ms {
+                self.held
+                    .push(wait_ms, (message, remote_addr, opt_datagram_len));
+                continue;
+            }
+
             // Copy assemble message out if we got one
             data[0..message.len()].copy_from_slice(&message);
-
-            // Return a flow and the amount of data in the message
-            let peer_addr = PeerAddress::new(
-                SocketAddress::from_socket_addr(remote_addr),
-                ProtocolType::UDP,
-            );
-            let local_socket_addr = self.socket.local_addr()?;
-            let flow = Flow::new(
-                peer_addr,
-                SocketAddress::from_socket_addr(local_socket_addr),
-            );
-
-            break (message.len(), flow);
+            break (message.len(), remote_addr, opt_datagram_len);
         };
+
+        // Return a flow and the amount of data in the message
+        let peer_addr = PeerAddress::new(
+            SocketAddress::from_socket_addr(remote_addr),
+            ProtocolType::UDP,
+        );
+        let local_socket_addr = self.socket.local_addr()?;
+        let flow = Flow::new(
+            peer_addr,
+            SocketAddress::from_socket_addr(local_socket_addr),
+        );
 
         #[cfg(feature = "verbose-tracing")]
         tracing::Span::current().record("ret.len", message_len);
         #[cfg(feature = "verbose-tracing")]
         tracing::Span::current().record("ret.flow", format!("{:?}", flow).as_str());
-        Ok((message_len, flow))
+        Ok((message_len, flow, opt_datagram_len))
+    }
+
+    /// Sends a fragment once debug chaos's emulated link has carried it; a socket closed by then
+    /// loses it, as the link would
+    fn send_held(&self, framed_chunk: Bytes, remote_addr: SocketAddr, wait_ms: u32) {
+        let socket = Arc::downgrade(&self.socket);
+        spawn_detached("chaos held udp send", async move {
+            sleep(wait_ms).await;
+            if let Some(socket) = socket.upgrade() {
+                let _ = socket.send_to(&framed_chunk, remote_addr).await;
+            }
+        });
     }
 
     /// Fragment and send a message. `purpose` names the call site in the send-timeout log.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.flow)))]
+    /// Sends one message in datagrams of at most `mtu` bytes
     pub async fn send_message(
         &self,
         data: Bytes,
         remote_addr: SocketAddr,
+        mtu: u16,
         purpose: &'static str,
     ) -> io::Result<NetworkResult<Flow>> {
         if data.len() > MAX_MESSAGE_SIZE {
@@ -186,6 +275,21 @@ impl RawUdpProtocolHandler {
         }
 
         let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| async move {
+            // Debug chaos: a lost or held fragment counts as sent
+            match self
+                .network_manager()
+                .chaos()
+                .send_verdict(remote_addr.ip(), framed_chunk.len())
+            {
+                ChaosVerdict::Pass => {}
+                ChaosVerdict::Hold(wait_ms) => {
+                    self.send_held(framed_chunk, remote_addr, wait_ms);
+                    return Ok(NetworkResult::value(()));
+                }
+                ChaosVerdict::Drop | ChaosVerdict::Oversize => {
+                    return Ok(NetworkResult::value(()));
+                }
+            }
             let len = network_result_try!(self
                 .socket
                 .send_to(&framed_chunk, remote_addr)
@@ -203,7 +307,7 @@ impl RawUdpProtocolHandler {
         network_result_try!(match timeout(
             self.send_timeout_ms,
             self.assembly_buffer
-                .split_message(data, remote_addr, sender)
+                .split_message(data, remote_addr, mtu.into(), sender)
         )
         .await
         {
@@ -252,16 +356,24 @@ impl RawUdpProtocolHandler {
             return Ok(NetworkResult::no_connection_other("transport disabled"));
         }
 
-        // Zero length packet with a best-effort per-packet TTL
-        let res = match self
-            .ttl_sender
-            .send_to(self.socket.as_ref(), &[], remote_addr, ttl)
-        {
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "UDP hole punch send would block: remote_addr={:?}", remote_addr);
-                return Ok(NetworkResult::timeout());
+        // Zero length packet with a best-effort per-packet TTL; debug chaos can lose it, never hold it
+        let verdict = self
+            .network_manager()
+            .chaos()
+            .send_verdict(remote_addr.ip(), 0);
+        let res = if matches!(verdict, ChaosVerdict::Drop | ChaosVerdict::Oversize) {
+            Ok(0)
+        } else {
+            match self
+                .ttl_sender
+                .send_to(self.socket.as_ref(), &[], remote_addr, ttl)
+            {
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "UDP hole punch send would block: remote_addr={:?}", remote_addr);
+                    return Ok(NetworkResult::timeout());
+                }
+                res => res,
             }
-            res => res,
         };
 
         // Check for errors

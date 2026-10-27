@@ -1,4 +1,5 @@
 use super::*;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 impl_veilid_log_facility!("stor");
 
@@ -16,6 +17,10 @@ pub(in crate::storage_manager) struct OutboundWatch {
     /// Last fallback change inspection of a never-established watch; a state's own timer takes over
     #[serde(skip)]
     opt_unestablished_inspect_ts: Option<Timestamp>,
+
+    /// Change inspections in a row that failed, which size the next retry
+    #[serde(skip)]
+    change_inspect_failures: u32,
 }
 
 impl fmt::Display for OutboundWatch {
@@ -45,23 +50,51 @@ impl OutboundWatch {
             state: None,
             desired: Some(desired),
             opt_unestablished_inspect_ts: None,
+            change_inspect_failures: 0,
         }
+    }
+
+    /// Count a failed change inspection; returns the failures before it
+    pub fn note_change_inspect_failure(&mut self) -> u32 {
+        let failures = self.change_inspect_failures;
+        self.change_inspect_failures = failures.saturating_add(1);
+        failures
+    }
+
+    /// A change inspection completed
+    pub fn clear_change_inspect_failures(&mut self) {
+        self.change_inspect_failures = 0;
     }
 
     /// Whether this watch is due a fallback change inspection, and over which subkeys.
     /// A wanted but never-established watch has no state to keep a timer in, so it is
     /// covered here at the ceiling: reconcile is already retrying establishment, and until
-    /// it lands this interval is delivery latency
+    /// it lands this interval is delivery latency. `opt_loss_ended_ts` is when the latest
+    /// Offline or Degraded period ended.
     pub fn needs_fallback_inspect(
         &self,
         cur_ts: Timestamp,
         consensus_count: usize,
         renew_window: TimestampDuration,
         max_interval: TimestampDuration,
+        opt_loss_ended_ts: Option<Timestamp>,
     ) -> Option<ValueSubkeyRangeSet> {
         if let Some(state) = self.state.as_ref() {
+            // A fixed share of the interval per record spreads the inspections a loss causes
+            let opt_loss_end = opt_loss_ended_ts.map(|ts| {
+                let mut hasher = DefaultHasher::new();
+                self.record_key.hash(&mut hasher);
+                let spread = hasher.finish() % max_interval.as_u64().max(1);
+                (ts, TimestampDuration::new(spread))
+            });
             return state
-                .fallback_inspect_due(cur_ts, consensus_count, renew_window, max_interval)
+                .fallback_inspect_due(
+                    cur_ts,
+                    consensus_count,
+                    renew_window,
+                    max_interval,
+                    opt_loss_end,
+                )
                 .then(|| state.params().subkeys.clone());
         }
         let desired = self.desired.as_ref()?;
@@ -248,13 +281,6 @@ impl OutboundWatch {
             return true;
         };
 
-        // If we have a consensus, or are not attempting consensus at this time,
-        // but need to reconcile because some per-node watches either expired or had their routes die, do it
-        if self.wants_per_node_watch_update(registry, state, cur_ts) {
-            veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because per_node_watch wants update", self.record_key);
-            return true;
-        }
-
         // If the desired parameters have changed, then we should reconcile with them
         if state.params() != desired {
             veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because desired params have changed: {} != {}", self.record_key, state.params(), desired);
@@ -304,6 +330,19 @@ impl OutboundWatch {
 
         let routing_table = registry.routing_table();
         let rss = routing_table.route_spec_store();
+        let survival = routing_table
+            .network_manager()
+            .online_detector()
+            .survival(RoutingDomain::PublicInternet);
+        let max_interval = registry
+            .storage_manager()
+            .timings()
+            .watch_inspect_max_interval;
+        // Retries start one RPC timeout out, once the last renewal has answered or timed out
+        let retry_base = registry.config().rpc_timeout();
+        if !state.route_renewal_due(cur_ts, retry_base, max_interval, survival) {
+            return false;
+        }
 
         // See if any of our per node watches have a dead value changed route
         // if so, speculatively renew them

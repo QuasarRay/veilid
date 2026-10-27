@@ -53,7 +53,7 @@ async fn http_request(addr: SocketAddr, request: Vec<u8>) -> Result<(u16, Vec<u8
 }
 
 async fn exchange(addr: SocketAddr, request: Vec<u8>) -> Result<(u16, Vec<u8>), IgdError> {
-    let stream = connect_async_tcp_stream(None, addr, HTTP_TIMEOUT_MS)
+    let stream = connect_async_tcp_stream(None, addr, HTTP_TIMEOUT_MS, None)
         .await
         .map_err(|e| IgdError::http(e.to_string()))?
         .into_timeout_error()

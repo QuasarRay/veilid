@@ -11,13 +11,9 @@ use std::sync::atomic::{AtomicU16, Ordering};
 const VERSION_1: u8 = 1;
 type LengthType = u16;
 type SequenceType = u16;
-const HEADER_LEN: usize = 8;
+/// Bytes of framing in every datagram ahead of the message bytes it carries
+pub const FRAME_HEADER_LEN: usize = 8;
 const MAX_LEN: usize = LengthType::MAX as usize;
-
-/// The hard-coded maximum fragment size used by AssemblyBuffer
-///
-/// Eventually this should parameterized and made configurable.
-pub const FRAGMENT_LEN: usize = 1280 - HEADER_LEN;
 
 const MAX_CONCURRENT_HOSTS: usize = 256;
 const MAX_ASSEMBLIES_PER_HOST: usize = 256;
@@ -256,6 +252,18 @@ impl AssemblyBuffer {
         }
     }
 
+    /// Whether `frame` carries a whole message by itself, so the datagram it came in is a size
+    /// the path carried
+    #[must_use]
+    pub fn is_whole_message_frame(frame: &[u8]) -> bool {
+        if frame.len() <= FRAME_HEADER_LEN || frame.len() > MAX_LEN || frame[0] != VERSION_1 {
+            return false;
+        }
+        let off = LengthType::from_be_bytes(frame[4..6].try_into().unwrap_or_log());
+        let len = LengthType::from_be_bytes(frame[6..FRAME_HEADER_LEN].try_into().unwrap_or_log());
+        off == 0 && len as usize == frame.len() - FRAME_HEADER_LEN
+    }
+
     /// Receive a packet chunk and add to the message assembly
     /// if a message has been completely, return it
     pub fn insert_frame(
@@ -270,7 +278,7 @@ impl AssemblyBuffer {
 
         // If we receive a frame smaller than or equal to the length of the header, drop it
         // or if this frame is larger than our max message length, then drop it
-        if frame.len() <= HEADER_LEN || frame.len() > MAX_LEN {
+        if frame.len() <= FRAME_HEADER_LEN || frame.len() > MAX_LEN {
             if debug_target_enabled!("network_result") {
                 return NetworkResult::invalid_message(format!(
                     "invalid header length: frame.len={}",
@@ -295,8 +303,8 @@ impl AssemblyBuffer {
         // Version 1 header
         let seq = SequenceType::from_be_bytes(frame[2..4].try_into().unwrap_or_log());
         let off = LengthType::from_be_bytes(frame[4..6].try_into().unwrap_or_log());
-        let len = LengthType::from_be_bytes(frame[6..HEADER_LEN].try_into().unwrap_or_log());
-        let chunk = &frame[HEADER_LEN..];
+        let len = LengthType::from_be_bytes(frame[6..FRAME_HEADER_LEN].try_into().unwrap_or_log());
+        let chunk = &frame[FRAME_HEADER_LEN..];
 
         // See if we have a whole message and not a fragment
         if off == 0 && len as usize == chunk.len() {
@@ -368,27 +376,28 @@ impl AssemblyBuffer {
         let off: LengthType = offset as LengthType;
         let len: LengthType = message_len as LengthType;
 
-        let mut out = zeroed_u8_vec(chunk.len() + HEADER_LEN);
+        let mut out = zeroed_u8_vec(chunk.len() + FRAME_HEADER_LEN);
 
         // Write out header
         out[0] = VERSION_1;
         out[1] = 0; // reserved
         out[2..4].copy_from_slice(&seq.to_be_bytes()); // sequence number
         out[4..6].copy_from_slice(&off.to_be_bytes()); // offset of chunk inside message
-        out[6..HEADER_LEN].copy_from_slice(&len.to_be_bytes()); // total length of message
+        out[6..FRAME_HEADER_LEN].copy_from_slice(&len.to_be_bytes()); // total length of message
 
         // Write out body
-        out[HEADER_LEN..].copy_from_slice(chunk);
+        out[FRAME_HEADER_LEN..].copy_from_slice(chunk);
         out.into()
     }
 
-    /// Split a message into packets and send them serially, ensuring
-    /// that they are sent consecutively to a particular remote address,
+    /// Split a message into packets of at most `frame_len` bytes, header included, and send them
+    /// serially, ensuring that they are sent consecutively to a particular remote address,
     /// never interleaving packets from one message and another to minimize reassembly problems
     pub async fn split_message<S, F>(
         &self,
         data: Bytes,
         remote_addr: SocketAddr,
+        frame_len: usize,
         mut sender: S,
     ) -> std::io::Result<NetworkResult<()>>
     where
@@ -397,6 +406,9 @@ impl AssemblyBuffer {
     {
         if data.len() > MAX_LEN {
             return Err(Error::from(ErrorKind::InvalidData));
+        }
+        if frame_len <= FRAME_HEADER_LEN {
+            return Err(Error::from(ErrorKind::InvalidInput));
         }
 
         // Do not frame or split anything zero bytes long, just send it
@@ -417,7 +429,7 @@ impl AssemblyBuffer {
         // Chunk it up
         let mut offset = 0usize;
         let message_len = data.len();
-        for chunk in data.chunks(FRAGMENT_LEN) {
+        for chunk in data.chunks(frame_len - FRAME_HEADER_LEN) {
             // Frame chunk
             let framed_chunk = Self::frame_chunk(chunk, offset, message_len, seq);
             // Send chunk

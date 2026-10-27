@@ -97,10 +97,11 @@ impl PublicInternetRoutingDomainController {
             return None;
         }
 
-        let blame_suppressed = routing_table
+        let online_detector_state = routing_table
             .network_manager()
             .online_detector()
-            .blame_suppressed(RoutingDomain::PublicInternet);
+            .online_state(RoutingDomain::PublicInternet);
+        let blame_suppressed = online_detector_state.suppresses_blame();
 
         // Relay node no longer can relay. Tolerate transient unresponsiveness (Missing from a
         // single lost question): truly dead relays are dropped by the state check above, and
@@ -111,7 +112,8 @@ impl PublicInternetRoutingDomainController {
         // Retention, not candidacy: an incumbent keeps its job unless something is wrong with it
         let relay_filter_passes = relay_retention_filter(&relay_snap);
         if !relay_filter_passes {
-            if relay_snap.state.is_responsive() && !blame_suppressed {
+            // A relay that can no longer relay says so whatever our own link is doing
+            if relay_snap.state.is_responsive() && online_detector_state != OnlineState::Offline {
                 veilid_log!(routing_table debug
                     "Relay node can no longer relay ({}), dropping relay {}",
                     relay_retention_filter_reason(&relay_snap).unwrap_or("unknown"),
@@ -251,9 +253,9 @@ impl PublicInternetRoutingDomainController {
             RoutingDomainInboundStage::Invalid
             | RoutingDomainInboundStage::NeedsDialInfoConfirmation
             | RoutingDomainInboundStage::Unusable => return Ok(()),
-            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
-                state.relay_requirements.clone()
-            }
+            RoutingDomainInboundStage::NeedsRelays
+            | RoutingDomainInboundStage::NeedsTransportMtus
+            | RoutingDomainInboundStage::ReadyToPublish => state.relay_requirements.clone(),
         };
 
         let (state_updates, opt_new_relay_compilation) = if !relay_requirements.needs_relays() {

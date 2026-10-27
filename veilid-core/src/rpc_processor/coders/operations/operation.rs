@@ -120,6 +120,22 @@ impl RPCOperation {
         &self.kind
     }
 
+    /// Where a status question or answer keeps the probe that sizes it to its datagram
+    pub fn mtu_probe_slot(&mut self) -> Option<&mut Option<MtuProbe>> {
+        match &mut self.kind {
+            RPCOperationKind::Question(question) => question.mtu_probe_slot(),
+            RPCOperationKind::Answer(answer) => answer.mtu_probe_slot(),
+            RPCOperationKind::Statement(_) => None,
+        }
+    }
+
+    /// The size a status probe fills its datagram to
+    pub fn mtu_probe_size(&mut self) -> Option<u16> {
+        self.mtu_probe_slot()
+            .and_then(|slot| slot.as_ref())
+            .map(|mtu_probe| mtu_probe.size)
+    }
+
     pub fn destructure(self) -> (OperationId, SenderPeerInfo, RPCOperationKind) {
         (self.op_id, self.sender_peer_info, self.kind)
     }

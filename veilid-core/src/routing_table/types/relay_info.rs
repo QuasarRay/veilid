@@ -9,6 +9,8 @@ pub struct RelayInfo {
     address_types: AddressTypeSet,
     dial_info_detail_list: Vec<DialInfoDetail>,
     relay_kind: RelayKind,
+    #[serde(default)]
+    receive_mtus: TransportMtus,
 }
 
 impl fmt::Display for RelayInfo {
@@ -25,7 +27,8 @@ impl fmt::Display for RelayInfo {
         for did in &self.dial_info_detail_list {
             writeln!(f, "{}", indent_all_string(f.to_string(did)))?;
         }
-        write!(f, "relay_kind: {}", f.to_string(self.relay_kind))
+        writeln!(f, "relay_kind: {}", f.to_string(self.relay_kind))?;
+        write!(f, "receive_mtus: {}", self.receive_mtus)
     }
 }
 
@@ -37,6 +40,7 @@ impl RelayInfo {
         address_types: AddressTypeSet,
         mut dial_info_detail_list: Vec<DialInfoDetail>,
         relay_kind: RelayKind,
+        receive_mtus: TransportMtus,
     ) -> Self {
         dial_info_detail_list.sort_unstable();
 
@@ -50,6 +54,7 @@ impl RelayInfo {
             address_types,
             dial_info_detail_list,
             relay_kind,
+            receive_mtus,
         }
     }
 
@@ -68,6 +73,9 @@ impl RelayInfo {
     pub fn relay_kind(&self) -> RelayKind {
         self.relay_kind
     }
+    pub fn receive_mtus(&self) -> &TransportMtus {
+        &self.receive_mtus
+    }
 
     /// Compare this RelayInfo to another one
     /// Excludes the timestamp
@@ -82,8 +90,10 @@ impl RelayInfo {
         let bdids = other.dial_info_detail_list();
         let aor = self.relay_kind();
         let bor = other.relay_kind();
+        let amtus = self.receive_mtus();
+        let bmtus = other.receive_mtus();
 
-        ani == bni && aop == bop && aat == bat && adids == bdids && aor == bor
+        ani == bni && aop == bop && aat == bat && adids == bdids && aor == bor && amtus == bmtus
     }
 
     pub fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {

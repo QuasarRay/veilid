@@ -1,6 +1,7 @@
 use super::*;
+use crate::routing_table::{PrivateRoute, RouteNode};
+use crate::rpc_processor::Destination;
 use crate::tests::*;
-use crate::veilid_api::Target;
 
 fn record_key(n: u8) -> OpaqueRecordKey {
     OpaqueRecordKey::new(CRYPTO_KIND_VLD0, BareOpaqueRecordKey::new(&[n; 32]))
@@ -17,7 +18,13 @@ fn watch_params(
         expiration,
         count: 100,
         watcher_member_id: MemberId::new(ck, BareMemberId::new(&[tag; 32])),
-        target: Target::NodeId(NodeId::new(ck, BareNodeId::new(&[tag; 32]))),
+        dest: Destination::private_route(
+            Arc::new(PrivateRoute::new_stub(
+                PublicKey::new(ck, BarePublicKey::new(&[tag; 32])),
+                RouteNode::NodeId(NodeId::new(ck, BareNodeId::new(&[tag; 32]))),
+            )),
+            SafetySelection::Unsafe(Sequencing::PreferOrdered),
+        ),
     }
 }
 

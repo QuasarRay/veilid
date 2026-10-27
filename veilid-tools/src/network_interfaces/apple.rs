@@ -7,9 +7,9 @@ use self::ios_route_abi::{
     rt_msghdr, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY, RTF_GATEWAY,
 };
 use libc::{
-    freeifaddrs, getifaddrs, ifaddrs, ioctl, sockaddr_in6, socket, sysctl, time_t, AF_INET6,
-    AF_LINK, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ,
-    NET_RT_FLAGS, PF_ROUTE, SOCK_DGRAM,
+    freeifaddrs, getifaddrs, ifaddrs, ifreq, ioctl, sockaddr_in6, socket, sysctl, time_t, AF_INET,
+    AF_INET6, AF_LINK, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING,
+    IFNAMSIZ, NET_RT_FLAGS, PF_ROUTE, SIOCGIFMTU, SOCK_DGRAM,
 };
 #[cfg(target_os = "macos")]
 use libc::{rt_msghdr, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY, RTF_GATEWAY};
@@ -331,6 +331,34 @@ impl PlatformSupportApple {
         }
     }
 
+    fn get_interface_mtu(ifname: &str) -> Option<u32> {
+        let name = ifname.as_bytes();
+        if name.len() >= IFNAMSIZ {
+            return None;
+        }
+        // SAFETY: all-zero is a valid ifreq: a byte array and a zeroed union
+        let mut req: ifreq = unsafe { core::mem::zeroed() };
+        for (dst, src) in req.ifr_name.iter_mut().zip(name) {
+            *dst = *src as libc::c_char;
+        }
+
+        // SAFETY: socket() has no pointer arguments
+        let sock = unsafe { socket(AF_INET, SOCK_DGRAM, 0) };
+        if sock < 0 {
+            return None;
+        }
+        // SAFETY: sock is a fresh descriptor this guard now owns and closes on every path
+        let sock = unsafe { OwnedFd::from_raw_fd(sock) };
+
+        // SAFETY: req is a full ifreq, the size this ioctl encodes
+        if unsafe { ioctl(sock.as_raw_fd(), SIOCGIFMTU, &mut req) } < 0 {
+            return None;
+        }
+        // SAFETY: read after a successful SIOCGIFMTU, which fills this union member
+        let mtu = unsafe { req.ifr_ifru.ifru_mtu };
+        u32::try_from(mtu).ok()
+    }
+
     fn get_address_flags(ifname: &str, addr: sockaddr_in6) -> io::Result<AddressFlags> {
         let mut flags_req = in6_ifreq::from_name(ifname)?;
         flags_req.set_addr(addr);
@@ -435,6 +463,7 @@ impl PlatformSupportApple {
                 // If we have no NetworkInterface yet, make one
                 let flags = self.get_interface_flags(ifaddr.ifa_flags as c_int);
                 let mut net_intf = NetworkInterface::new(ifname.clone(), flags);
+                net_intf.mtu = Self::get_interface_mtu(&ifname);
                 // Add gateways if we have them
                 if let Some(gateways) = self.gateways.get(&ifindex) {
                     for gateway in gateways {

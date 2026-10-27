@@ -35,15 +35,34 @@ impl RouteStatsDisposition {
     }
 }
 
+/// Evidence one failure carries at full blame weight
+const EVIDENCE_PER_FAILURE: u32 = 1000;
+
+/// Evidence a failure carries at a blame weight from 0 to 1
+fn failure_evidence(weight: f64) -> u32 {
+    (weight.clamp(0.0, 1.0) * f64::from(EVIDENCE_PER_FAILURE)).round() as u32
+}
+
+/// Evidence `failures` failures at full blame weight carry
+fn evidence_of(failures: usize) -> u32 {
+    u32::try_from(failures)
+        .unwrap_or(u32::MAX)
+        .saturating_mul(EVIDENCE_PER_FAILURE)
+}
+
 /// Per-`SequenceOrdering` validity/failure stats. These are the **single source
 /// of truth** for whether a route works at a given ordering; every aggregate
 /// view on [RouteStats] is derived from these, never mutated directly. A
 /// success or failure always happens on *some* ordering (the transport used),
 /// so the recorder always knows which entry to update.
 ///
+/// Failures kill an ordering by evidence, not count: each carries the blame weight it was
+/// observed under, so under our own loss more of them are needed, and a recovery does not
+/// retroactively condemn a run gathered while degraded.
+///
 /// Saved with the route set, so a restarted node holds its routes as tested. What belongs to
-/// one session is not: the tallies, deferrals under blame suppression, loss marks (their state
-/// ends with the session) and the keepalive clock (no flow survives an attach).
+/// one session is not: the tallies, the evidence, deferrals under blame suppression, loss marks
+/// (their state ends with the session) and the keepalive clock (no flow survives an attach).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RouteOrderingStats {
     /// Consecutive failed-to-send count (loopback test failures count here too)
@@ -59,11 +78,17 @@ pub struct RouteOrderingStats {
     pub loopback_fail: u64,
     /// Current run of loopback failures
     pub consecutive_loopback_failures: usize,
+    /// Evidence of the current run of loopback failures, `EVIDENCE_PER_FAILURE` each at full blame
+    #[serde(skip)]
+    pub loopback_failure_evidence: u32,
     /// Longest run of loopback failures this session
     #[serde(skip)]
     pub max_consecutive_loopback_failures: usize,
     /// Per-destination lost question tracking: destination pubkey -> lost count
     pub lost_question_destinations: HashMap<PublicKey, usize>,
+    /// Evidence of the lost questions per destination, each counting at most one failure
+    #[serde(skip)]
+    pub lost_destination_evidence: HashMap<PublicKey, u32>,
     /// Destinations a question was lost to, until each answers here: pubkey -> state it was lost in
     #[serde(skip)]
     pub lost_destination_marks: HashMap<PublicKey, LossEpoch>,
@@ -90,17 +115,29 @@ impl RouteOrderingStats {
     /// failures that kills it (route-level Locked handled by caller).
     pub fn disposition(&self, loopback_threshold: usize) -> RouteStatsDisposition {
         // Route-spanning evidence first, or a dead route carrying a send failure reads as alive
-        if self.consecutive_loopback_failures >= loopback_threshold {
+        if self.loopback_failures_kill(loopback_threshold) {
             RouteStatsDisposition::InvalidLoopbackFailures
-        } else if self.lost_question_destinations.len()
-            >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
-        {
+        } else if self.lost_destinations_kill() {
             RouteStatsDisposition::InvalidLostQuestions
         } else if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD {
             RouteStatsDisposition::InvalidSendFailure
         } else {
             RouteStatsDisposition::Valid
         }
+    }
+
+    /// Whether the run of loopback failures carries `loopback_threshold` failures of evidence
+    fn loopback_failures_kill(&self, loopback_threshold: usize) -> bool {
+        self.loopback_failure_evidence >= evidence_of(loopback_threshold)
+    }
+
+    /// Whether lost questions to enough distinct destinations carry their threshold of evidence
+    fn lost_destinations_kill(&self) -> bool {
+        self.lost_destination_evidence
+            .values()
+            .map(|e| (*e).min(EVIDENCE_PER_FAILURE))
+            .sum::<u32>()
+            >= evidence_of(ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD)
     }
 
     /// Does this ordering need (re)testing?
@@ -315,10 +352,11 @@ impl RouteStats {
             .iter()
             .map(|o| match self.per_ordering.get(&o) {
                 Some(s) => format!(
-                    "{}: send={} loopback_streak={} lost_dests={}",
+                    "{}: send={} loopback_streak={} evidence={:.1} lost_dests={}",
                     o,
                     s.failed_to_send,
                     s.consecutive_loopback_failures,
+                    f64::from(s.loopback_failure_evidence) / f64::from(EVIDENCE_PER_FAILURE),
                     s.lost_question_destinations.len()
                 ),
                 None => format!("{o}: untested"),
@@ -340,9 +378,8 @@ impl RouteStats {
         !orderings.is_empty()
             && orderings.iter().all(|o| {
                 self.per_ordering.get(&o).is_some_and(|s| {
-                    s.consecutive_loopback_failures >= loopback_failure_threshold(o)
-                        || s.lost_question_destinations.len()
-                            >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
+                    s.loopback_failures_kill(loopback_failure_threshold(o))
+                        || s.lost_destinations_kill()
                 })
             })
     }
@@ -374,6 +411,8 @@ impl RouteStats {
         ordering: SequenceOrdering,
         destination: &Destination,
         opt_epoch: Option<LossEpoch>,
+        weight: f64,
+        sent_ts: Timestamp,
     ) {
         let Ok(dest_key) = destination.destination_key() else {
             self.ordering_mut(ordering)
@@ -381,15 +420,19 @@ impl RouteStats {
                 .record_lost_question(Timestamp::now());
             return;
         };
-        self.record_lost_question_to(ordering, dest_key, opt_epoch);
+        self.record_lost_question_to(ordering, dest_key, opt_epoch, weight, sent_ts);
     }
 
-    /// Mark a route as having lost an answer for a destination key at the given ordering
+    /// Mark a route as having lost an answer for a destination key at the given ordering, with
+    /// the blame weight it was lost under. A question sent before the route's last answer carries
+    /// no evidence: the route worked after it left.
     pub fn record_lost_question_to(
         &mut self,
         ordering: SequenceOrdering,
         dest_key: PublicKey,
         opt_epoch: Option<LossEpoch>,
+        weight: f64,
+        sent_ts: Timestamp,
     ) {
         let os = self.ordering_mut(ordering);
         os.answer_stats_accounting
@@ -397,6 +440,16 @@ impl RouteStats {
         *os.lost_question_destinations
             .entry(dest_key.clone())
             .or_insert(0) += 1;
+        let weight = if os.last_rcvd_answer_ts.is_some_and(|ts| sent_ts < ts) {
+            0.0
+        } else {
+            weight
+        };
+        let evidence = os
+            .lost_destination_evidence
+            .entry(dest_key.clone())
+            .or_insert(0);
+        *evidence = evidence.saturating_add(failure_evidence(weight));
         if let Some(epoch) = opt_epoch {
             os.lost_destination_marks
                 .retain(|_, mark| mark.same_network(&epoch));
@@ -446,6 +499,7 @@ impl RouteStats {
         os.answer_stats_accounting.record_answer(cur_ts);
         // Receiving any answer at this ordering means the ordering is functional.
         os.lost_question_destinations.clear();
+        os.lost_destination_evidence.clear();
         // but only this destination's answer shows the route reaches it
         if let Ok(dest_key) = destination.destination_key() {
             os.lost_destination_marks.remove(&dest_key);
@@ -463,12 +517,14 @@ impl RouteStats {
     }
 
     /// Record a loopback route test result for an ordering. A pass marks the
-    /// ordering valid and clears its failures; failures count consecutively and a run of
-    /// them (per-ordering threshold) kills the ordering. Returns the tally after the result.
+    /// ordering valid and clears its failures; failures count consecutively, each with the blame
+    /// weight it was observed under, and a run carrying the per-ordering threshold of evidence
+    /// kills the ordering. Returns the tally after the result.
     pub fn record_loopback_result(
         &mut self,
         ordering: SequenceOrdering,
         ok: bool,
+        weight: f64,
         cur_ts: Timestamp,
     ) -> RouteLoopbackTally {
         let os = self.ordering_mut(ordering);
@@ -479,11 +535,16 @@ impl RouteStats {
             os.last_known_valid_ts = Some(cur_ts);
             os.failed_to_send = 0;
             os.lost_question_destinations.clear();
+            os.lost_destination_evidence.clear();
             os.loopback_pass += 1;
             os.consecutive_loopback_failures = 0;
+            os.loopback_failure_evidence = 0;
         } else {
             os.loopback_fail += 1;
             os.consecutive_loopback_failures += 1;
+            os.loopback_failure_evidence = os
+                .loopback_failure_evidence
+                .saturating_add(failure_evidence(weight));
             os.max_consecutive_loopback_failures = os
                 .max_consecutive_loopback_failures
                 .max(os.consecutive_loopback_failures);
@@ -604,6 +665,30 @@ impl RouteStats {
                 .map(|os| os.needs_testing(cur_ts))
                 .unwrap_or(true)
         })
+    }
+
+    /// Whether a remote route needs a test. Its orderings are the remote's own, so the route is
+    /// one unit: due while a failure stands, or when nothing proved it within the idle time.
+    pub fn remote_needs_testing(&self, cur_ts: Timestamp) -> bool {
+        let failing = self
+            .per_ordering
+            .values()
+            .any(|os| !os.lost_question_destinations.is_empty() || os.failed_to_send > 0);
+        failing
+            || self.last_known_valid_ts().is_none_or(|ts| {
+                cur_ts.duration_since(ts) > TimestampDuration::new_ms(ROUTE_MIN_IDLE_TIME_MS as u64)
+            })
+    }
+
+    /// A remote route answered a test: it is proved over `ordering`, and the failures on every
+    /// ordering are cleared, since the route is one unit to us
+    pub fn record_remote_test_pass(&mut self, ordering: SequenceOrdering, cur_ts: Timestamp) {
+        for os in self.per_ordering.values_mut() {
+            os.failed_to_send = 0;
+            os.lost_question_destinations.clear();
+            os.lost_destination_evidence.clear();
+        }
+        self.ordering_mut(ordering).last_known_valid_ts = Some(cur_ts);
     }
 }
 
@@ -774,6 +859,16 @@ impl RouteSpecStore {
             })
             .collect::<Vec<_>>();
         veilid_log!(self debug target: "rtab::route", "route test summary: {}", parts.join(" "));
+    }
+
+    /// A remote route answered a test: proved over the ordering its question left on
+    pub fn record_remote_test_pass(&self, key: &PublicKey, opt_transport: Option<TransportType>) {
+        let ordering = opt_transport.map_or(SequenceOrdering::Ordered, |t| t.sequence_ordering());
+        let cur_ts = Timestamp::now();
+        self.update_remote_route_stats(cur_ts, key, |s| {
+            s.record_remote_test_pass(ordering, cur_ts);
+            Ok(())
+        });
     }
 
     /// Modify the route statistics for remote routes

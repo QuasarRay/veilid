@@ -10,6 +10,7 @@ const maxEnvelopeVersions :UInt32 = 16;
 const maxCapabilities :UInt32 = 64;
 const maxDialInfoDetails :UInt32 = 64;
 const maxRelayInfos :UInt32 = 16;
+const maxTransportMtus :UInt32 = 16;
 
 # Answer peer lists
 const maxFindNodeAPeersLen :UInt32 = 20;
@@ -31,6 +32,11 @@ const maxAppMessageMessageLen :UInt32 = 32768;
 const maxAppCallQMessageLen :UInt32 = 32768;
 const maxAppCallAMessageLen :UInt32 = 32768;
 const maxFindBlockADataLen :UInt32 = 32768;
+const maxMtuProbePaddingLen :UInt32 = 1500;
+
+# Transport mtus and probe sizes, in bytes
+const minTransportMtu :UInt32 = 576;                    # IPv4's minimum reassembly size
+const maxTransportMtu :UInt32 = 1500;                   # Ethernet's MTU, which the internet path never exceeds
 
 # Typed IDs and Hashes
 ##############################
@@ -208,6 +214,12 @@ struct SenderInfo @0xbad425a899f50b53 {
     socketAddress           @0  :SocketAddress;         # socket address that for the sending peer
 }
 
+# Fills a status question or answer out to one datagram size, proving the path carries it
+struct MtuProbe @0xe712ddc0b7533132 {
+    size                    @0  :UInt16;                # datagram payload bytes this message was sent at
+    padding                 @1  :Data;                  # random bytes that fill the message out to `size`
+}
+
 struct CryptoInfo @0xc7fe5dd7f7901475 {
     cryptoKind              @0  :CryptoKind;            # Type of cryptography this info is for
     detail                  @1  :AnyPointer;            # The struct corresponding to this crypto kind (CryptoInfoVLD0/1/etc)
@@ -226,6 +238,13 @@ struct CryptoInfoVLD1 @0xc0848d50fdbf004a {
     signingKey              @1  :Data;                  # Signing Key (use by: VLD1/ML-DSA: 1952 bytes)
 }
 
+# Largest packet a node takes on one low-level transport without fragmentation
+struct TransportMtu @0xc6c59d4813f068e6 {
+    protocolType            @0  :ProtocolType;          # low-level protocol: UDP or TCP
+    addressType             @1  :AddressType;           # address type
+    mtu                     @2  :UInt16;                # UDP: datagram payload bytes, TCP: segment payload bytes
+}
+
 # Just enough information to describe a single relay, for the RLAY capability
 # Relays must support the same set of envelopes as the node being relayed for
 # Relays support whatever cryptography is used on their node ids
@@ -242,6 +261,7 @@ struct RelayInfo @0xe5814c9bf77c5d64 {
     addressTypes            @3  :List(AddressType);     # address types supported
     dialInfoDetailList      @4  :List(DialInfoDetail);  # inbound dial info details for this node
     relayKind               @5  :RelayKind;                  # type of relay
+    receiveMtus             @6  :List(TransportMtu);    # the relay's own receive mtus, which sends through it stay within
 }
 
 # Full node information to be signed into a peerinfo
@@ -254,6 +274,7 @@ struct NodeInfo @0xaab6a61cc9dc8e34 {
     addressTypes            @5  :List(AddressType);     # address types supported
     dialInfoDetailList      @6  :List(DialInfoDetail);  # inbound dial info details for this node
     relayInfoList           @7  :List(RelayInfo);       # relay node info, just enough to get connected
+    receiveMtus             @8  :List(TransportMtu);    # largest packets this node takes per transport, absent ones take the safe size
 }
 
 struct PeerInfo @0xca2ea684ebbdad2f {
@@ -270,11 +291,13 @@ struct RoutedOperation @0xc8e9c493627bb3f2 {
 
 struct OperationStatusQ @0x865d80cea70d884a {
     nodeStatus              @0  :NodeStatus;            # optional: node status update about the statusq sender
+    mtuProbe                @1  :MtuProbe;              # optional: sent at the probe size, asks for an answer at that size
 }
 
 struct OperationStatusA @0x841a6fb922d2d61a {
     nodeStatus              @0  :NodeStatus;            # optional: returned node status
     senderInfo              @1  :SenderInfo;            # optional: info about StatusQ sender from the perspective of the replier
+    mtuProbe                @2  :MtuProbe;              # optional: answers a probe at the size it was sent at
 }
 
 struct OperationValidateDialInfo @0xe4e14b9be1cee00d {

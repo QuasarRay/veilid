@@ -62,14 +62,14 @@ impl fmt::Display for InboundWatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "id={} exp={} cnt={} signer={} subkeys={} changed={} target={:?}",
+            "id={} exp={} cnt={} signer={} subkeys={} changed={} dest={:?}",
             self.id,
             self.params.expiration,
             self.params.count,
             self.params.watcher_member_id,
             self.params.subkeys,
             self.changed_subkeys,
-            self.params.target
+            self.params.dest
         )
     }
 }

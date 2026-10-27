@@ -18,6 +18,12 @@ impl RPCAnswer {
     pub fn desc(&self) -> &'static str {
         self.detail.desc()
     }
+    pub fn mtu_probe_slot(&mut self) -> Option<&mut Option<MtuProbe>> {
+        match &mut self.detail {
+            RPCAnswerDetail::StatusA(status_a) => Some(status_a.mtu_probe_slot()),
+            _ => None,
+        }
+    }
     pub fn destructure(self) -> RPCAnswerDetail {
         self.detail
     }

@@ -53,7 +53,11 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
         })
     }
 
-    fn send(&self, message: Bytes) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
+    fn send(
+        &self,
+        message: Bytes,
+        _mtu: u16,
+    ) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
         Box::pin(async move {
             match self {
                 //            Self::Dummy(d) => d.send(message),
@@ -122,5 +126,49 @@ impl NativeProtocolNetworkConnection {
                 .await
             }
         }
+    }
+}
+
+/// A TCP-based connection that holds each send's segments to that send's size
+#[derive(Debug)]
+pub(super) struct SegmentLimitedConnection {
+    /// The connection being wrapped
+    inner: ProtocolNetworkConnection,
+    /// Lowers the segment size of the stream under it
+    segment_limit: TcpSegmentLimit,
+}
+
+impl SegmentLimitedConnection {
+    pub fn wrap(
+        inner: ProtocolNetworkConnection,
+        segment_limit: TcpSegmentLimit,
+    ) -> ProtocolNetworkConnection {
+        Box::new(Self {
+            inner,
+            segment_limit,
+        })
+    }
+}
+
+impl PlatformProtocolNetworkConnection for SegmentLimitedConnection {
+    fn flow(&self) -> Flow {
+        self.inner.flow()
+    }
+    fn direction(&self) -> Direction {
+        self.inner.direction()
+    }
+    fn close(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
+        self.inner.close()
+    }
+    fn send(
+        &self,
+        message: Bytes,
+        mtu: u16,
+    ) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
+        self.segment_limit.lower(mtu.into());
+        self.inner.send(message, mtu)
+    }
+    fn recv(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<Bytes>>> {
+        self.inner.recv()
     }
 }

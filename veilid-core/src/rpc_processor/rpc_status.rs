@@ -15,6 +15,9 @@ pub struct StatusAnswer {
     pub answer: Answer<StatusSenderInfo>,
     /// The first-hop send attempt that carried the question
     pub send_data_result: SendDataResult,
+    /// The datagram a probe's answer arrived whole in, as evidence of the size the path carried
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    pub opt_mtu_probe_datagram_len: Option<u16>,
 }
 
 /// Outcome of `rpc_call_status`
@@ -30,8 +33,14 @@ impl RPCProcessor {
     // direct -> node status + sender info
     // safety -> node status
     // private -> nothing
+    // `opt_mtu_probe_size` sends a probe that fills one datagram of that size and asks for an
+    // answer of the same size; its loss counts against neither the peer nor our online state
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rpc", skip(self), ret, err(level=Level::DEBUG)))]
-    pub async fn rpc_call_status(&self, dest: Destination) -> Result<StatusResult, RPCError> {
+    pub async fn rpc_call_status(
+        &self,
+        dest: Destination,
+        opt_mtu_probe_size: Option<u16>,
+    ) -> Result<StatusResult, RPCError> {
         let _guard = self
             .startup_context
             .startup_lock
@@ -69,7 +78,12 @@ impl RPCProcessor {
         };
 
         // Create status rpc question
-        let status_q = RPCOperationStatusQ::new(node_status);
+        let opt_mtu_probe = opt_mtu_probe_size.map(|size| {
+            let mut padding = vec![0u8; MAX_MTU_PROBE_PADDING_LEN];
+            random_bytes(&mut padding);
+            MtuProbe { size, padding }
+        });
+        let status_q = RPCOperationStatusQ::new(node_status, opt_mtu_probe);
         let question = RPCQuestion::new(respond_to, RPCQuestionDetail::StatusQ(Box::new(status_q)));
 
         let debug_string = format!("Status => {:#}", dest);
@@ -105,6 +119,10 @@ impl RPCProcessor {
             TimeoutOr::Timeout => return Ok(StatusResult::Failed(send_data_result)),
             TimeoutOr::Value(v) => v,
         };
+        let opt_answer_datagram_len = match &msg.header.detail {
+            RPCMessageHeaderDetail::Direct(detail) => detail.opt_datagram_len,
+            _ => None,
+        };
 
         // Get the right answer type
         let (_, _, kind) = msg.operation.destructure();
@@ -115,7 +133,7 @@ impl RPCProcessor {
             },
             _ => return Ok(StatusResult::Failed(send_data_result)),
         };
-        let (a_node_status, sender_info) = status_a.destructure();
+        let (a_node_status, sender_info, a_mtu_probe) = status_a.destructure();
 
         // Ensure the returned node status is the kind for the routing domain we asked for
         if let Some(target_nr) = opt_target_nr {
@@ -204,6 +222,8 @@ impl RPCProcessor {
                 },
             ),
             send_data_result,
+            // What the answer claims proves nothing; the datagram it came in does
+            opt_mtu_probe_datagram_len: a_mtu_probe.and(opt_answer_datagram_len),
         })))
     }
 
@@ -220,7 +240,26 @@ impl RPCProcessor {
             },
             _ => return Ok(NetworkResult::invalid_message("not a question")),
         };
-        let q_node_status = status_q.destructure();
+        let (q_node_status, q_mtu_probe) = status_q.destructure();
+
+        // Only a question that arrived whole at its size gets an answer that size, never larger
+        let opt_mtu_probe = match (&msg.header.detail, q_mtu_probe) {
+            (RPCMessageHeaderDetail::Direct(detail), Some(q_mtu_probe))
+                if detail.flow.protocol_type() == ProtocolType::UDP =>
+            {
+                let limit = self
+                    .network_manager()
+                    .own_mtus()
+                    .limit(LowLevelTransportType {
+                        low_level_protocol_type: LowLevelProtocolType::UDP,
+                        address_type: detail.flow.address_type(),
+                    });
+                let filled = q_mtu_probe.size.saturating_sub(MTU_PROBE_FILL_SLACK);
+                let question_filled = detail.opt_datagram_len.is_some_and(|len| len >= filled);
+                (question_filled && limit >= q_mtu_probe.size).then_some(q_mtu_probe)
+            }
+            _ => None,
+        };
 
         let (node_status, sender_info) = match &msg.header.detail {
             RPCMessageHeaderDetail::Direct(detail) => {
@@ -256,7 +295,7 @@ impl RPCProcessor {
         };
 
         // Make status answer
-        let status_a = RPCOperationStatusA::new(node_status, sender_info);
+        let status_a = RPCOperationStatusA::new(node_status, sender_info, opt_mtu_probe);
 
         // Send status answer
         self.answer(

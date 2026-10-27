@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "rt-async-std")]
 use async_io::Async;
 use std::io;
+use std::sync::atomic::AtomicU32;
 
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
@@ -18,7 +19,9 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
-/// Bind a UDP socket to `local_address` with `SO_REUSEADDR`/`SO_REUSEPORT` set.
+/// Bind a UDP socket to `local_address` with `SO_REUSEADDR`/`SO_REUSEPORT` set. On Linux and
+/// Android an IPv4 socket's datagrams go out without DF, so routers may fragment them, as on other
+/// platforms.
 ///
 /// Returns `Ok(None)` if the address could not be bound (a bind failure is not an error).
 /// Errors only on socket creation or option failures (`Socket::new`, reuse-address/port, and the tokio non-blocking conversion).
@@ -66,10 +69,15 @@ pub fn bind_async_udp_socket_probed(local_address: SocketAddr) -> io::Result<Opt
 /// Bind a TCP listener to `local_address`.
 ///
 /// Probes the port with a non-shared socket first, then binds a shared
-/// (`SO_REUSEADDR`/`SO_REUSEPORT`) socket once the port is known free.
+/// (`SO_REUSEADDR`/`SO_REUSEPORT`) socket once the port is known free. With `mss`, accepted
+/// connections ask their peers for segments no larger than that where the platform advertises it
+/// (Linux, Android); elsewhere clamp each accepted stream with [`limit_tcp_stream_mss`].
 /// Returns `Ok(None)` if the address could not be bound or listened on (these are not errors).
 /// Errors only on socket creation or option failures (`Socket::new`, linger, nodelay, reuse-address/port, and the tokio non-blocking conversion).
-pub fn bind_async_tcp_listener(local_address: SocketAddr) -> io::Result<Option<TcpListener>> {
+pub fn bind_async_tcp_listener(
+    local_address: SocketAddr,
+    mss: Option<u32>,
+) -> io::Result<Option<TcpListener>> {
     // Create a default non-shared socket and bind it
     let Some(socket) = new_bound_default_socket2_tcp(local_address)? else {
         return Ok(None);
@@ -82,6 +90,9 @@ pub fn bind_async_tcp_listener(local_address: SocketAddr) -> io::Result<Option<T
     let Some(socket) = new_bound_shared_socket2_tcp(local_address)? else {
         return Ok(None);
     };
+    if let Some(mss) = mss {
+        request_socket_mss(&socket, mss);
+    }
 
     // Listen on the socket
     if socket.listen(128).is_err() {
@@ -107,13 +118,16 @@ pub fn bind_async_tcp_listener(local_address: SocketAddr) -> io::Result<Option<T
 ///
 /// When `local_address` is given the connecting socket is shared
 /// (`SO_REUSEADDR`/`SO_REUSEPORT`); otherwise a default socket is used. The
-/// connect is non-blocking and bounded by `timeout_ms`.
+/// connect is non-blocking and bounded by `timeout_ms`. With `mss`, the stream sends segments no
+/// larger than that, and asks its peer for the same where the platform advertises it (Linux,
+/// Android); failing to set it leaves a working stream with the platform's segment size.
 ///
 /// A timeout yields `Ok(TimeoutOr::timeout())`, not an error. Errors with `AddrInUse` when `local_address` cannot be bound, and propagates the connect failure (e.g. `ConnectionRefused`, `HostUnreachable`) along with any socket creation or option io error.
 pub async fn connect_async_tcp_stream(
     local_address: Option<SocketAddr>,
     remote_address: SocketAddr,
     timeout_ms: u32,
+    mss: Option<u32>,
 ) -> io::Result<TimeoutOr<TcpStream>> {
     let socket = match local_address {
         Some(a) => {
@@ -121,9 +135,284 @@ pub async fn connect_async_tcp_stream(
         }
         None => new_default_socket2_tcp(domain_for_address(remote_address))?,
     };
+    if let Some(mss) = mss {
+        request_socket_mss(&socket, mss);
+    }
 
     // Non-blocking connect to remote address
-    nonblocking_connect(socket, remote_address, timeout_ms).await
+    let res = nonblocking_connect(socket, remote_address, timeout_ms).await?;
+    if let (Some(mss), TimeoutOr::Value(tcp_stream)) = (mss, &res) {
+        // Best effort, like the request before connect
+        let _ = limit_tcp_stream_mss(tcp_stream, mss);
+    }
+    Ok(res)
+}
+
+/// Lower a connected stream's TCP segment size to at most `mss`. It limits only what this end
+/// sends: the peer's segments follow what was advertised when the connection opened. Windows
+/// cannot set TCP_MAXSEG, so there it caps the socket's IP MTU, which IPv6 keeps at 1280 or more.
+///
+/// Errors with the io error from the underlying `getsockopt`/`setsockopt`.
+pub fn limit_tcp_stream_mss(tcp_stream: &TcpStream, mss: u32) -> io::Result<()> {
+    let socket = socket2::SockRef::from(tcp_stream);
+    cfg_if! {
+        if #[cfg(unix)] {
+            // XNU rejects a value above the current one
+            if socket.tcp_mss()? > mss {
+                socket.set_tcp_mss(mss)?;
+            }
+        } else {
+            if windows_tcp_mss(&socket)? > mss {
+                windows_cap_ip_mtu(&socket, mss)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The TCP segment size a connected stream sends.
+///
+/// Errors with the io error from the underlying `getsockopt`; Windows can read it from Windows 10.
+pub fn tcp_stream_mss(tcp_stream: &TcpStream) -> io::Result<u32> {
+    let socket = socket2::SockRef::from(tcp_stream);
+    cfg_if! {
+        if #[cfg(unix)] {
+            socket.tcp_mss()
+        } else {
+            windows_tcp_mss(&socket)
+        }
+    }
+}
+
+/// Lowers the largest segment a [`SegmentLimitedTcpStream`] sends.
+#[derive(Clone, Debug)]
+pub struct TcpSegmentLimit(Arc<AtomicU32>);
+
+impl TcpSegmentLimit {
+    /// Lowers the limit to `limit` bytes; it never rises again.
+    pub fn lower(&self, limit: u32) {
+        self.0.fetch_min(limit.max(1), Ordering::Relaxed);
+    }
+
+    /// The limit, once one was set.
+    #[must_use]
+    pub fn get(&self) -> Option<u32> {
+        let limit = self.0.load(Ordering::Relaxed);
+        (limit != u32::MAX).then_some(limit)
+    }
+}
+
+cfg_if! {
+    if #[cfg(feature="rt-async-std")] {
+        type SegmentLimitedInner = TcpStream;
+    } else if #[cfg(feature="rt-tokio")] {
+        type SegmentLimitedInner = Compat<TcpStream>;
+    } else {
+        compile_error!("needs executor implementation");
+    }
+}
+
+/// A TCP stream whose segments stay within a limit that can be lowered while it is open:
+/// - Linux and Android under tokio write at most the limit at a time and end each write with
+///   `MSG_EOR`, which stops the kernel appending to it or merging it, retransmits included
+/// - macOS, iOS and Windows lower the socket's own segment size
+/// - elsewhere writes stay within the limit, but the kernel may merge them
+pub struct SegmentLimitedTcpStream {
+    stream: SegmentLimitedInner,
+    limit: TcpSegmentLimit,
+    applied: u32,
+}
+
+impl SegmentLimitedTcpStream {
+    /// Wrap `tcp_stream`, returning the handle that lowers its limit; until then it is unlimited.
+    #[must_use]
+    pub fn new(tcp_stream: TcpStream) -> (Self, TcpSegmentLimit) {
+        let limit = TcpSegmentLimit(Arc::new(AtomicU32::new(u32::MAX)));
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                let stream = tcp_stream;
+            } else if #[cfg(feature="rt-tokio")] {
+                let stream = tcp_stream.compat();
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+        (
+            Self {
+                stream,
+                limit: limit.clone(),
+                applied: u32::MAX,
+            },
+            limit,
+        )
+    }
+
+    #[cfg(any(
+        feature = "rt-tokio",
+        not(any(target_os = "linux", target_os = "android"))
+    ))]
+    fn tcp_stream(&self) -> &TcpStream {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                &self.stream
+            } else if #[cfg(feature="rt-tokio")] {
+                self.stream.get_ref()
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+}
+
+impl AsyncRead for SegmentLimitedTcpStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &mut [u8],
+    ) -> task::Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for SegmentLimitedTcpStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &[u8],
+    ) -> task::Poll<io::Result<usize>> {
+        let Some(limit) = self.limit.get() else {
+            return Pin::new(&mut self.stream).poll_write(cx, buf);
+        };
+        if limit < self.applied {
+            self.applied = limit;
+            // Best effort: where the socket keeps its size, the bounded writes below still apply
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            let _ = limit_tcp_stream_mss(self.tcp_stream(), limit);
+        }
+        let buf = &buf[..buf.len().min(limit as usize)];
+        cfg_if! {
+            if #[cfg(all(feature = "rt-tokio", any(target_os = "linux", target_os = "android")))] {
+                poll_write_end_of_record(self.tcp_stream(), cx, buf)
+            } else {
+                Pin::new(&mut self.stream).poll_write(cx, buf)
+            }
+        }
+    }
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+    ) -> task::Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+    fn poll_close(
+        mut self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+    ) -> task::Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_close(cx)
+    }
+}
+
+/// Writes `buf` as one record the kernel will not merge with another, retransmits included
+#[cfg(all(feature = "rt-tokio", any(target_os = "linux", target_os = "android")))]
+fn poll_write_end_of_record(
+    tcp_stream: &TcpStream,
+    cx: &mut task::Context<'_>,
+    buf: &[u8],
+) -> task::Poll<io::Result<usize>> {
+    loop {
+        task::ready!(tcp_stream.poll_write_ready(cx))?;
+        match tcp_stream.try_io(tokio::io::Interest::WRITABLE, || {
+            socket2::SockRef::from(tcp_stream).send_with_flags(buf, libc::MSG_EOR)
+        }) {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            res => return task::Poll::Ready(res),
+        }
+    }
+}
+
+/// Changes the segment size a listening socket advertises to the connections it accepts from
+/// now on. Only Linux advertises it; elsewhere this changes nothing.
+#[derive(Debug)]
+pub struct TcpListenerMssHandle(Socket);
+
+impl TcpListenerMssHandle {
+    /// A handle on `listener`'s socket, which stays usable after the listener moves on.
+    ///
+    /// Errors with the io error from duplicating the socket.
+    pub fn try_new(listener: &TcpListener) -> io::Result<Self> {
+        Ok(Self(socket2::SockRef::from(listener).try_clone()?))
+    }
+
+    /// Ask the listener to advertise `mss`; best effort.
+    pub fn set_mss(&self, mss: u32) {
+        request_socket_mss(&self.0, mss);
+    }
+}
+
+/// ws2ipdef.h; the winapi crate has none of these
+#[cfg(windows)]
+const TCP_MAXSEG: core::ffi::c_int = 4;
+#[cfg(windows)]
+const IP_USER_MTU: core::ffi::c_int = 76;
+#[cfg(windows)]
+const IPV6_USER_MTU: core::ffi::c_int = 76;
+
+/// The segment size a connected Windows TCP socket sends
+#[cfg(windows)]
+fn windows_tcp_mss(socket: &Socket) -> io::Result<u32> {
+    use std::os::windows::io::AsRawSocket;
+    use winapi::shared::ws2def::IPPROTO_TCP;
+    use winapi::um::winsock2::{getsockopt, SOCKET, SOCKET_ERROR};
+
+    let mut mss: u32 = 0;
+    let mut len = core::mem::size_of::<u32>() as core::ffi::c_int;
+    // SAFETY: the socket is open, and `mss` and `len` outlive this synchronous call
+    let res = unsafe {
+        getsockopt(
+            socket.as_raw_socket() as SOCKET,
+            IPPROTO_TCP as core::ffi::c_int,
+            TCP_MAXSEG,
+            (&mut mss as *mut u32).cast(),
+            &mut len,
+        )
+    };
+    if res == SOCKET_ERROR {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(mss)
+}
+
+/// Caps a Windows socket's IP MTU so its TCP segments are at most `mss`. Only what this end sends
+/// shrinks, and IPv6 refuses an MTU below 1280
+#[cfg(windows)]
+fn windows_cap_ip_mtu(socket: &Socket, mss: u32) -> io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use winapi::shared::ws2def::{IPPROTO_IP, IPPROTO_IPV6};
+    use winapi::um::winsock2::{setsockopt, SOCKET, SOCKET_ERROR};
+
+    let (level, option, mtu) = if socket.local_addr()?.is_ipv6() {
+        (
+            IPPROTO_IPV6 as core::ffi::c_int,
+            IPV6_USER_MTU,
+            mss.saturating_add(60).max(1280),
+        )
+    } else {
+        (IPPROTO_IP, IP_USER_MTU, mss.saturating_add(40))
+    };
+    // SAFETY: the socket is open, and `mtu` outlives this synchronous call
+    let res = unsafe {
+        setsockopt(
+            socket.as_raw_socket() as SOCKET,
+            level,
+            option,
+            (&mtu as *const u32).cast(),
+            core::mem::size_of::<u32>() as core::ffi::c_int,
+        )
+    };
+    if res == SOCKET_ERROR {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Set the `SO_LINGER` option on a TCP stream.
@@ -206,7 +495,35 @@ fn new_shared_socket2_udp(domain: core::ffi::c_int) -> io::Result<Socket> {
             let _ = disable_udp_icmp_errors(&socket);
         }
     }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if domain == Domain::IPV4 {
+        // Best effort: where it fails, a router that must fragment our datagrams drops them instead
+        let _ = allow_ipv4_fragmentation(&socket);
+    }
     Ok(socket)
+}
+
+/// Let routers fragment an IPv4 socket's datagrams, as other platforms do; Linux and Android
+/// otherwise set DF on every datagram that fits the cached path MTU
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn allow_ipv4_fragmentation(socket: &Socket) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let value: libc::c_int = libc::IP_PMTUDISC_DONT;
+    // SAFETY: the socket is open, and `value` outlives this synchronous call
+    let res = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_MTU_DISCOVER,
+            (&value as *const libc::c_int).cast(),
+            core::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if res != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Keep ICMP port unreachable and TTL expired out of recv, as on other platforms; Windows
@@ -315,6 +632,19 @@ fn new_bound_default_socket2_tcp(local_address: SocketAddr) -> io::Result<Option
     }
 
     Ok(Some(socket))
+}
+
+/// Asks for `mss` before connecting or listening. Linux also advertises it in the handshake, so
+/// the peer's segments shrink too; XNU ignores it there and rejects values above its 512-byte
+/// default, so a failure is expected and its connected streams are clamped instead, as on Windows.
+fn request_socket_mss(socket: &Socket, mss: u32) {
+    cfg_if! {
+        if #[cfg(unix)] {
+            let _ = socket.set_tcp_mss(mss);
+        } else {
+            let _ = (socket, mss);
+        }
+    }
 }
 
 fn new_bound_shared_socket2_tcp(local_address: SocketAddr) -> io::Result<Option<Socket>> {

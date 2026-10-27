@@ -6,8 +6,8 @@ use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("rtab");
 
-/// Loopback failures a route may defer under blame suppression before one is
-/// recorded anyway, so chronic degradation cannot make a dead route immortal
+/// Loopback failures a route may defer while stalls or failure bursts hold the domain degraded
+/// before one is recorded anyway, so chronic bursts cannot make a dead route immortal
 const MAX_LOOPBACK_FAILURE_DEFERRALS: usize = 3;
 
 /////////////////////////////////////
@@ -207,7 +207,7 @@ impl PingValidationProcessorState {
                         let _start_ts = Timestamp::now();
                         let rpc_processor = fut_registry.rpc_processor();
                         let result =
-                            Box::pin(rpc_processor.rpc_call_status(fut_dest.clone())).await;
+                            Box::pin(rpc_processor.rpc_call_status(fut_dest.clone(), None)).await;
 
                         veilid_stats!({
                             use super::ping_stats_accounting::{PingOutcome, PingPurpose};
@@ -687,6 +687,7 @@ impl RoutingTable {
         priority: usize,
     ) -> Option<PingValidationEntry> {
         let private_route = rss.best_remote_private_route(route_id)?;
+        let route_key = private_route.public_key.clone();
 
         let safety_spec = SafetySpec {
             preferred_route: None,
@@ -716,7 +717,14 @@ impl RoutingTable {
                       result: Result<StatusResult, RPCError>|
                       -> Vec<PingValidationEntry> {
                     match result {
-                        Ok(StatusResult::Sent(_)) => {
+                        Ok(StatusResult::Sent(status_answer)) => {
+                            registry
+                                .routing_table()
+                                .route_spec_store()
+                                .record_remote_test_pass(
+                                    &route_key,
+                                    status_answer.send_data_result.opt_transport_type(),
+                                );
                             #[cfg(feature = "verbose-tracing")]
                             veilid_log!(registry trace "Remote route test PASSED: {:#}", route_id_clone);
                         }
@@ -774,7 +782,7 @@ impl RoutingTable {
                         let cur_ts = Timestamp::now();
                         let mut tally = RouteLoopbackTally::default();
                         rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
-                            tally = s.record_loopback_result(ordering, true, cur_ts);
+                            tally = s.record_loopback_result(ordering, true, 1.0, cur_ts);
                             Ok(())
                         });
                         rss.record_route_test_summary(ordering, true);
@@ -798,25 +806,29 @@ impl RoutingTable {
                     }
                 };
 
-                if routing_table
-                    .network_manager()
-                    .online_detector()
-                    .blame_suppressed(RoutingDomain::PublicInternet)
-                {
-                    // Unbounded deferral makes a dead route immortal: its failures
-                    // are never recorded, so it is never released
-                    let mut deferrals = 0;
-                    rss.update_allocated_route_stats(Timestamp::now(), &route_key, |s| {
-                        deferrals = s.record_loopback_deferral(ordering);
-                        Ok(())
-                    });
-                    if deferrals <= MAX_LOOPBACK_FAILURE_DEFERRALS {
-                        veilid_log!(registry debug "Deferring route loopback failure (offline/degraded): {:#} ({:#})", route_id, ordering);
-                        routing_table.request_route_test(route_id);
-                        return Vec::new();
+                let network_manager = routing_table.network_manager();
+                let online_detector = network_manager.online_detector();
+                let weight = match online_detector.blame_weight(RoutingDomain::PublicInternet) {
+                    // A loopback crosses our link four times, a direct round trip twice
+                    Some(weight) => weight * weight,
+                    None => {
+                        // Offline never blames; stalls and bursts defer, capped so dead routes die
+                        let offline = online_detector.online_state(RoutingDomain::PublicInternet)
+                            == OnlineState::Offline;
+                        let mut deferrals = 0;
+                        rss.update_allocated_route_stats(Timestamp::now(), &route_key, |s| {
+                            deferrals = s.record_loopback_deferral(ordering);
+                            Ok(())
+                        });
+                        if offline || deferrals <= MAX_LOOPBACK_FAILURE_DEFERRALS {
+                            veilid_log!(registry debug "Deferring route loopback failure (offline/degraded): {:#} ({:#})", route_id, ordering);
+                            routing_table.request_route_test(route_id);
+                            return Vec::new();
+                        }
+                        veilid_log!(registry debug "Route loopback deferral cap reached, recording failure: {:#} ({:#})", route_id, ordering);
+                        1.0
                     }
-                    veilid_log!(registry debug "Route loopback deferral cap reached, recording failure: {:#} ({:#})", route_id, ordering);
-                }
+                };
 
                 // Neither route nor hops can be blamed for a transport we could not send on
                 let opt_transport = sdr.opt_transport_type();
@@ -837,7 +849,7 @@ impl RoutingTable {
                 let cur_ts = Timestamp::now();
                 let mut tally = RouteLoopbackTally::default();
                 rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
-                    tally = s.record_loopback_result(ordering, false, cur_ts);
+                    tally = s.record_loopback_result(ordering, false, weight, cur_ts);
                     Ok(())
                 });
                 rss.record_route_test_summary(ordering, false);
@@ -851,13 +863,13 @@ impl RoutingTable {
                     .collect::<Vec<_>>()
                     .join(",");
                 let Some(transport) = opt_transport else {
-                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ord={:#} fails={} pass/fail={}/{} hops=[{}]", route_id, ordering, tally.streak, tally.pass, tally.fail, hop_ids);
+                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ord={:#} fails={} weight={:.2} pass/fail={}/{} hops=[{}]", route_id, ordering, tally.streak, weight, tally.pass, tally.fail, hop_ids);
                     return Vec::new();
                 };
                 // first_hop is only our leg's transport; the ordering is what the hops forward with
-                veilid_log!(registry debug "Route loopback FAILED: {:#} ord={:#} first_hop={:#} fails={} pass/fail={}/{} hops=[{}]", route_id, ordering, transport, tally.streak, tally.pass, tally.fail, hop_ids);
-                // A multi-hop failure cannot isolate a hop; only a single hop's legs are ours
-                if let [hop] = hops.as_slice() {
+                veilid_log!(registry debug "Route loopback FAILED: {:#} ord={:#} first_hop={:#} fails={} weight={:.2} pass/fail={}/{} hops=[{}]", route_id, ordering, transport, tally.streak, weight, tally.pass, tally.fail, hop_ids);
+                // Only a single hop's legs are ours, and only when our own loss cannot explain them
+                if let ([hop], true) = (hops.as_slice(), weight >= 1.0) {
                     hop.report_failed_route_test(transport);
                 }
 

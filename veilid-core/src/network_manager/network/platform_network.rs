@@ -72,10 +72,12 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// for the purpose of sending this one message.
     /// This bypasses the connection table as it is not a 'node to node' connection.
     /// The caller is resposible for encrypting data before calling this function. USE WITH CAUTION.
+    /// No datagram or TCP segment carries more than `mtu` payload bytes.
     fn send_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<()>>>;
 
     /// Send and receive data to/from a dial info, unbound, using a new connection from a random port
@@ -85,30 +87,36 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// for the purpose of sending this one message.
     /// This bypasses the connection table as it is not a 'node to node' connection.
     /// The caller is resposible for encrypting data before calling this function. USE WITH CAUTION.
+    /// No datagram or TCP segment carries more than `mtu` payload bytes.
     fn send_recv_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
         timeout_ms: u32,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<Bytes>>>;
 
     /// Send data to a flow that already exists
     ///
     /// The caller is resposible for encrypting data before calling this function. USE WITH CAUTION.
+    /// No datagram or TCP segment carries more than `mtu` payload bytes.
     fn send_data_to_existing_flow(
         &self,
         flow: Flow,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<UniqueFlow>>>;
 
     /// Send data directly to a dial info, possibly without knowing which node it is going to
     ///
     /// Returns a flow for the connection used to send the data
     /// The caller is resposible for encrypting data before calling this function. USE WITH CAUTION.
+    /// No datagram or TCP segment carries more than `mtu` payload bytes.
     fn send_data_to_dial_info(
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkResult<UniqueFlow>>>;
 
     /// Send hole punch attempt to a specific dialinfo. May not be appropriate for all protocols.

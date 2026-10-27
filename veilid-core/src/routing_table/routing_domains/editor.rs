@@ -15,6 +15,7 @@ pub trait RoutingDomainEditor {
     // fn remove_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);
     fn set_network_config(&mut self, network_config: RoutingDomainNetworkConfig);
     fn set_confirmed(&mut self, confirmed: bool);
+    fn set_receive_mtus(&mut self, receive_mtus: Option<TransportMtus>);
     fn commit(&mut self);
     fn reset(&mut self);
 }
@@ -61,6 +62,9 @@ impl<T: RoutingDomainDetailAccessors + ?Sized> RoutingDomainDetailApplyChange fo
             RoutingDomainChange::SetConfirmed { confirmed } => {
                 self.common_mut().set_confirmed(confirmed);
             }
+            RoutingDomainChange::SetReceiveMtus { receive_mtus } => {
+                self.common_mut().set_receive_mtus(receive_mtus);
+            }
         }
     }
 }
@@ -91,6 +95,9 @@ pub(super) enum RoutingDomainChange {
     SetConfirmed {
         confirmed: bool,
     },
+    SetReceiveMtus {
+        receive_mtus: Option<TransportMtus>,
+    },
 }
 
 pub(super) struct CommitSnapshot {
@@ -101,6 +108,7 @@ pub(super) struct CommitSnapshot {
     pub address_types: AddressTypeSet,
     pub capabilities: BTreeSet<VeilidCapability>,
     pub confirmed: bool,
+    pub receive_mtus: Option<TransportMtus>,
 }
 
 pub(super) struct CommitChanged {
@@ -111,6 +119,7 @@ pub(super) struct CommitChanged {
     pub address_types_changed: bool,
     pub capabilities_changed: bool,
     pub confirmation_changed: bool,
+    pub receive_mtus_changed: bool,
     pub peer_info_changed: bool,
 }
 
@@ -128,13 +137,15 @@ impl CommitSnapshot {
         let address_types_changed = self.address_types != new.address_types;
         let capabilities_changed = self.capabilities != new.capabilities;
         let confirmation_changed = self.confirmed != new.confirmed;
+        let receive_mtus_changed = self.receive_mtus != new.receive_mtus;
         let peer_info_changed = dial_info_changed
             || relays_changed
             || outbound_protocols_changed
             || inbound_protocols_changed
             || address_types_changed
             || capabilities_changed
-            || confirmation_changed;
+            || confirmation_changed
+            || receive_mtus_changed;
         CommitChanged {
             dial_info_changed,
             relays_changed,
@@ -143,6 +154,7 @@ impl CommitSnapshot {
             address_types_changed,
             capabilities_changed,
             confirmation_changed,
+            receive_mtus_changed,
             peer_info_changed,
         }
     }

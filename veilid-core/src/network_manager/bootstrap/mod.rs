@@ -123,6 +123,7 @@ impl NetworkManager {
                     AddressTypeSet::all(), // Bootstraps are always IPV4 and IPV6 capable
                     bsrec.dial_info_details().to_vec(), // Dial info is as specified in the bootstrap list
                     vec![],                             // No relays for bootstrap nodes
+                    TransportMtus::default(), // Their mtus arrive with their signed peer info
                 );
 
                 match PeerInfo::try_new_from_unsigned(

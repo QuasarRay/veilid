@@ -271,10 +271,15 @@ impl NativeNetwork {
                     .connection_manager()
                     .close_dead_connections(&own_addresses_except(&interface_address_state, None));
 
-                self.apply_egress_change(
+                let moved = self.apply_egress_change(
                     &last_network_state,
                     &interface_address_state,
                     protocol_config.family_global,
+                );
+                self.refresh_family_mtus(
+                    &interface_address_state,
+                    protocol_config.family_global,
+                    moved,
                 );
 
                 // Return the 'detect address changes' settings from when they were set up for all the other
@@ -287,6 +292,12 @@ impl NativeNetwork {
                 veilid_log!(self debug
                     "Network interface address state:\n{}\n",
                     indent_all_string(format!("{:?}", interface_address_state))
+                );
+
+                self.refresh_family_mtus(
+                    &interface_address_state,
+                    protocol_config.family_global,
+                    AddressTypeSet::new(),
                 );
 
                 // The first time we get a network state, set up the 'detect address changes' settings for
@@ -330,12 +341,13 @@ impl NativeNetwork {
     }
 
     /// React to what an interface address change did to PublicInternet egress
+    /// Returns the families whose egress moved
     fn apply_egress_change(
         &self,
         last_network_state: &NetworkState,
         interface_address_state: &NetworkInterfaceAddressState,
         now_in_use: AddressTypeSet,
-    ) {
+    ) -> AddressTypeSet {
         let last_interface_address_state = &last_network_state.interface_address_state;
         let change = egress_change(
             last_interface_address_state,
@@ -345,7 +357,7 @@ impl NativeNetwork {
         );
         if change.is_none() {
             veilid_log!(self debug "PublicInternet egress unchanged");
-            return;
+            return AddressTypeSet::new();
         }
         veilid_log!(self debug "PublicInternet egress {}: {}",
             if change.is_full_move() {
@@ -399,6 +411,8 @@ impl NativeNetwork {
         }
         // The purge runs while offline, when an emptied table cannot ask, so ask directly
         self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
+
+        change.moved
     }
 
     // TODO: This, along with the binding code should be part of the protocol trait

@@ -294,8 +294,12 @@ impl RPCStats {
         self.recent_lost_questions = 0;
     }
 
-    pub fn lost_question(&mut self, lost_ts: Timestamp) {
-        self.first_steady_answer_ts = None;
+    /// A lost question; `breaks_steady` false keeps the run of steady answers going, for a loss our
+    /// own link's loss explains
+    pub fn lost_question(&mut self, lost_ts: Timestamp, breaks_steady: bool) {
+        if breaks_steady {
+            self.first_steady_answer_ts = None;
+        }
         if self.first_steady_lost_question_ts.is_none() {
             self.first_steady_lost_question_ts = Some(lost_ts);
         }

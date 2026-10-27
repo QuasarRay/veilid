@@ -3,7 +3,7 @@ use super::*;
 // ValueChangedInfo but without the subkey data that requires an async operation to get
 #[derive(Debug)]
 pub(in super::super) struct EarlyValueChangedInfo {
-    pub target: Target,
+    pub dest: Destination,
     pub key: OpaqueRecordKey,
     pub subkeys: ValueSubkeyRangeSet,
     pub count: u32,
@@ -35,10 +35,10 @@ where
         subkey: ValueSubkey,
         watch_update_mode: &InboundWatchUpdateMode,
     ) {
-        let (do_update, opt_ignore_target) = match watch_update_mode {
+        let (do_update, opt_ignore_dest) = match watch_update_mode {
             InboundWatchUpdateMode::NoUpdate => (false, None),
             InboundWatchUpdateMode::UpdateAll => (true, None),
-            InboundWatchUpdateMode::ExcludeTarget(target) => (true, Some(target)),
+            InboundWatchUpdateMode::ExcludeDestination(dest) => (true, Some(dest)),
         };
         if !do_update {
             return;
@@ -57,7 +57,8 @@ where
             // If this watcher is watching the changed subkey then add to the watcher's changed list
             // Don't bother marking changes for value sets coming from the same watching node/target because they
             // are already going to be aware of the changes in that case
-            if Some(&w.params().target) != opt_ignore_target && w.params().subkeys.contains(subkey)
+            if !opt_ignore_dest.is_some_and(|d| w.params().dest.same_target(d))
+                && w.params().subkeys.contains(subkey)
             {
                 w.add_changed_subkey(subkey);
                 changed_watched = true;
@@ -106,7 +107,7 @@ where
                 // If the watcher is not a member of the schema, then it is an anonymous watch and the total is per-target-per-record key
                 if count_watch {
                     watch_count += 1;
-                    if w.params().target == params.target {
+                    if w.params().dest.same_target(&params.dest) {
                         target_watch_count += 1;
                     }
                 }
@@ -249,7 +250,7 @@ where
                     // if count goes to zero mark this watcher dead
                     let params = w.params();
                     let id = w.id();
-                    let target = params.target.clone();
+                    let dest = params.dest.clone();
 
                     let count = params.count.saturating_sub(1);
                     w.update_count(count);
@@ -259,7 +260,7 @@ where
                     }
 
                     evcis.push(EarlyValueChangedInfo {
-                        target,
+                        dest,
                         key: rtk.record_key.clone(),
                         subkeys,
                         count,

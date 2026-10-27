@@ -13,6 +13,8 @@ pub(in crate::rpc_processor) struct RPCMessageHeaderDetailDirect {
     pub flow: Flow,
     /// The routing domain of the peer that we received from
     pub routing_domain: RoutingDomain,
+    /// Length of the UDP datagram the envelope arrived whole in, None over streams or fragments
+    pub opt_datagram_len: Option<u16>,
 }
 
 /// Header details for rpc messages received over only a safety route but not a private route
@@ -37,7 +39,7 @@ pub(in crate::rpc_processor) struct RPCMessageHeaderDetailPrivateRouted {
     pub remote_safety_route: PublicKey,
     /// The private route we received the rpc over
     pub private_route: PublicKey,
-    // The safety spec for replying to this private routed rpc
+    /// The safety spec for replying to this private routed rpc
     pub safety_spec: SafetySpec,
     /// The route operation id this message came from
     pub route_op_id: OperationId,

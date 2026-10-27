@@ -87,7 +87,12 @@ impl NetworkManager {
         // Our own transport is suppressed, so this says nothing about the bootstrap node
         let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_recv_data_unbound_to_dial_info(dial_info.clone(), data.clone(), timeout_ms)
+            .send_recv_data_unbound_to_dial_info(
+                dial_info.clone(),
+                data.clone(),
+                SAFE_TRANSPORT_MTU,
+                timeout_ms,
+            )
             .await?
         else {
             return Ok(Vec::new());
@@ -128,7 +133,12 @@ impl NetworkManager {
         // Our own transport is suppressed, so this says nothing about the bootstrap node
         let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_recv_data_unbound_to_dial_info(dial_info.clone(), data.clone(), timeout_ms)
+            .send_recv_data_unbound_to_dial_info(
+                dial_info.clone(),
+                data.clone(),
+                SAFE_TRANSPORT_MTU,
+                timeout_ms,
+            )
             .await?
         else {
             return Ok(BootstrapPeers::default());

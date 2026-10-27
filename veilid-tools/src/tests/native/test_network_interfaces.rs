@@ -378,6 +378,14 @@ cfg_if! {
             let tdiff = ((t2 - t1) as f64)/1000000.0f64;
             info!("running network interface test with {} iterations took {} seconds", count, tdiff);
             //info!("interfaces: {:#?}", interfaces)
+
+            #[cfg(not(target_os = "openbsd"))]
+            assert!(
+                interfaces.with_interfaces(|interfaces| interfaces
+                    .values()
+                    .any(|intf| !intf.is_loopback() && intf.mtu().is_some())),
+                "some interface should report its mtu"
+            );
         }
     }
 }

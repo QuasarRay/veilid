@@ -35,7 +35,11 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
         })
     }
 
-    fn send(&self, message: Bytes) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
+    fn send(
+        &self,
+        message: Bytes,
+        _mtu: u16,
+    ) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
         Box::pin(async move {
             match self {
                 //            Self::Dummy(d) => d.send(message),

@@ -239,7 +239,7 @@ pub fn test_recovery_clears_evidence_window() {
     // A round trip after the evidence plus the clean period: recovered, window gone
     pd.last_success_ts = Some(ts(12));
     let transition = OnlineDetector::commit_effective(&timings(), &mut pd, None, ts(16));
-    assert_eq!(transition.map(|t| t.1), Some(OnlineState::Online));
+    assert_eq!(transition.map(|t| t.new_state), Some(OnlineState::Online));
     assert!(pd.windowed_failures.values().all(BTreeMap::is_empty));
     assert_eq!(pd.last_degraded_evidence_ts, None);
 
@@ -264,7 +264,10 @@ pub fn test_exit_reports_a_stall_only_period() {
     assert!(OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(10)).is_some());
     pd.last_success_ts = Some(ts(12));
     let exit = OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(16));
-    assert_eq!(exit.map(|t| (t.1, t.3)), Some((OnlineState::Online, true)));
+    assert_eq!(
+        exit.map(|t| (t.new_state, t.local_stall_only)),
+        Some((OnlineState::Online, true))
+    );
 
     let mut pd = OnlineDetectionPerDomain::default();
     for ft in framing {
@@ -275,7 +278,10 @@ pub fn test_exit_reports_a_stall_only_period() {
     assert!(OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(10)).is_some());
     pd.last_success_ts = Some(ts(12));
     let exit = OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(16));
-    assert_eq!(exit.map(|t| (t.1, t.3)), Some((OnlineState::Online, false)));
+    assert_eq!(
+        exit.map(|t| (t.new_state, t.local_stall_only)),
+        Some((OnlineState::Online, false))
+    );
 }
 
 pub fn test_failures_across_a_stall_are_void() {
@@ -285,7 +291,12 @@ pub fn test_failures_across_a_stall_are_void() {
     let threshold = OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION as u8;
     let stall = Some(ts(200));
     assert_eq!(
-        OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(200)),
+        OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(200)).map(|t| (
+            t.old_state,
+            t.new_state,
+            t.clean,
+            t.local_stall_only
+        )),
         Some((
             OnlineState::Online,
             OnlineState::Degraded,
@@ -364,7 +375,7 @@ pub fn test_stall_is_credited_as_untestable() {
     );
     assert_eq!(
         pd.recent_degraded_intervals.back(),
-        Some(&(ts(50), ts(100)))
+        Some(&(ts(50), ts(100), 0.0))
     );
     assert_eq!(pd.degraded_started_ts, Some(ts(200)));
 
@@ -372,7 +383,8 @@ pub fn test_stall_is_credited_as_untestable() {
     // recorded window is cut back to the freeze, and the stall is credited up to the
     // failure storm that followed
     let mut pd = OnlineDetectionPerDomain::default();
-    pd.recent_degraded_intervals.push_back((ts(90), ts(199)));
+    pd.recent_degraded_intervals
+        .push_back((ts(90), ts(199), 0.0));
     pd.degraded_started_ts = Some(ts(199));
     assert_eq!(
         OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100)),
@@ -380,7 +392,7 @@ pub fn test_stall_is_credited_as_untestable() {
     );
     assert_eq!(
         pd.recent_degraded_intervals.back(),
-        Some(&(ts(90), ts(100)))
+        Some(&(ts(90), ts(100), 0.0))
     );
 
     // Offline going into the stall already credits it: nothing more is recorded

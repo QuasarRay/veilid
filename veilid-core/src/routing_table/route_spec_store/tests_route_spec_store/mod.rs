@@ -1,5 +1,7 @@
 //! The route spec store content comes back from the table store as it was saved.
 
+pub mod test_remote_routes;
+
 use super::*;
 use crate::crypto::tests_crypto::*;
 use crate::tests::*;
@@ -96,7 +98,7 @@ pub async fn test_route_test_state_survives_restart() {
             content.add_detail(id, detail);
         }
         rss.update_allocated_route_stats(tested_ts, &key, |s| {
-            let _ = s.record_loopback_result(SequenceOrdering::Ordered, true, tested_ts);
+            let _ = s.record_loopback_result(SequenceOrdering::Ordered, true, 1.0, tested_ts);
             s.record_loopback_keepalive(tested_ts, SequenceOrdering::Ordered);
             Ok(())
         });

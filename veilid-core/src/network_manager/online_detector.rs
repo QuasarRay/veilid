@@ -45,6 +45,10 @@ pub(crate) struct OnlineDetectorTimings {
     pub degraded_max_hold: TimestampDuration,
     /// Local stalls at or above this consume enough of the RPC timeout to void peer evidence: half
     pub local_stall_min: TimestampDuration,
+    /// Every question sent this long ago has its outcome: one RPC timeout
+    pub outcome_lag: TimestampDuration,
+    /// Window the loss estimate's per-path median reads, a few questions each: six RPC timeouts
+    pub loss_attribution_window: TimestampDuration,
 }
 
 impl OnlineDetectorTimings {
@@ -57,6 +61,8 @@ impl OnlineDetectorTimings {
             degraded_reentry: rpc_timeout.saturating_mul(6),
             degraded_max_hold: rpc_timeout.saturating_mul(12),
             local_stall_min: rpc_timeout.saturating_mul(50).div(100),
+            outcome_lag: rpc_timeout,
+            loss_attribution_window: rpc_timeout.saturating_mul(6),
         }
     }
 }
@@ -105,6 +111,78 @@ pub(crate) fn degraded_exit_clean(
         .min(timings.degraded_exit_clean_max)
 }
 
+/// Delay before retry `attempt` (0 for the first) of network work that failed: doubling from
+/// `base` up to `ceiling`, stretched by `opt_survival`, the share of round trips our own link lets
+/// through, so a lossy link is asked as often per answer as a healthy one. None while offline.
+pub(crate) fn failure_backoff(
+    base: TimestampDuration,
+    ceiling: TimestampDuration,
+    attempt: u32,
+    opt_survival: Option<f64>,
+) -> Option<TimestampDuration> {
+    let survival = opt_survival?;
+    let doubled = base.saturating_mul(1u64 << attempt.min(16));
+    let stretched = if survival > 0.0 {
+        doubled.f64_mul(1.0 / survival)
+    } else {
+        ceiling
+    };
+    Some(stretched.min(ceiling))
+}
+
+/// The blame weight in force through a degraded period, integrated for its mean: zero during
+/// stalls and bursts, our link's survival under measured loss
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct DegradedBlame {
+    /// Weight times microseconds up to `since`
+    integral: f64,
+    /// Weight in force since `since`
+    weight: f64,
+    /// When `weight` took over
+    since: Timestamp,
+}
+
+impl DegradedBlame {
+    fn new(weight: f64, now: Timestamp) -> Self {
+        Self {
+            integral: 0.0,
+            weight,
+            since: now,
+        }
+    }
+
+    fn advance(&mut self, weight: f64, now: Timestamp) {
+        self.integral += self.weight * now.duration_since(self.since).as_u64() as f64;
+        self.weight = weight;
+        self.since = now;
+    }
+
+    /// Mean weight over the period that began at `start`, as of `now`
+    fn mean(&self, start: Timestamp, now: Timestamp) -> f64 {
+        let span = now.duration_since(start).as_u64() as f64;
+        if span <= 0.0 {
+            return self.weight;
+        }
+        let total = self.integral + self.weight * now.duration_since(self.since).as_u64() as f64;
+        (total / span).clamp(0.0, 1.0)
+    }
+}
+
+/// A change of the committed three-state answer
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct EffectiveTransition {
+    /// State before the change
+    pub old_state: OnlineState,
+    /// State after the change
+    pub new_state: OnlineState,
+    /// Clean window the next exit from Degraded needs
+    pub clean: TimestampDuration,
+    /// On leaving Degraded, whether local stalls alone held it there
+    pub local_stall_only: bool,
+    /// The loss estimate at the change
+    pub loss: LossEstimate,
+}
+
 /// The three-state answer, derived from the stored two-state machine plus
 /// degradation evidence. Pure so the timing rules are testable without a network.
 ///
@@ -138,8 +216,11 @@ pub(crate) fn effective_online_state(
 /// Events that drive the online/offline state machine.
 pub(crate) enum OnlineEvent {
     /// A round trip completed, `sent_ts` being when the question left, or something arrived
-    /// unasked (`None`).
-    Success { sent_ts: Option<Timestamp> },
+    /// unasked (`None`). `opt_direct` is a direct question's node and transport.
+    Success {
+        sent_ts: Option<Timestamp>,
+        opt_direct: Option<(NodeId, TransportType)>,
+    },
     /// Failures for previously-live nodes on one framing type. `fresh_node_ids` is the
     /// subset whose failure is news (see `record_failure`); only those arm the degraded
     /// window, while offline detection keeps the full live set.
@@ -194,8 +275,17 @@ pub(crate) struct OnlineDetectionPerDomain {
     pub(crate) recent_offline_intervals: VecDeque<(Timestamp, Timestamp)>,
     /// Start of the current degraded period, if effectively degraded
     pub(crate) degraded_started_ts: Option<Timestamp>,
-    /// The same for degraded periods, where we could test but must not believe the answer
-    pub(crate) recent_degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
+    /// The same for degraded periods, each with the mean blame weight it carried: only the
+    /// unblamed share of one is credited
+    pub(crate) recent_degraded_intervals: VecDeque<(Timestamp, Timestamp, f64)>,
+    /// Blame weight through the current degraded period
+    degraded_blame: Option<DegradedBlame>,
+    /// Our own share of lost round trips, from direct questions
+    pub(crate) loss_estimator: LossEstimator,
+    /// Whether loss on our link held the current degraded period at any point
+    degraded_by_loss: bool,
+    /// When the loss estimate was last logged
+    last_loss_log_ts: Option<Timestamp>,
     /// Cumulative online<->offline transition count
     #[cfg(feature = "stats")]
     total_transitions: u64,
@@ -227,6 +317,10 @@ impl Default for OnlineDetectionPerDomain {
             recent_offline_intervals: VecDeque::new(),
             degraded_started_ts: None,
             recent_degraded_intervals: VecDeque::new(),
+            degraded_blame: None,
+            loss_estimator: LossEstimator::default(),
+            degraded_by_loss: false,
+            last_loss_log_ts: None,
             #[cfg(feature = "stats")]
             total_transitions: 0,
             #[cfg(feature = "stats")]
@@ -277,20 +371,68 @@ pub struct OnlineDetector {
 /// share this snapshot instead, and the state machine republishes it on every path that can change
 /// the interval data.
 #[derive(Debug, Default)]
-struct OverlapData {
+pub(crate) struct OverlapData {
     offline_intervals: VecDeque<(Timestamp, Timestamp)>,
-    degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
+    degraded_intervals: VecDeque<(Timestamp, Timestamp, f64)>,
     offline_started_ts: Option<Timestamp>,
     degraded_started_ts: Option<Timestamp>,
+    degraded_blame: Option<DegradedBlame>,
 }
 
 impl OverlapData {
+    /// A snapshot of the domain's current interval data
+    pub(crate) fn of(pd: &OnlineDetectionPerDomain) -> Self {
+        Self {
+            offline_intervals: pd.recent_offline_intervals.clone(),
+            degraded_intervals: pd.recent_degraded_intervals.clone(),
+            offline_started_ts: pd.offline_started_ts,
+            degraded_started_ts: pd.degraded_started_ts,
+            degraded_blame: pd.degraded_blame,
+        }
+    }
+
     /// Whether this snapshot already holds the domain's current interval data
     fn matches(&self, pd: &OnlineDetectionPerDomain) -> bool {
         self.offline_started_ts == pd.offline_started_ts
             && self.degraded_started_ts == pd.degraded_started_ts
+            && self.degraded_blame == pd.degraded_blame
             && self.offline_intervals == pd.recent_offline_intervals
             && self.degraded_intervals == pd.recent_degraded_intervals
+    }
+
+    /// Offline time in `from..to`, plus the unblamed share of degraded time if `include_degraded`
+    pub(crate) fn overlap(
+        &self,
+        from: Timestamp,
+        to: Timestamp,
+        include_degraded: bool,
+    ) -> TimestampDuration {
+        let empty: VecDeque<(Timestamp, Timestamp, f64)> = VecDeque::new();
+        let (degraded_intervals, opt_degraded_started) = if include_degraded {
+            (&self.degraded_intervals, self.degraded_started_ts)
+        } else {
+            (&empty, None)
+        };
+        // The open period carries its mean weight so far, so its credit never shrinks
+        let open_weight = |s: Timestamp| self.degraded_blame.map_or(0.0, |b| b.mean(s, to));
+        let mut overlap = 0u64;
+        // Offline and degraded never overlap: entering one closes the other
+        for (s, e, weight) in self
+            .offline_intervals
+            .iter()
+            .map(|(s, e)| (*s, *e, 0.0))
+            .chain(degraded_intervals.iter().copied())
+            .chain(self.offline_started_ts.map(|s| (s, to, 0.0)))
+            .chain(opt_degraded_started.map(|s| (s, to, open_weight(s))))
+        {
+            let lo = s.max(from);
+            let hi = e.min(to);
+            if hi > lo {
+                let span = hi.duration_since(lo).as_u64() as f64;
+                overlap += (span * (1.0 - weight.clamp(0.0, 1.0))) as u64;
+            }
+        }
+        TimestampDuration::new(overlap)
     }
 }
 
@@ -338,12 +480,7 @@ impl OnlineDetector {
         {
             return;
         }
-        let snap = Arc::new(OverlapData {
-            offline_intervals: pd.recent_offline_intervals.clone(),
-            degraded_intervals: pd.recent_degraded_intervals.clone(),
-            offline_started_ts: pd.offline_started_ts,
-            degraded_started_ts: pd.degraded_started_ts,
-        });
+        let snap = Arc::new(OverlapData::of(pd));
         self.overlap_data.write().insert(routing_domain, snap);
     }
 
@@ -356,9 +493,88 @@ impl OnlineDetector {
         *self.enabled_framing_types.lock() = framing_types;
     }
 
-    /// Record a successful round-trip, or unasked inbound traffic (`sent_ts` None).
-    pub fn record_success(&self, routing_domain: RoutingDomain, sent_ts: Option<Timestamp>) {
-        self.process_event(routing_domain, OnlineEvent::Success { sent_ts });
+    /// Record a successful round-trip, or unasked inbound traffic (`sent_ts` None). A direct
+    /// question's answer passes its node and transport for the loss estimate.
+    pub fn record_success(
+        &self,
+        routing_domain: RoutingDomain,
+        sent_ts: Option<Timestamp>,
+        opt_direct: Option<(NodeId, TransportType)>,
+    ) {
+        self.process_event(
+            routing_domain,
+            OnlineEvent::Success {
+                sent_ts,
+                opt_direct,
+            },
+        );
+    }
+
+    /// Record a direct question lost, for the loss estimate. Routed questions stay out: any hop
+    /// could have lost them.
+    pub fn record_round_trip_lost(
+        &self,
+        routing_domain: RoutingDomain,
+        node_id: NodeId,
+        transport: TransportType,
+        sent_ts: Timestamp,
+    ) {
+        if !Self::uses_ping_detection(routing_domain) {
+            return;
+        }
+        let local_stall_ts = *self.last_local_stall.lock();
+        let now = Timestamp::now();
+        let opt_logged = {
+            let mut inner = self.inner.lock();
+            let pd = inner.entry(routing_domain).or_default();
+            Self::note_round_trip(
+                &self.timings,
+                pd,
+                &node_id,
+                transport,
+                sent_ts,
+                false,
+                local_stall_ts,
+                now,
+            )
+        };
+        if let Some(estimate) = opt_logged.filter(LossEstimate::shows_loss) {
+            veilid_log!(self debug "{:?} {}", routing_domain, estimate);
+        }
+    }
+
+    /// Feed a direct question's outcome to the loss estimate; returns the estimate when it is due
+    /// to be logged
+    #[expect(clippy::too_many_arguments)]
+    fn note_round_trip(
+        timings: &OnlineDetectorTimings,
+        pd: &mut OnlineDetectionPerDomain,
+        node_id: &NodeId,
+        transport: TransportType,
+        sent_ts: Timestamp,
+        answered: bool,
+        local_stall_ts: Option<Timestamp>,
+        now: Timestamp,
+    ) -> Option<LossEstimate> {
+        // Questions from before this online period or a stall say nothing about the link now
+        let counted =
+            sent_ts >= pd.last_transition_ts && local_stall_ts.is_none_or(|ts| sent_ts >= ts);
+        pd.loss_estimator.record_outcome(
+            node_id,
+            transport.sequence_ordering(),
+            sent_ts,
+            answered,
+            counted,
+            now,
+        );
+        let due = pd
+            .last_loss_log_ts
+            .is_none_or(|ts| now.duration_since(ts) >= timings.degraded_evidence_window);
+        due.then(|| {
+            pd.last_loss_log_ts = Some(now);
+            let learn = pd.effective_state == OnlineState::Online;
+            pd.loss_estimator.evaluate(timings, learn, now)
+        })
     }
 
     /// Record an RPC failure against the directly attempted node. Routed failures are
@@ -404,9 +620,10 @@ impl OnlineDetector {
         let cur_ts = Timestamp::now();
         let routing_table = self.routing_table();
         let so = transport.sequence_ordering();
+        let node_ids: Vec<NodeId> = node_ids.into_iter().collect();
         let mut live_node_ids = Vec::new();
         let mut fresh_node_ids = Vec::new();
-        for node_id in node_ids {
+        for node_id in node_ids.iter().cloned() {
             let Some(nr) = routing_table.lookup_node_id(node_id.clone()).ok().flatten() else {
                 continue;
             };
@@ -434,6 +651,20 @@ impl OnlineDetector {
             }
             if fresh {
                 fresh_node_ids.push(node_id);
+            }
+        }
+        // Peers that answered recently stay live to the offline count after our loss demotes them
+        {
+            let inner = self.inner.lock();
+            if let Some(pd) = inner.get(&routing_domain) {
+                let since = sent_ts.earlier(crate::routing_table::RELIABLE_PING_INTERVAL_MAX);
+                for node_id in node_ids {
+                    if !live_node_ids.contains(&node_id)
+                        && pd.loss_estimator.answered_since(&node_id, since)
+                    {
+                        live_node_ids.push(node_id);
+                    }
+                }
             }
         }
         if live_node_ids.is_empty() {
@@ -540,13 +771,16 @@ impl OnlineDetector {
     ) -> Option<(Timestamp, Timestamp)> {
         let stall_start = now.earlier(duration);
         if let Some(s) = pd.degraded_started_ts.filter(|s| *s < stall_start) {
-            pd.recent_degraded_intervals.push_back((s, stall_start));
+            let weight = pd.degraded_blame.map_or(0.0, |b| b.mean(s, stall_start));
+            pd.recent_degraded_intervals
+                .push_back((s, stall_start, weight));
             veilid_stats!(
                 pd.total_time_degraded = pd
                     .total_time_degraded
                     .saturating_add(stall_start.duration_since(s))
             );
             pd.degraded_started_ts = Some(now);
+            pd.degraded_blame = pd.degraded_blame.map(|b| DegradedBlame::new(b.weight, now));
         }
         for iv in pd.recent_degraded_intervals.iter_mut() {
             if iv.0 < stall_start && iv.1 > stall_start {
@@ -554,12 +788,16 @@ impl OnlineDetector {
             }
         }
         pd.recent_degraded_intervals
-            .retain(|(s, _)| *s < stall_start);
+            .retain(|(s, _, _)| *s < stall_start);
         let mut covered: Vec<(Timestamp, Timestamp)> = pd
             .recent_offline_intervals
             .iter()
-            .chain(pd.recent_degraded_intervals.iter())
             .copied()
+            .chain(
+                pd.recent_degraded_intervals
+                    .iter()
+                    .map(|(s, e, _)| (*s, *e)),
+            )
             .chain(
                 [pd.offline_started_ts, pd.degraded_started_ts]
                     .into_iter()
@@ -597,6 +835,43 @@ impl OnlineDetector {
             .saturating_sub(CREDIT_INTERVALS_KEPT);
         pd.recent_offline_intervals.drain(..excess);
         Some((start, end))
+    }
+
+    /// Each detecting domain's committed state and loss estimate, one line each
+    pub fn debug_info(&self) -> String {
+        RoutingDomain::all()
+            .into_iter()
+            .filter_map(|rd| {
+                self.read_committed(rd, |pd| (pd.effective_state, pd.loss_estimator.estimate()))
+                    .map(|(state, loss)| format!("{:?}: {:?}, {}\n", rd, state, loss))
+            })
+            .collect()
+    }
+
+    /// Share of round trips our own link lets through, for `failure_backoff`: 1 while online, the
+    /// loss estimate while degraded, None while offline
+    pub fn survival(&self, routing_domain: RoutingDomain) -> Option<f64> {
+        self.read_committed(routing_domain, |pd| match pd.effective_state {
+            OnlineState::Online => Some(1.0),
+            OnlineState::Degraded => Some(pd.loss_estimator.estimate().survival),
+            OnlineState::Offline => None,
+        })
+        .unwrap_or(Some(1.0))
+    }
+
+    /// The weight a failure observed now carries against a route: full while online, our link's
+    /// measured survival while its loss holds the domain degraded. None while offline or degraded
+    /// only by stalls and failure bursts, when the failure is about us.
+    pub fn blame_weight(&self, routing_domain: RoutingDomain) -> Option<f64> {
+        self.read_committed(routing_domain, |pd| {
+            let loss = pd.loss_estimator.estimate();
+            match pd.effective_state {
+                OnlineState::Online => Some(1.0),
+                OnlineState::Degraded if loss.degraded => Some(loss.survival),
+                OnlineState::Degraded | OnlineState::Offline => None,
+            }
+        })
+        .unwrap_or(Some(1.0))
     }
 
     /// Whether blame writers should hold fire for this routing domain.
@@ -641,6 +916,20 @@ impl OnlineDetector {
         Some(out)
     }
 
+    /// When the latest Offline or Degraded period ended; None while one is under way, or if none
+    /// is remembered
+    pub fn loss_ended_ts(&self, routing_domain: RoutingDomain) -> Option<Timestamp> {
+        self.read_committed(routing_domain, |pd| {
+            if pd.offline_started_ts.is_some() || pd.degraded_started_ts.is_some() {
+                return None;
+            }
+            let offline_end = pd.recent_offline_intervals.back().map(|(_, end)| *end);
+            let degraded_end = pd.recent_degraded_intervals.back().map(|(_, end, _)| *end);
+            offline_end.max(degraded_end)
+        })
+        .flatten()
+    }
+
     /// When this domain last came back online, if within the reliable ping span.
     /// None if currently offline or no recent reattach.
     pub fn online_since(&self, routing_domain: RoutingDomain) -> Option<Timestamp> {
@@ -671,7 +960,8 @@ impl OnlineDetector {
         self.interval_overlap(routing_domain, from, to, false)
     }
 
-    /// The same, plus degraded time, where the blame gates discarded what came back.
+    /// The same, plus the unblamed share of degraded time: all of it during stalls and bursts,
+    /// one minus our link's survival under measured loss.
     ///
     /// Only for spans that condemn. Degraded time still carries positive evidence
     /// (successes are recorded throughout), so it must not be deducted from how long a
@@ -699,29 +989,7 @@ impl OnlineDetector {
         let Some(od) = self.overlap_data.read().get(&routing_domain).cloned() else {
             return TimestampDuration::new(0);
         };
-        let empty: VecDeque<(Timestamp, Timestamp)> = VecDeque::new();
-        let (degraded_intervals, opt_degraded_started) = if include_degraded {
-            (&od.degraded_intervals, od.degraded_started_ts)
-        } else {
-            (&empty, None)
-        };
-        let mut overlap = 0u64;
-        // Offline and degraded never overlap: entering one closes the other
-        for (s, e) in od
-            .offline_intervals
-            .iter()
-            .chain(degraded_intervals.iter())
-            .copied()
-            .chain(od.offline_started_ts.map(|s| (s, to)))
-            .chain(opt_degraded_started.map(|s| (s, to)))
-        {
-            let lo = s.max(from);
-            let hi = e.min(to);
-            if hi > lo {
-                overlap += hi.duration_since(lo).as_u64();
-            }
-        }
-        TimestampDuration::new(overlap)
+        od.overlap(from, to, include_degraded)
     }
 
     /// Stats snapshot: (online, degraded, transitions, time offline, time degraded).
@@ -760,18 +1028,19 @@ impl OnlineDetector {
         }
     }
 
-    /// Recompute and commit the effective three-state answer; returns a
-    /// transition for the caller to log outside the lock: the states, the next exit's clean
-    /// window, and on leaving Degraded whether local stalls alone held it there.
+    /// Recompute and commit the effective three-state answer; returns a transition for the
+    /// caller to log outside the lock.
     pub(crate) fn commit_effective(
         timings: &OnlineDetectorTimings,
         pd: &mut OnlineDetectionPerDomain,
         local_stall_ts: Option<Timestamp>,
         now: Timestamp,
-    ) -> Option<(OnlineState, OnlineState, TimestampDuration, bool)> {
+    ) -> Option<EffectiveTransition> {
         let evidence = pd.last_degraded_evidence_ts.max(local_stall_ts);
         let clean = degraded_exit_clean(timings, pd.degraded_reentries);
-        let new_state = effective_online_state(
+        let learn = pd.effective_state == OnlineState::Online;
+        let loss = pd.loss_estimator.evaluate(timings, learn, now);
+        let mut new_state = effective_online_state(
             timings,
             pd.online_state,
             evidence,
@@ -779,16 +1048,31 @@ impl OnlineDetector {
             clean,
             now,
         );
+        // Loss on our own link holds Degraded on its own evidence
+        if new_state == OnlineState::Online && loss.degraded {
+            new_state = OnlineState::Degraded;
+        }
         let old_state = pd.effective_state;
+        let blame_weight = if loss.degraded { loss.survival } else { 0.0 };
+        // Advance only on a new weight: each advance republishes the overlap snapshot
+        if let Some(blame) = pd
+            .degraded_blame
+            .as_mut()
+            .filter(|b| b.weight != blame_weight)
+        {
+            blame.advance(blame_weight, now);
+        }
         if new_state == old_state {
+            pd.degraded_by_loss |= new_state == OnlineState::Degraded && loss.degraded;
             return None;
         }
         let mut local_stall_only = false;
         // Decided on entry, held for the whole degraded period
         match (old_state, new_state) {
             (OnlineState::Degraded, _) => {
-                // Broad failures are the only other evidence, and the last exit cleared them
-                local_stall_only = pd.last_degraded_evidence_ts.is_none();
+                // Broad failures and loss are the other evidence, and the last exit cleared them
+                local_stall_only = pd.last_degraded_evidence_ts.is_none() && !pd.degraded_by_loss;
+                pd.degraded_by_loss = false;
                 pd.degraded_recovered_ts = Some(now);
                 // The window outlives the clean period; without this one more failure
                 // re-crosses the threshold on the old entries
@@ -796,6 +1080,7 @@ impl OnlineDetector {
                 pd.last_degraded_evidence_ts = None;
             }
             (_, OnlineState::Degraded) => {
+                pd.degraded_by_loss = loss.degraded;
                 let rapid = pd
                     .degraded_recovered_ts
                     .is_some_and(|ts| now.duration_since(ts) <= timings.degraded_reentry);
@@ -811,40 +1096,55 @@ impl OnlineDetector {
         pd.effective_transitions += 1;
         if new_state == OnlineState::Degraded {
             pd.degraded_started_ts = Some(now);
+            pd.degraded_blame = Some(DegradedBlame::new(blame_weight, now));
         } else if let Some(start) = pd.degraded_started_ts.take() {
             veilid_stats!(
                 pd.total_time_degraded = pd
                     .total_time_degraded
                     .saturating_add(now.duration_since(start))
             );
-            pd.recent_degraded_intervals.push_back((start, now));
+            let weight = pd.degraded_blame.take().map_or(0.0, |b| b.mean(start, now));
+            pd.recent_degraded_intervals.push_back((start, now, weight));
             let excess = pd
                 .recent_degraded_intervals
                 .len()
                 .saturating_sub(CREDIT_INTERVALS_KEPT);
             pd.recent_degraded_intervals.drain(..excess);
         }
-        Some((
+        Some(EffectiveTransition {
             old_state,
             new_state,
-            degraded_exit_clean(timings, pd.degraded_reentries),
+            clean: degraded_exit_clean(timings, pd.degraded_reentries),
             local_stall_only,
-        ))
+            loss,
+        })
     }
 
     /// Degraded transitions log here; online and offline log from the stored machine.
     fn log_effective_transition(
         &self,
         routing_domain: RoutingDomain,
-        opt_transition: Option<(OnlineState, OnlineState, TimestampDuration, bool)>,
+        opt_transition: Option<EffectiveTransition>,
         why: &str,
     ) {
-        let Some((old_state, new_state, clean, local_stall_only)) = opt_transition else {
+        let Some(EffectiveTransition {
+            old_state,
+            new_state,
+            clean,
+            local_stall_only,
+            loss,
+        }) = opt_transition
+        else {
             return;
         };
         match (old_state, new_state) {
             (_, OnlineState::Degraded) => {
-                veilid_log!(self info "{:?} degraded detected ({}): blame suppressed, exit needs {} clean{}", routing_domain, why, clean, executor_snapshot_suffix());
+                let why = if loss.degraded {
+                    "lost round trips"
+                } else {
+                    why
+                };
+                veilid_log!(self info "{:?} degraded detected ({}): blame suppressed, exit needs {} clean, {}{}", routing_domain, why, clean, loss, executor_snapshot_suffix());
             }
             (OnlineState::Degraded, OnlineState::Online) => {
                 let cause = if local_stall_only {
@@ -852,7 +1152,7 @@ impl OnlineDetector {
                 } else {
                     ""
                 };
-                veilid_log!(self info "{:?} recovered from degraded{}", routing_domain, cause);
+                veilid_log!(self info "{:?} recovered from degraded{}, {}", routing_domain, cause, loss);
             }
             _ => {}
         }
@@ -860,14 +1160,6 @@ impl OnlineDetector {
             self.network_manager()
                 .transport_stats()
                 .release_canaries(routing_domain.into(), "back online");
-        }
-        if let Err(e) = self.event_bus().post(OnlineStateChangeEvent {
-            routing_domain,
-            old_state,
-            new_state,
-            local_stall_only,
-        }) {
-            veilid_log!(self warn "failed to post OnlineStateChangeEvent: {}", e);
         }
     }
 
@@ -888,12 +1180,16 @@ impl OnlineDetector {
             purge_reason,
             do_wipe,
             opt_eff_transition,
+            opt_loss_log,
         ) = {
             let mut inner = self.inner.lock();
             let pd = inner.entry(routing_domain).or_default();
             // Exiting Degraded needs a round trip after the evidence, so stamp in every state
             if matches!(event, OnlineEvent::Success { .. }) {
                 pd.last_success_ts = Some(now);
+            }
+            if matches!(event, OnlineEvent::NetworkChange | OnlineEvent::Detached) {
+                pd.loss_estimator.reset();
             }
             let opt_new_state = match pd.online_state {
                 OnlineState::Offline => Self::process_offline_event(&event, pd.offline_started_ts),
@@ -923,6 +1219,7 @@ impl OnlineDetector {
                         pd.pending_failures.clear();
                     }
                     OnlineState::Online => {
+                        pd.loss_estimator.clear_window();
                         if let Some(start) = pd.offline_started_ts.take() {
                             // Only a sustained outage invalidates transport evidence
                             do_wipe = now.duration_since(start) >= self.timings.offline_sustained;
@@ -976,6 +1273,23 @@ impl OnlineDetector {
                     };
                 }
             }
+            // After the state step, so an answer that ends an outage is not counted in its window
+            let opt_loss_log = match &event {
+                OnlineEvent::Success {
+                    sent_ts: Some(sent_ts),
+                    opt_direct: Some((node_id, transport)),
+                } => Self::note_round_trip(
+                    &self.timings,
+                    pd,
+                    node_id,
+                    *transport,
+                    *sent_ts,
+                    true,
+                    local_stall_ts,
+                    now,
+                ),
+                _ => None,
+            };
             let opt_eff_transition = Self::commit_effective(&self.timings, pd, local_stall_ts, now);
             self.publish_overlap_data(routing_domain, pd);
             (
@@ -986,8 +1300,13 @@ impl OnlineDetector {
                 purge_reason,
                 do_wipe,
                 opt_eff_transition,
+                opt_loss_log,
             )
         };
+        // `debug network stats` shows the estimate on demand
+        if let Some(estimate) = opt_loss_log.filter(LossEstimate::shows_loss) {
+            veilid_log!(self debug "{:?} {}", routing_domain, estimate);
+        }
 
         // Log the transition (and any flapping) outside the lock.
         if let Some(new_state) = opt_new_state {
@@ -1024,7 +1343,7 @@ impl OnlineDetector {
             // Only an answer to a question sent after going offline proves the network we are
             // on now; an answer to an older question, or anything arriving unasked, can be the
             // old network's echo and would flip us online onto a dead one
-            OnlineEvent::Success { sent_ts } => match (*sent_ts, offline_started_ts) {
+            OnlineEvent::Success { sent_ts, .. } => match (*sent_ts, offline_started_ts) {
                 (Some(sent), Some(started)) if sent > started => Some(OnlineState::Online),
                 (Some(_), None) => Some(OnlineState::Online),
                 _ => None,

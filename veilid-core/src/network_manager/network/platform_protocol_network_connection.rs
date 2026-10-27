@@ -10,8 +10,12 @@ pub trait PlatformProtocolNetworkConnection: fmt::Debug + Send + Sync {
     fn direction(&self) -> Direction;
     /// Close the connection
     fn close(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>>;
-    /// Send one message frame
-    fn send(&self, message: Bytes) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>>;
+    /// Send one message frame in TCP segments of at most `mtu` bytes
+    fn send(
+        &self,
+        message: Bytes,
+        mtu: u16,
+    ) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>>;
     /// Receive one message frame
     fn recv(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<Bytes>>>;
 }

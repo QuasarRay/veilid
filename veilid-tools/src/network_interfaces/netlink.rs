@@ -6,7 +6,7 @@ use futures_util::stream::TryStreamExt;
 use libc::{
     close, if_indextoname, ifreq, ioctl, socket, AF_INET, IFA_F_DADFAILED, IFA_F_DEPRECATED,
     IFA_F_OPTIMISTIC, IFA_F_PERMANENT, IFA_F_TEMPORARY, IFA_F_TENTATIVE, IFF_LOOPBACK,
-    IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ, IF_NAMESIZE, SIOCGIFFLAGS, SOCK_DGRAM,
+    IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ, IF_NAMESIZE, SIOCGIFFLAGS, SIOCGIFMTU, SOCK_DGRAM,
 };
 use netlink_packet_route::address::{AddressAttribute, AddressMessage, CacheInfo};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
@@ -50,6 +50,18 @@ fn ioctl_siocgifflags(sock: c_int, req: &mut ifreq) -> c_int {
 fn ioctl_siocgifflags(sock: c_int, req: &mut ifreq) -> c_int {
     // SAFETY: sock is open and req is a complete ifreq the call fills in place
     unsafe { ioctl(sock, SIOCGIFFLAGS, req) }
+}
+
+#[cfg(any(target_os = "android", target_env = "musl"))]
+fn ioctl_siocgifmtu(sock: c_int, req: &mut ifreq) -> c_int {
+    // SAFETY: sock is open and req is a complete ifreq the call fills in place
+    unsafe { ioctl(sock, SIOCGIFMTU as i32, req) }
+}
+
+#[cfg(not(any(target_os = "android", target_env = "musl")))]
+fn ioctl_siocgifmtu(sock: c_int, req: &mut ifreq) -> c_int {
+    // SAFETY: sock is open and req is a complete ifreq the call fills in place
+    unsafe { ioctl(sock, SIOCGIFMTU, req) }
 }
 
 #[cfg(all(
@@ -233,6 +245,27 @@ impl PlatformSupportNetlink {
         })
     }
 
+    fn get_interface_mtu(&self, ifname: &str) -> Option<u32> {
+        let mut req = ifreq_from_name(ifname).ok()?;
+
+        // SAFETY: socket() has no pointer arguments
+        let sock = unsafe { socket(AF_INET, SOCK_DGRAM, 0) };
+        if sock < 0 {
+            return None;
+        }
+
+        let res = ioctl_siocgifmtu(sock, &mut req);
+        // SAFETY: sock was opened above and is closed exactly once here
+        unsafe { close(sock) };
+        if res < 0 {
+            return None;
+        }
+
+        // SAFETY: read after a successful SIOCGIFMTU, which fills this union member
+        let mtu = unsafe { req.ifr_ifru.ifru_mtu };
+        u32::try_from(mtu).ok()
+    }
+
     fn process_address_message_v4(msg: AddressMessage) -> Option<InterfaceAddress> {
         // Get ip address
         let ip = msg.attributes.iter().find_map(|attr| {
@@ -388,6 +421,7 @@ impl PlatformSupportNetlink {
                 // If we have no NetworkInterface yet, make one
                 let flags = self.get_interface_flags(&ifname)?;
                 let mut net_intf = NetworkInterface::new(ifname.clone(), flags);
+                net_intf.mtu = self.get_interface_mtu(&ifname);
                 // Add gateways if we have them
                 if let Some(gateways) = self.gateways.get(&msg.header.index) {
                     for gateway in gateways {

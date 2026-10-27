@@ -514,6 +514,9 @@ pub struct NetworkInterface {
     pub gateways: Vec<IpAddr>,
     /// Addresses bound to this interface, sorted by preference and deduplicated.
     pub addrs: Vec<InterfaceAddress>,
+    /// Largest IP packet the interface carries, when the OS reports it.
+    #[serde(default)]
+    pub mtu: Option<u32>,
 }
 
 impl fmt::Debug for NetworkInterface {
@@ -523,7 +526,8 @@ impl fmt::Debug for NetworkInterface {
         ds.field("name", &self.name)
             .field("flags", &self.flags)
             .field("gateways", &self.gateways)
-            .field("addrs", &self.addrs);
+            .field("addrs", &self.addrs)
+            .field("mtu", &self.mtu);
         if alt {
             ds.field("// primary_ipv4", &self.primary_ipv4());
             ds.field("// primary_ipv6", &self.primary_ipv6());
@@ -540,6 +544,7 @@ impl NetworkInterface {
             flags,
             gateways: Vec::new(),
             addrs: Vec::new(),
+            mtu: None,
         }
     }
 
@@ -597,6 +602,12 @@ impl NetworkInterface {
     #[must_use]
     pub fn gateways(&self) -> &[IpAddr] {
         &self.gateways
+    }
+
+    /// Largest IP packet the interface carries, when the OS reports it.
+    #[must_use]
+    pub fn mtu(&self) -> Option<u32> {
+        self.mtu
     }
 
     /// Most-preferred IPv4 address on this interface (per `InterfaceAddress::cmp`).

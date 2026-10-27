@@ -112,7 +112,9 @@ impl NetworkManager {
                             // to making new flows and connections for the purposes of relaying
                             let seq_relay_nr = relay_nr.sequencing_filtered(sequencing);
                             veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "outbound relaying {} bytes to {}", data.len(), seq_relay_nr);
-                            if let Err(e) = pin_future!(self.send_data(seq_relay_nr, data)).await {
+                            if let Err(e) =
+                                pin_future!(self.send_data(seq_relay_nr, data, None)).await
+                            {
                                 // Throttled: one log per relayed envelope, and a peer sets the rate
                                 veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to outbound relay envelope: {}", e);
                             }

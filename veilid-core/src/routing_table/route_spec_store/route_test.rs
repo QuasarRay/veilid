@@ -288,7 +288,7 @@ impl RouteSpecStore {
             let registry = registry.clone();
             let dest = loopback_dest;
             probes.push(Box::pin(async move {
-                let res = Box::pin(registry.rpc_processor().rpc_call_status(dest)).await;
+                let res = Box::pin(registry.rpc_processor().rpc_call_status(dest, None)).await;
                 (true, res)
             }));
         }
@@ -296,7 +296,7 @@ impl RouteSpecStore {
         for dest in direct_dests {
             let registry = registry.clone();
             probes.push(Box::pin(async move {
-                let res = Box::pin(registry.rpc_processor().rpc_call_status(dest)).await;
+                let res = Box::pin(registry.rpc_processor().rpc_call_status(dest, None)).await;
                 (false, res)
             }));
         }
@@ -343,12 +343,14 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     async fn test_remote_route(&self, id: RemoteRouteSetId) -> VeilidAPIResult<Option<bool>> {
+        let route_key;
         // Make private route test
         let dest = {
             // Get the route to test
             let Some(private_route) = self.best_remote_private_route(&id) else {
                 apibail_internal!("no best key to test remote route");
             };
+            route_key = private_route.public_key.clone();
 
             // Always test routes with safety routes that are more likely to succeed
             let stability = Stability::Reliable;
@@ -372,8 +374,14 @@ impl RouteSpecStore {
         };
 
         // Test with double-round trip ping to self
-        match Box::pin(self.rpc_processor().rpc_call_status(dest)).await? {
-            StatusResult::Sent(_) => Ok(Some(true)),
+        match Box::pin(self.rpc_processor().rpc_call_status(dest, None)).await? {
+            StatusResult::Sent(status_answer) => {
+                self.record_remote_test_pass(
+                    &route_key,
+                    status_answer.send_data_result.opt_transport_type(),
+                );
+                Ok(Some(true))
+            }
             StatusResult::Failed(_) | StatusResult::NotSent(_) => Ok(Some(false)),
         }
     }

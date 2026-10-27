@@ -101,6 +101,8 @@ const RPC_WORKERS_PER_CORE: u32 = 16;
 const ROUTE_HOP_ALLOWANCE_PERCENT: u64 = 10;
 /// Route hops the base RPC timeout already covers
 const ROUTE_HOPS_IN_BASE_TIMEOUT: usize = 4;
+/// Renders a probe gets to land its padding in the fill window
+const MTU_PROBE_RENDER_PASSES: usize = 3;
 
 /// The timeout added for each route hop past those the base RPC timeout covers
 fn route_hop_allowance(timeout: TimestampDuration) -> TimestampDuration {
@@ -692,7 +694,9 @@ impl RPCProcessor {
                             .map(|uf| format!("flow={:#}", uf.flow))
                             .unwrap_or_else(|| "flow=<none>".to_owned());
                         veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "RPC Lost (id={:#} {} {}): {}", id, debug_string, e, context_debug);
-                        this.record_lost_question(&waitable_reply.context).await;
+                        if !waitable_reply.context.mtu_probe {
+                            this.record_lost_question(&waitable_reply.context).await;
+                        }
 
                         #[cfg(feature = "instrument")]
                         tracing::Span::current().record("ret_outcome", "error");
@@ -713,7 +717,9 @@ impl RPCProcessor {
                             .map(|uf| format!("flow={:#}", uf.flow))
                             .unwrap_or_else(|| "flow=<none>".to_owned());
                         veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "RPC Lost (id={:#} {} Timeout): {}", id, debug_string, context_debug);
-                        this.record_lost_question(&waitable_reply.context).await;
+                        if !waitable_reply.context.mtu_probe {
+                            this.record_lost_question(&waitable_reply.context).await;
+                        }
 
                         #[cfg(feature = "instrument")]
                         tracing::Span::current().record("ret_outcome", "timeout");
@@ -732,11 +738,13 @@ impl RPCProcessor {
                         });
 
                         // Record answer received
-                        this.record_answer_received(
-                            recv_ts,
-                            rpcreader.header.body_len,
-                            &waitable_reply.context,
-                        );
+                        if !waitable_reply.context.mtu_probe {
+                            this.record_answer_received(
+                                recv_ts,
+                                rpcreader.header.body_len,
+                                &waitable_reply.context,
+                            );
+                        }
 
                         #[cfg(feature = "instrument")]
                         {
@@ -942,11 +950,66 @@ impl RPCProcessor {
     /// Produce a byte buffer that represents the wire encoding of the entire
     /// unencrypted envelope body for a RPC message. This incorporates
     /// wrapping a private and/or safety route if they are specified.
+    /// A status probe's padding is grown or cut until its envelope fills one datagram of the
+    /// probe size; a probe that cannot be filled goes out without its probe.
+    async fn render_signed_operation(
+        &self,
+        dest: Destination,
+        mut operation: RPCOperation,
+        signing_params: Option<RPCSigningParams>,
+    ) -> RPCNetworkResult<RenderedOperation> {
+        let Some(size) = operation.mtu_probe_size() else {
+            return self
+                .render_signed_operation_once(dest, operation, signing_params)
+                .await;
+        };
+        let target_envelope_len = usize::from(size).saturating_sub(FRAME_HEADER_LEN);
+        let filled_envelope_len =
+            target_envelope_len.saturating_sub(usize::from(MTU_PROBE_FILL_SLACK));
+        // Random padding does not compress, so each pass lands within a few bytes
+        for _ in 0..MTU_PROBE_RENDER_PASSES {
+            let rendered = network_result_try!(
+                self.render_signed_operation_once(
+                    dest.clone(),
+                    operation.clone(),
+                    signing_params.clone()
+                )
+                .await?
+            );
+            let envelope_len = env0_envelope_len(&rendered.message);
+            if (filled_envelope_len..=target_envelope_len).contains(&envelope_len) {
+                return Ok(NetworkResult::value(rendered));
+            }
+            let Some(mtu_probe) = operation.mtu_probe_slot().and_then(|slot| slot.as_mut()) else {
+                break;
+            };
+            if envelope_len > target_envelope_len {
+                let padding_len = mtu_probe
+                    .padding
+                    .len()
+                    .saturating_sub(envelope_len - target_envelope_len);
+                mtu_probe.padding.truncate(padding_len);
+            } else {
+                let grown_from = mtu_probe.padding.len();
+                let padding_len = (grown_from + (target_envelope_len - envelope_len))
+                    .min(MAX_MTU_PROBE_PADDING_LEN);
+                mtu_probe.padding.resize(padding_len, 0);
+                random_bytes(&mut mtu_probe.padding[grown_from..]);
+            }
+        }
+        // Unfilled, a probe proves nothing, and overfilled it would split into two datagrams
+        if let Some(slot) = operation.mtu_probe_slot() {
+            *slot = None;
+        }
+        self.render_signed_operation_once(dest, operation, signing_params)
+            .await
+    }
+
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn render_signed_operation(
+    async fn render_signed_operation_once(
         &self,
         dest: Destination,
         operation: RPCOperation,
@@ -1232,7 +1295,8 @@ impl RPCProcessor {
     /// A send aborted before any transport was tried says something about the peer only while
     /// this node has a PublicInternet network of its own; with the domain Invalid, between an
     /// egress going and the next one appearing, every abort is ours, whatever the detector has
-    /// had time to notice
+    /// had time to notice. Degraded holds it too: our own lost questions clear the flows an
+    /// inbound-only peer is reached over, and one abort marks a peer dead.
     fn pre_send_abort_blames_peer(&self) -> bool {
         let state = self
             .routing_table()
@@ -1324,25 +1388,27 @@ impl RPCProcessor {
                 None,
             );
         }
-        let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
+        // Our own loss discounts a failed send; a stall, burst or outage voids it
+        let opt_weight = match opt_rd {
+            Some(rd) => online_detector.blame_weight(rd),
+            None => Some(1.0),
+        };
         let transport_suppressed =
             |transport: TransportType| self.transport_send_suppressed(opt_rd, transport);
 
         // Record for node if this was not sent via a route
         if !is_routed {
-            if !suppress_degradation {
-                if let Some(transport) = opt_transport {
-                    if !transport_suppressed(transport) {
-                        // A specific transport failed to send, record it on the transport
-                        node_ref.stats_failed_to_send(send_ts, wants_answer, transport, dialed);
-                    }
-                } else if self.pre_send_abort_blames_peer() {
-                    // Pre-send abort with no transport attempted:
-                    // * NoRoutingDomain / NoPeerInfo / NoContactMethod / Punished
-                    // * Or a ContactMethod::Existing that didn't exist
-                    // Record at the node level.
-                    node_ref.stats_unreachable();
+            if let Some(transport) = opt_transport {
+                if let (Some(weight), false) = (opt_weight, transport_suppressed(transport)) {
+                    // A specific transport failed to send, record it on the transport
+                    node_ref.stats_failed_to_send(send_ts, wants_answer, transport, dialed, weight);
                 }
+            } else if self.pre_send_abort_blames_peer() {
+                // Pre-send abort with no transport attempted:
+                // * NoRoutingDomain / NoPeerInfo / NoContactMethod / Punished
+                // * Or a ContactMethod::Existing that didn't exist
+                // Record at the node level.
+                node_ref.stats_unreachable();
             }
             // Always clear last_flows: the underlying flow is gone or broken regardless.
             node_ref.clear_last_flows();
@@ -1387,6 +1453,21 @@ impl RPCProcessor {
             context.node_ref.best_routing_domain()
         };
 
+        if let (Some(rd), true, Some(transport)) = (
+            opt_rd,
+            context.is_direct(),
+            context.send_data_result.transport_type(),
+        ) {
+            self.network_manager()
+                .online_detector()
+                .record_round_trip_lost(
+                    rd,
+                    context.node_ref.best_node_id(),
+                    transport,
+                    context.send_ts,
+                );
+        }
+
         // A flow we did not dial says nothing about either side: drop it and charge nothing
         if !context.is_routed() && !context.send_data_result.dialed_evidence() {
             if let Some(unique_flow) = context.send_data_result.unique_flow() {
@@ -1414,7 +1495,11 @@ impl RPCProcessor {
                 }
             }
         }
-        let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
+        // Our own loss discounts a lost question; a stall, burst or outage voids it
+        let opt_weight = match opt_rd {
+            Some(rd) => online_detector.blame_weight(rd),
+            None => Some(1.0),
+        };
         let transport_suppressed =
             |transport: TransportType| self.transport_send_suppressed(opt_rd, transport);
 
@@ -1424,7 +1509,7 @@ impl RPCProcessor {
             // hasn't been re-tested since: we haven't had a fair chance to ping it,
             // so leave its reliability and ping cadence intact.
             let cur_ts = Timestamp::now();
-            let protect_after_reattach = !suppress_degradation
+            let protect_after_reattach = opt_weight.is_some()
                 && opt_rd
                     .and_then(|rd| online_detector.online_since(rd))
                     .map(|online_ts| {
@@ -1437,12 +1522,13 @@ impl RPCProcessor {
                             && context.node_ref.state(cur_ts) == BucketEntryState::Reliable
                     })
                     .unwrap_or(false);
-            if !suppress_degradation && !protect_after_reattach {
+            if let (Some(weight), false) = (opt_weight, protect_after_reattach) {
                 if let Some(transport) = context.send_data_result.transport_type() {
                     if !transport_suppressed(transport) {
                         context.node_ref.stats_lost_question(
                             transport,
                             context.send_data_result.dialed_evidence(),
+                            weight,
                         );
                     }
                 }
@@ -1459,17 +1545,24 @@ impl RPCProcessor {
             .filter(|transport| !transport_suppressed(*transport))
             .map(|transport| transport.sequence_ordering());
 
-        // The state the loss is judged in; while blame is suppressed the loss is about us
-        let opt_epoch = (!suppress_degradation).then(|| {
+        // The state the loss is judged in; during a stall, burst or outage the loss is about us
+        let opt_epoch = opt_weight.is_some().then(|| {
             self.routing_table()
                 .loss_epoch(context.destination.node_info_ts())
         });
+        let weight = opt_weight.unwrap_or(0.0);
 
         // If safety route was used, record question lost there
         if let Some(sr) = &context.opt_safety_route_ref {
             if let Some(ordering) = opt_ordering {
                 sr.with_stats_mut(|s| {
-                    s.record_lost_question(ordering, &context.destination, opt_epoch)
+                    s.record_lost_question(
+                        ordering,
+                        &context.destination,
+                        opt_epoch,
+                        weight,
+                        context.send_ts,
+                    )
                 });
 
                 // Fanouts ask the node after the rest of its window until it answers a routed question
@@ -1502,7 +1595,13 @@ impl RPCProcessor {
         if let Some(pr) = &context.opt_remote_private_route_ref {
             if let Some(ordering) = opt_ordering {
                 pr.with_stats_mut(|s| {
-                    s.record_lost_question(ordering, &context.destination, opt_epoch)
+                    s.record_lost_question(
+                        ordering,
+                        &context.destination,
+                        opt_epoch,
+                        weight,
+                        context.send_ts,
+                    )
                 });
             }
         }
@@ -1513,7 +1612,13 @@ impl RPCProcessor {
             {
                 if let Some(ordering) = opt_ordering {
                     rpr.with_stats_mut(|s| {
-                        s.record_lost_question(ordering, &context.destination, opt_epoch)
+                        s.record_lost_question(
+                            ordering,
+                            &context.destination,
+                            opt_epoch,
+                            weight,
+                            context.send_ts,
+                        )
                     });
                 }
             }
@@ -1596,9 +1701,16 @@ impl RPCProcessor {
             context.node_ref.best_routing_domain()
         };
         if let Some(rd) = opt_rd {
-            self.network_manager()
-                .online_detector()
-                .record_success(rd, Some(context.send_ts));
+            let opt_direct = context
+                .send_data_result
+                .transport_type()
+                .filter(|_| context.is_direct())
+                .map(|transport| (context.node_ref.best_node_id(), transport));
+            self.network_manager().online_detector().record_success(
+                rd,
+                Some(context.send_ts),
+                opt_direct,
+            );
         }
 
         // Record stats for remote node if this was direct
@@ -1743,9 +1855,11 @@ impl RPCProcessor {
         let bytes = msg.header.body_len;
 
         // Inbound traffic is proof we're online.
-        self.network_manager()
-            .online_detector()
-            .record_success(msg.header.routing_domain(), None);
+        self.network_manager().online_detector().record_success(
+            msg.header.routing_domain(),
+            None,
+            None,
+        );
 
         // Ordering this message arrived on (marks that ordering valid on the receiving route).
         let ordering = msg
@@ -1808,9 +1922,11 @@ impl RPCProcessor {
         let bytes = msg.header.body_len;
 
         // Inbound traffic is proof we're online.
-        self.network_manager()
-            .online_detector()
-            .record_success(msg.header.routing_domain(), None);
+        self.network_manager().online_detector().record_success(
+            msg.header.routing_domain(),
+            None,
+            None,
+        );
 
         // Ordering this message arrived on (marks that ordering valid on the receiving route).
         let ordering = msg
@@ -1886,8 +2002,10 @@ impl RPCProcessor {
 
         // Wrap question in operation
         let answer_desc = question.detail().answer_desc();
-        let operation = RPCOperation::new_question(question, spi);
+        let mut operation = RPCOperation::new_question(question, spi);
         let op_id = operation.op_id();
+        // A probe's loss blames the path's size, not the peer
+        let opt_mtu_probe_size = operation.mtu_probe_size();
 
         // Get signing parameters
         let signing_params = match opt_signer_keypair {
@@ -1964,11 +2082,19 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
+            .send_envelope(
+                node_ref.clone(),
+                opt_dial_info.clone(),
+                message,
+                opt_mtu_probe_size,
+            )
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.
                 let send_ts = Timestamp::now();
+                if opt_mtu_probe_size.is_some() {
+                    return RPCError::network(e);
+                }
                 self.record_send_failure(
                     RPCKind::Question,
                     send_ts,
@@ -1988,6 +2114,9 @@ impl RPCProcessor {
             veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
                 outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
+            if opt_mtu_probe_size.is_some() {
+                return Ok(QuestionOutcome::Failed(send_data_result));
+            }
             self.record_send_failure(
                 RPCKind::Question,
                 send_ts,
@@ -2002,7 +2131,7 @@ impl RPCProcessor {
         }
 
         // Successfully sent
-        if let Some(transport) = send_data_result.transport_type() {
+        if let (None, Some(transport)) = (opt_mtu_probe_size, send_data_result.transport_type()) {
             self.record_send_success(
                 RPCKind::Question,
                 send_ts,
@@ -2039,6 +2168,7 @@ impl RPCProcessor {
                 opt_remote_private_route_ref,
                 opt_reply_private_route_ref,
                 destination: dest,
+                mtu_probe: opt_mtu_probe_size.is_some(),
             },
         ))))
     }
@@ -2120,7 +2250,7 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
+            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message, None)
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.
@@ -2193,7 +2323,8 @@ impl RPCProcessor {
         let spi = self.get_sender_peer_info(&dest);
 
         // Wrap answer in operation
-        let operation = RPCOperation::new_answer(request.operation.op_id(), answer, spi);
+        let mut operation = RPCOperation::new_answer(request.operation.op_id(), answer, spi);
+        let opt_mtu_probe_size = operation.mtu_probe_size();
 
         // Get signing parameters
         let signing_params = match opt_signer_keypair {
@@ -2254,7 +2385,12 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
+            .send_envelope(
+                node_ref.clone(),
+                opt_dial_info.clone(),
+                message,
+                opt_mtu_probe_size,
+            )
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.

@@ -2,6 +2,7 @@ mod discovery_context;
 mod igd_manager;
 mod low_level_protocol_tcp;
 mod low_level_protocol_udp;
+mod mtu_detection;
 mod network_state;
 mod protocol;
 mod restore;
@@ -41,6 +42,7 @@ pub const MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT: usize = 3;
 pub const UPDATE_DIAL_INFO_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const UPNP_TASK_TICK_PERIOD_SECS: u32 = 1;
+pub const MTU_DETECTION_TASK_TICK_PERIOD_SECS: u32 = 1;
 
 /// Native network durations derived from config
 #[derive(Clone, Copy, Debug)]
@@ -69,6 +71,23 @@ impl NativeNetworkTimings {
     }
 }
 pub const PEEK_DETECT_LEN: usize = 64;
+
+/// Our TCP size in `addr`'s family, which only Linux announces in the handshake
+fn own_tcp_mss(registry: &VeilidComponentRegistry, addr: SocketAddr) -> u32 {
+    let address_type = if addr.is_ipv4() {
+        AddressType::IPV4
+    } else {
+        AddressType::IPV6
+    };
+    registry
+        .network_manager()
+        .own_mtus()
+        .get(LowLevelTransportType {
+            low_level_protocol_type: LowLevelProtocolType::TCP,
+            address_type,
+        })
+        .into()
+}
 
 /////////////////////////////////////////////////////////////////
 
@@ -106,6 +125,10 @@ struct NetworkInner {
     igd_manager: Option<igd_manager::IGDManager>,
     /// Network state
     network_state: Option<Arc<NetworkState>>,
+    /// where each in-use address family's packet size stands
+    family_mtus: BTreeMap<AddressType, FamilyMtu>,
+    /// handles on the TCP listeners, to change the segment size they announce
+    listener_mss_handles: BTreeMap<SocketAddr, TcpListenerMssHandle>,
 }
 
 pub(super) struct NetworkUnlockedInner {
@@ -125,6 +148,7 @@ pub(super) struct NetworkUnlockedInner {
     confirm_dial_info_tasks: BTreeMap<RoutingDomain, TickTask<EyreReport>>,
     network_interfaces_task: TickTask<EyreReport>,
     upnp_task: TickTask<EyreReport>,
+    mtu_detection_task: TickTask<EyreReport>,
     network_task_lock: AsyncRwLock<()>,
 
     // Durations derived from config
@@ -267,6 +291,7 @@ impl PlatformNetwork for NativeNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<()>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
@@ -312,7 +337,7 @@ impl PlatformNetwork for NativeNetwork {
                         )
                         .wrap_err("create socket failure")?;
                         network_result_try!(h
-                            .send_message(data, peer_socket_addr, "unbound")
+                            .send_message(data, peer_socket_addr, mtu, "unbound")
                             .await
                             .wrap_err("send message failure")?);
                     }
@@ -326,7 +351,7 @@ impl PlatformNetwork for NativeNetwork {
                         )
                         .await
                         .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
                     ProtocolType::WS => {
                         let pnc = network_result_try!(WebsocketProtocolHandler::connect(
@@ -337,7 +362,7 @@ impl PlatformNetwork for NativeNetwork {
                         )
                         .await
                         .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
                     #[cfg(feature = "enable-protocol-wss")]
                     ProtocolType::WSS => {
@@ -349,7 +374,7 @@ impl PlatformNetwork for NativeNetwork {
                         )
                         .await
                         .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
                 }
                 Ok(NetworkResult::Value(()))
@@ -383,6 +408,7 @@ impl PlatformNetwork for NativeNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
         timeout_ms: u32,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<Bytes>>> {
         Box::pin(async move {
@@ -427,7 +453,7 @@ impl PlatformNetwork for NativeNetwork {
                         .wrap_err("create socket failure")?;
                         // Attribute the send only; a missing reply is the peer's silence
                         let send_res = h
-                            .send_message(data, peer_socket_addr, "unbound_recv")
+                            .send_message(data, peer_socket_addr, mtu, "unbound_recv")
                             .await
                             .wrap_err("send message failure")?;
                         if let Some(outcome) = TransportSendOutcome::from_network_result(&send_res)
@@ -441,7 +467,7 @@ impl PlatformNetwork for NativeNetwork {
 
                         // receive single response
                         let mut out = BytesMut::zeroed(MAX_MESSAGE_SIZE);
-                        let (recv_len, recv_addr) = network_result_try!(timeout(
+                        let (recv_len, recv_addr, _) = network_result_try!(timeout(
                             timeout_ms,
                             h.recv_message(&mut out).in_current_span()
                         )
@@ -513,7 +539,7 @@ impl PlatformNetwork for NativeNetwork {
                                 return Ok(nr.map(|_| unreachable!()));
                             }
                         };
-                        let send_res = pnc.send(data).await.wrap_err("send failure")?;
+                        let send_res = pnc.send(data, mtu).await.wrap_err("send failure")?;
                         if let Some(outcome) = TransportSendOutcome::from_network_result(&send_res)
                         {
                             network_manager
@@ -549,6 +575,7 @@ impl PlatformNetwork for NativeNetwork {
         &self,
         flow: Flow,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<UniqueFlow>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
@@ -566,7 +593,7 @@ impl PlatformNetwork for NativeNetwork {
                 ) {
                     match ph
                         .clone()
-                        .send_message(data.clone(), peer_socket_addr, "existing_flow")
+                        .send_message(data.clone(), peer_socket_addr, mtu, "existing_flow")
                         .await
                         .wrap_err("sending data to existing flow")?
                     {
@@ -602,7 +629,7 @@ impl PlatformNetwork for NativeNetwork {
 
             // Try to send to the exact existing connection if one exists
             if let Some(conn) = network_manager.connection_manager().get_connection(flow) {
-                match timeout(self.single_send_timeout_ms(), conn.send_async(data)).await {
+                match timeout(self.single_send_timeout_ms(), conn.send_async(data, mtu)).await {
                     Ok(ConnectionHandleSendResult::Sent) => {
                         // Network accounting
                         network_manager.stats_packet_sent(
@@ -632,6 +659,7 @@ impl PlatformNetwork for NativeNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkResult<UniqueFlow>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
@@ -665,7 +693,7 @@ impl PlatformNetwork for NativeNetwork {
                     }
                 };
                 let flow = network_result_try!(ph
-                    .send_message(data, peer_socket_addr, "dial_info")
+                    .send_message(data, peer_socket_addr, mtu, "dial_info")
                     .await
                     .wrap_err("failed to send data to dial info")?);
                 UniqueFlow {
@@ -678,7 +706,7 @@ impl PlatformNetwork for NativeNetwork {
                 let connmgr = network_manager.connection_manager();
                 let conn = network_result_try!(connmgr.get_or_create_connection(dial_info).await?);
 
-                match timeout(self.single_send_timeout_ms(), conn.send_async(data)).await {
+                match timeout(self.single_send_timeout_ms(), conn.send_async(data, mtu)).await {
                     Ok(ConnectionHandleSendResult::Sent) => {}
                     Ok(ConnectionHandleSendResult::NotSent) => {
                         return Ok(NetworkResult::NoConnection(io::Error::new(
@@ -894,6 +922,8 @@ impl NativeNetwork {
             preferred_local_addresses: BTreeMap::new(),
             igd_manager: None,
             network_state: None,
+            family_mtus: BTreeMap::new(),
+            listener_mss_handles: BTreeMap::new(),
         }
     }
 
@@ -924,6 +954,10 @@ impl NativeNetwork {
                 NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS,
             ),
             upnp_task: TickTask::new("upnp_task", UPNP_TASK_TICK_PERIOD_SECS),
+            mtu_detection_task: TickTask::new(
+                "mtu_detection_task",
+                MTU_DETECTION_TASK_TICK_PERIOD_SECS,
+            ),
             network_task_lock: AsyncRwLock::new(()),
             timings: NativeNetworkTimings::new(&config),
         }
@@ -1246,6 +1280,9 @@ impl NativeNetwork {
             bail!("failed to get new network state routing domain network state");
         };
         let rd_network_state_changed = opt_last_rd_network_state != Some(new_rd_network_state);
+
+        // Our receive mtus ride every commit, so no publish goes out without them
+        editor.set_receive_mtus(self.receive_mtus());
 
         // Update the routing domain details if the config or interface dialinfo details have changed
         if rd_network_state_changed {

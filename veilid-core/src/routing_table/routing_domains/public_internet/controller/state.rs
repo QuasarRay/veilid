@@ -104,6 +104,7 @@ impl PublicInternetRoutingDomainController {
             entry_summary,
             low_water_mark,
             relays,
+            receive_mtus,
         ) = {
             let detail = self.read_dyn();
             let relay_requirements = detail.relay_requirements();
@@ -115,6 +116,7 @@ impl PublicInternetRoutingDomainController {
             let entry_summary = detail.get_entry_summary();
             let low_water_mark = detail.get_low_water_mark();
             let relays = detail.relays();
+            let receive_mtus = detail.receive_mtus();
 
             (
                 relay_requirements,
@@ -126,6 +128,7 @@ impl PublicInternetRoutingDomainController {
                 entry_summary,
                 low_water_mark,
                 relays,
+                receive_mtus,
             )
         };
 
@@ -145,6 +148,9 @@ impl PublicInternetRoutingDomainController {
                 // If relays are not needed, but we have some, we are also in the 'needsrelays' state so we can get
                 // rid of the unnecessary relays before we publish
                 RoutingDomainInboundStage::NeedsRelays
+            } else if receive_mtus.is_none() {
+                // Peers size what they send us by what we publish, so publish it settled
+                RoutingDomainInboundStage::NeedsTransportMtus
             } else {
                 RoutingDomainInboundStage::ReadyToPublish
             }

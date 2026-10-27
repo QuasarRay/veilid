@@ -214,15 +214,16 @@ impl RawTcpProtocolHandler {
         let tcp_stream = network_result_try!(connect_async_tcp_stream(
             local_address,
             remote_address,
-            timeout_ms
+            timeout_ms,
+            Some(own_tcp_mss(&registry, remote_address))
         )
         .await
         .folded()?);
+        let segment_size = tcp_stream_mss(&tcp_stream).ok();
 
         // See what local address we ended up with and turn this into a stream
         let actual_local_address = tcp_stream.local_addr()?;
-        #[cfg(feature = "rt-tokio")]
-        let tcp_stream = tcp_stream.compat();
+        let (tcp_stream, segment_limit) = SegmentLimitedTcpStream::new(tcp_stream);
         let ps = AsyncPeekStream::new(tcp_stream);
 
         // Wrap the stream in a network connection and return it
@@ -236,13 +237,18 @@ impl RawTcpProtocolHandler {
         veilid_log!(registry trace target: "net", "RawTcp connect (outbound) flow: {:?}", flow);
 
         let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
-            registry,
+            registry.clone(),
             flow,
             Direction::Out,
             ps,
         ));
 
-        Ok(NetworkResult::Value(Box::new(conn)))
+        Ok(NetworkResult::Value(
+            registry.network_manager().chaos().wrap_connection(
+                SegmentLimitedConnection::wrap(Box::new(conn), segment_limit),
+                segment_size,
+            ),
+        ))
     }
 }
 

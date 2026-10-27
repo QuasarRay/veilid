@@ -7,8 +7,8 @@ pub(crate) enum InboundWatchUpdateMode {
     NoUpdate,
     /// Update all watchers
     UpdateAll,
-    /// Update all watchers except ones that come from a specific target
-    ExcludeTarget(Target),
+    /// Update all watchers except ones that come from a specific destination
+    ExcludeDestination(Destination),
 }
 
 impl<D> RecordStore<D>
@@ -153,7 +153,7 @@ where
             };
 
             changes.push(ValueChangedInfo {
-                target: evci.target,
+                dest: evci.dest,
                 record_key: evci.key,
                 subkeys: evci.subkeys,
                 count: evci.count,

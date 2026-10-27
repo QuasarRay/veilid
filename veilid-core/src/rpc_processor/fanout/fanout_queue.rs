@@ -554,72 +554,64 @@ impl<'a> FanoutQueue<'a> {
         }
     }
 
+    /// Moves an answered node from InProgress to `stage`; false if its answer no longer applies
+    fn transition_answered(
+        &mut self,
+        node_ref: NodeRef,
+        stage: FanoutNodeStage,
+        cur_ts: Timestamp,
+    ) -> bool {
+        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
+        match self.nodes.get(&key).unwrap_or_log().status.stage {
+            FanoutNodeStage::InProgress => {}
+            // A rejection consensus disqualifies in-flight nodes, whose answers can land after it
+            FanoutNodeStage::Disqualified => {
+                veilid_log!(self debug "fanout: {:?} answer from {} arrived after the node was disqualified", stage, key);
+                return false;
+            }
+            current => {
+                veilid_log!(self error "fanout: {:?} answer from {} while the node was {:?}, not in progress", stage, key, current);
+                return false;
+            }
+        }
+        self.nodes
+            .get_mut(&key)
+            .unwrap_or_log()
+            .status
+            .transition(stage, cur_ts);
+        true
+    }
+
     /// Transition node InProgress -> Timeout
     pub fn timeout(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "timeout: node should be in progress");
-            return;
-        }
-        node.status.transition(FanoutNodeStage::Timeout, cur_ts);
+        self.transition_answered(node_ref, FanoutNodeStage::Timeout, cur_ts);
     }
 
     /// Transition node InProgress -> Rejected
     pub fn rejected(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "rejected: node should be in progress");
-            return;
+        if self.transition_answered(node_ref, FanoutNodeStage::Rejected, cur_ts) {
+            self.disqualify(cur_ts);
         }
-        node.status.transition(FanoutNodeStage::Rejected, cur_ts);
-        self.disqualify(cur_ts);
     }
 
     /// Transition node InProgress -> Accepted
     pub fn accepted(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "accepted: node should be in progress");
-            return;
-        }
-        node.status.transition(FanoutNodeStage::Accepted, cur_ts);
+        self.transition_answered(node_ref, FanoutNodeStage::Accepted, cur_ts);
     }
 
     /// Transition node InProgress -> Stale
     pub fn stale(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "stale: node should be in progress");
-            return;
-        }
-        node.status.transition(FanoutNodeStage::Stale, cur_ts);
+        self.transition_answered(node_ref, FanoutNodeStage::Stale, cur_ts);
     }
 
     /// Transition node InProgress -> Conflict
     pub fn conflict(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "conflict: node should be in progress");
-            return;
-        }
-        node.status.transition(FanoutNodeStage::Conflict, cur_ts);
+        self.transition_answered(node_ref, FanoutNodeStage::Conflict, cur_ts);
     }
 
     /// Transition node InProgress -> Disqualified
     pub fn disqualified(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
-        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
-        let node = self.nodes.get_mut(&key).unwrap_or_log();
-        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            veilid_log!(self error "disqualified: node should be in progress");
-            return;
-        }
-        node.status
-            .transition(FanoutNodeStage::Disqualified, cur_ts);
+        self.transition_answered(node_ref, FanoutNodeStage::Disqualified, cur_ts);
     }
 
     /// Transition all Accepted -> Queued, in the event a newer value for consensus is found and we want to try again

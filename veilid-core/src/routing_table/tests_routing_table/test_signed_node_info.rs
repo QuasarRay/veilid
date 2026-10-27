@@ -18,6 +18,22 @@ pub async fn test_signed_node_info() {
         let keypair = vcrypto.generate_keypair();
         let secret_key_group = SecretKeyGroup::from(keypair.secret());
 
+        let mut receive_mtus = TransportMtus::default();
+        receive_mtus.set(
+            LowLevelTransportType {
+                low_level_protocol_type: LowLevelProtocolType::UDP,
+                address_type: AddressType::IPV4,
+            },
+            1472,
+        );
+        receive_mtus.set(
+            LowLevelTransportType {
+                low_level_protocol_type: LowLevelProtocolType::TCP,
+                address_type: AddressType::IPV6,
+            },
+            1440,
+        );
+
         // Build test node info
         let node_info = NodeInfo::new(
             Timestamp::now(),
@@ -42,7 +58,9 @@ pub async fn test_signed_node_info() {
                     dial_info: DialInfo::udp(fix_socket_address()),
                 }],
                 RelayKind::Inbound,
+                receive_mtus,
             )],
+            receive_mtus,
         );
 
         // Make peerinfo from nodeinfo
@@ -71,6 +89,11 @@ pub async fn test_signed_node_info() {
         assert!(
             pi2.equivalent(&pi),
             "should be equivalent:\npi={pi:?}\npi2={pi2:?}"
+        );
+        assert_eq!(pi2.node_info().receive_mtus(), &receive_mtus);
+        assert_eq!(
+            pi2.node_info().relay_info_list()[0].receive_mtus(),
+            &receive_mtus
         );
 
         // Test with invalid signatures and invalid crypto kind

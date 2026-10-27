@@ -36,21 +36,10 @@ const MAX_WS_BEFORE_BODY: usize = 2048;
 // Wait time for connection close
 // const MAX_CONNECTION_CLOSE_WAIT_US: u64 = 5_000_000;
 
-cfg_if! {
-    if #[cfg(feature="rt-async-std")] {
-        #[cfg(feature="enable-protocol-wss")]
-        pub type WebsocketNetworkConnectionWSS =
-            WebsocketNetworkConnection<futures_rustls::client::TlsStream<TcpStream>>;
-        pub type WebsocketNetworkConnectionWS = WebsocketNetworkConnection<TcpStream>;
-    } else if #[cfg(feature="rt-tokio")] {
-        #[cfg(feature="enable-protocol-wss")]
-        pub type WebsocketNetworkConnectionWSS =
-            WebsocketNetworkConnection<futures_rustls::client::TlsStream<Compat<TcpStream>>>;
-        pub type WebsocketNetworkConnectionWS = WebsocketNetworkConnection<Compat<TcpStream>>;
-    } else {
-        compile_error!("needs executor implementation");
-    }
-}
+#[cfg(feature = "enable-protocol-wss")]
+pub type WebsocketNetworkConnectionWSS =
+    WebsocketNetworkConnection<futures_rustls::client::TlsStream<SegmentLimitedTcpStream>>;
+pub type WebsocketNetworkConnectionWS = WebsocketNetworkConnection<SegmentLimitedTcpStream>;
 
 fn ws_error_to_network_result<T>(err: WsError) -> NetworkResult<T> {
     match err {
@@ -385,16 +374,20 @@ impl WebsocketProtocolHandler {
         let Some(ms) = remaining_ms() else {
             return Ok(NetworkResult::timeout());
         };
-        let tcp_stream =
-            network_result_try!(connect_async_tcp_stream(local_address, remote_address, ms)
-                .await
-                .folded()?);
+        let tcp_stream = network_result_try!(connect_async_tcp_stream(
+            local_address,
+            remote_address,
+            ms,
+            Some(own_tcp_mss(&registry, remote_address))
+        )
+        .await
+        .folded()?);
+        let segment_size = tcp_stream_mss(&tcp_stream).ok();
 
         // See what local address we ended up with
         let actual_local_addr = tcp_stream.local_addr()?;
 
-        #[cfg(feature = "rt-tokio")]
-        let tcp_stream = tcp_stream.compat();
+        let (tcp_stream, segment_limit) = SegmentLimitedTcpStream::new(tcp_stream);
 
         // Make our flow
         let flow = Flow::new(
@@ -433,9 +426,15 @@ impl WebsocketProtocolHandler {
                             Err(_) => NetworkResult::timeout(),
                         });
 
-                    Ok(NetworkResult::Value(Box::new(NativeProtocolNetworkConnection::Wss(
-                        WebsocketNetworkConnection::new(registry, flow, ws_stream),
-                    ))))
+                    let conn = NativeProtocolNetworkConnection::Wss(
+                        WebsocketNetworkConnection::new(registry.clone(), flow, ws_stream),
+                    );
+                    Ok(NetworkResult::Value(
+                        registry.network_manager().chaos().wrap_connection(
+                            SegmentLimitedConnection::wrap(Box::new(conn), segment_limit),
+                            segment_size,
+                        ),
+                    ))
                 } else {
                     bail_io_error_other!("no tls support for websockets enabled");
                 }
@@ -450,11 +449,17 @@ impl WebsocketProtocolHandler {
                     Ok(Err(e)) => ws_error_to_network_result(e),
                     Err(_) => NetworkResult::timeout(),
                 });
-            Ok(NetworkResult::Value(Box::new(
-                NativeProtocolNetworkConnection::Ws(WebsocketNetworkConnection::new(
-                    registry, flow, ws_stream,
-                )),
-            )))
+            let conn = NativeProtocolNetworkConnection::Ws(WebsocketNetworkConnection::new(
+                registry.clone(),
+                flow,
+                ws_stream,
+            ));
+            Ok(NetworkResult::Value(
+                registry.network_manager().chaos().wrap_connection(
+                    SegmentLimitedConnection::wrap(Box::new(conn), segment_limit),
+                    segment_size,
+                ),
+            ))
         }
     }
 }

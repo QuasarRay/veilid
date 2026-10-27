@@ -36,14 +36,18 @@ impl NativeNetwork {
                     .in_current_span()
                     .await
                 {
-                    Ok(Ok((size, flow))) => {
+                    Ok(Ok((size, flow, opt_datagram_len))) => {
                         consecutive_errors = 0;
                         network_manager.stats_packet_rcvd(
                             flow.remote_address().ip_addr(),
                             ByteCount::new(size as u64),
                         );
                         if let Err(e) = network_manager
-                            .on_recv_envelope(Bytes::copy_from_slice(&data[..size]), flow)
+                            .on_recv_envelope(
+                                Bytes::copy_from_slice(&data[..size]),
+                                flow,
+                                opt_datagram_len,
+                            )
                             .measure_debug(TimestampDuration::new_ms(500), |x| {
                                 veilid_log!(network_manager debug "on_recv_envelope: {} for {}", x, flow);
                             })

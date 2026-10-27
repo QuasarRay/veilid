@@ -22,6 +22,12 @@ impl RPCQuestion {
     pub fn detail(&self) -> &RPCQuestionDetail {
         &self.detail
     }
+    pub fn mtu_probe_slot(&mut self) -> Option<&mut Option<MtuProbe>> {
+        match &mut self.detail {
+            RPCQuestionDetail::StatusQ(status_q) => Some(status_q.mtu_probe_slot()),
+            _ => None,
+        }
+    }
     pub fn desc(&self) -> &'static str {
         self.detail.desc()
     }

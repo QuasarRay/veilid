@@ -239,27 +239,26 @@ impl DiscoveryContext {
         // filtered down to the protocol/address type we are checking the public address for
         node_ref.clear_last_flows();
 
-        let answer = match Box::pin(
-            rpc.rpc_call_status(Destination::direct(node_ref.clone(), None)),
-        )
-        .await
-        {
-            Ok(StatusResult::Sent(status_answer)) => status_answer.answer,
-            Ok(other) => {
-                veilid_log!(self debug target: "network_result",
-                    "request_public_address {:?}: {:?}",
-                    node_ref, other
-                );
-                return None;
-            }
-            Err(e) => {
-                veilid_log!(self error
-                    "failed to get status answer from {:?}: {}",
-                    node_ref, e
-                );
-                return None;
-            }
-        };
+        let answer =
+            match Box::pin(rpc.rpc_call_status(Destination::direct(node_ref.clone(), None), None))
+                .await
+            {
+                Ok(StatusResult::Sent(status_answer)) => status_answer.answer,
+                Ok(other) => {
+                    veilid_log!(self debug target: "network_result",
+                        "request_public_address {:?}: {:?}",
+                        node_ref, other
+                    );
+                    return None;
+                }
+                Err(e) => {
+                    veilid_log!(self error
+                        "failed to get status answer from {:?}: {}",
+                        node_ref, e
+                    );
+                    return None;
+                }
+            };
 
         veilid_log!(self debug target:"network_result",
             "request_public_address {:?}: Value({:?})",

@@ -178,14 +178,15 @@ impl NativeNetwork {
             return;
         }
 
+        let segment_size = tcp_stream_mss(&tcp_stream).ok();
+
         let listener_state = listener_state.clone();
         let connection_manager = connection_manager.clone();
 
         veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "TCP connection from: {}", peer_addr);
 
         // Create a stream we can peek on
-        #[cfg(feature = "rt-tokio")]
-        let tcp_stream = tcp_stream.compat();
+        let (tcp_stream, segment_limit) = SegmentLimitedTcpStream::new(tcp_stream);
         let ps = AsyncPeekStream::new(tcp_stream);
 
         /////////////////////////////////////////////////////////////
@@ -230,7 +231,10 @@ impl NativeNetwork {
         let conn = match conn {
             Ok(Some(c)) => {
                 veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "protocol handler found for {:?}: {:?}", peer_addr, c);
-                c
+                self.network_manager().chaos().wrap_connection(
+                    SegmentLimitedConnection::wrap(c, segment_limit),
+                    segment_size,
+                )
             }
             Ok(None) => {
                 // No protocol handlers matched? drop it.
@@ -263,9 +267,16 @@ impl NativeNetwork {
         let tls_connection_initial_timeout_ms = config.network.tls.connection_initial_timeout_ms;
 
         // Create a shared socket and bind it once we have determined the port is free
-        let Some(listener) = bind_async_tcp_listener(addr)? else {
+        let Some(listener) =
+            bind_async_tcp_listener(addr, Some(own_tcp_mss(&self.registry(), addr)))?
+        else {
             return Ok(false);
         };
+        let listener_mss_handle = TcpListenerMssHandle::try_new(&listener)?;
+        self.inner
+            .lock()
+            .listener_mss_handles
+            .insert(addr, listener_mss_handle);
 
         veilid_log!(self debug "spawn_socket_listener: binding successful to {}", addr);
 
@@ -316,7 +327,11 @@ impl NativeNetwork {
 
             veilid_log!(this debug "exited incoming loop for {}", addr);
             // Remove our listener state from this address if we're stopping
-            this.inner.lock().listener_states.remove(&addr);
+            {
+                let mut inner = this.inner.lock();
+                inner.listener_states.remove(&addr);
+                inner.listener_mss_handles.remove(&addr);
+            }
             veilid_log!(this debug "listener state removed for {}", addr);
         });
         ////////////////////////////////////////////////////////////

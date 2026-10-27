@@ -140,9 +140,36 @@
   - IPv6 link-local addresses are no longer published as LocalNetwork dial info, since a dial info carries no scope id and no peer could dial them, so a tunnel or AirDrop interface rotating its link-local address no longer churns the LocalNetwork peer info.
   - A reply sent while its interface is going away, as in a cellular-to-wifi switch, is a lost send at debug level instead of an RPC error with a backtrace, and an RPC network error's message keeps the socket error behind it.
   - Once PublicInternet outbound readiness is attained, any live ordered safety route keeps it and only an empty pool loses it; two routes per default length remain the bar to attain it and the allocation target, so route churn on a lossy link no longer flaps `public_internet_ready`.
-  - A watch's fallback inspection is a silence timer: a delivered change restarts it instead of switching it off for the rest of the watch, so a record that goes quiet after delivering is inspected again one interval later.
+  - A dead safety route still awaiting release no longer counts toward PublicInternet readiness.
+  - A watch's fallback inspection is a silence timer: a delivered change restarts it at its current interval instead of switching it off for the rest of the watch, so a record that goes quiet after delivering is inspected again one interval later.
+  - A per-node watch that expires unrenewed, after a stall through its renewal window or while its storage node stopped answering, leaves its watch, which reconciles, instead of holding the watch at consensus with nothing renewing it.
+  - Watching a record again, or cancelling part of its watch, before its first watch is established updates the watch instead of dropping it.
+  - A fallback inspection that finds a missed change reconciles the watch onto fresh routes, so a watch whose pushes stopped arriving is repaired instead of polled.
+  - A watch renews only the per-node watches due for renewal or bound to a dead route, and a watch short of consensus reconciles at the paced retry rate, so a storage node that stops answering no longer multiplies renewals and reconciles.
+  - At most 16 change inspections run at once, oldest first, so inspecting every watch after a freeze or an outage drains at a bounded rate.
+  - A fanout answer that arrives after its node was disqualified is logged at debug level instead of as an error.
+  - New `debug chaos` command reproduces a bad network on demand: loss and size caps for every address or by address range, a rate-limited link behind a bounded queue whose capacity drifts and collapses, presets measured on a cellular link (`mobile`, `mobile-bad`, `mtu-blackhole`), and lost watch pushes (`rpc.value_changed.loss`).
   - On iOS, Android and web, a process the platform froze in the background change-inspects every watch once when the app is active again, so a change missed while frozen arrives on return instead of waiting for a storing node's retry.
   - New `VeilidAPI::change_config()` replaces a detached node's configuration for its next attach, refusing the keys that need a restart, and UPnP is set up per attach so a change to `network.upnp` takes effect then.
+  - The online detector measures the share of round trips lost on this node's own link, from direct questions to peers that answered recently, and reports Degraded while that loss lasts instead of only after bursts of failures.
+  - A peer that answered recently still counts toward offline detection after this node's own loss has cost it its standing, so total loss after a lossy period reads as Offline.
+  - Route failures observed under this node's own loss count for less, so more of them are needed before a route is released, and none count while offline.
+  - A peer's lost questions and failed sends under this node's own loss count for less instead of not at all, and a lossy period delays a silent peer's death only by the share of it the loss explains, so a peer that stops answering on a lossy link is still found dead; stalls, failure bursts and outages still count against no peer.
+  - A relay that can no longer relay is replaced while this node is degraded too, and only an outage holds it.
+  - Reconcile retries for a watch short of consensus and retries of failed change inspections back off from 5 seconds, renewals after a watch's push route dies back off from one RPC timeout, and all back off further under measured loss.
+  - A dead push route returns a watch's fallback inspection to its base interval on the watch's own schedule, so the inspections it triggers spread out instead of arriving together.
+  - Under measured loss a watch's next fallback inspection waits longer, and leaving Degraded no longer change-inspects every watch.
+  - A watch at consensus that has had no push since its last fallback inspection keeps inspecting at the fallback ceiling instead of waiting for its renewal window, so changes behind pushes that fail silently arrive within the ceiling; a watch on a record that does not change is inspected at the ceiling too.
+  - A storage node left out of a watch because its renewal went unanswered rejoins the watch when it pushes a change on the watch id it holds, instead of having every push dropped, which on a lossy link could leave a record undelivered until the watch's renewal.
+  - `debug nodeinfo` shows each routing domain's online state and loss estimate.
+  - A node tests only the remote private routes the app imported, at most every 30 seconds while they answer. A reply route serves its one answer and is no longer kept or tested, and a watch keeps its request's reply destination for its ValueChanged pushes. Before, a node retested every reply route that reached it with a SetValue or WatchValue, about every 15 seconds and never letting one expire, which was about half of a busy node's received traffic.
+  - A bootstrapping node keeps pinging the peers it already knows, so peers that went missing while its own link was down answer again when it recovers instead of dying.
+  - A node sizes its UDP datagrams and TCP segments per address family, starting at 1,200 bytes and growing to what its egress interface carries once a probe shows full-size packets reach a peer and come back, so a path that silently drops larger packets, such as a cellular 464XLAT, no longer stalls; a move to another egress starts the family over at 1,200 bytes.
+  - A node advertises the sizes it takes in its peer info, and each relay's sizes in its relay info, and every send uses the smaller of its own size and the next hop's, or 1,200 bytes toward a node that advertises none. Sizes for transports a node does not know are dropped and the rest of the peer info kept, as with dial info, a size outside 576 to 1,500 bytes is rejected, and a probe counts only when its answer arrives whole in one datagram of its size. Older nodes accept and forward the new peer info.
+  - PublicInternet peer info is published once every address family's size is settled by a probe, or at 1,200 bytes when no peer can answer one.
+  - TCP segments keep to the receiver's size on every platform: Linux and Android hold each write to it and mark where it ends, macOS and iOS lower the connection's segment size, and Windows caps the socket's IP MTU. Linux also announces the node's own size when a connection opens.
+  - A watch keeps to the `get_value_count` storage nodes closest to its record and cancels every other watch it learns of, including ones accepted after consensus that it used to leave pushing until they expired, so each change arrives about 3 times instead of 6.
+  - A watch whose last push came before a loss period ends inspects again soon after, each at its own point in the fallback interval, so a change pushed during the loss turns up then instead of at the next renewal.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
@@ -168,6 +195,7 @@
   - Python sources are formatted with `black` and checked with `mypy`.
   - More tests.
   - New `change_config()` replaces a detached node's configuration for its next attach.
+  - A late answer to a request whose caller gave up no longer stops the client from receiving, and a message may be up to 1 MB.
 
 - veilid-server:
   - veilid-server answers direct bootstrap requests by default, and the packaged `veilid-server.conf` turns that off, so a bootstrap operator enables `serve_direct_bootstrap` in the config file.
@@ -183,9 +211,15 @@
   - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
   - **Breaking** `SplitUrlHost::new` is named `SplitUrlHost::try_new`, since it returns a `Result`.
   - **Breaking** `TrimmedBacktrace` and `TrimBacktraceTrait` are gone, and backtrace captures use `std::backtrace`.
+  - **Breaking** `bind_async_tcp_listener()` and `connect_async_tcp_stream()` take an optional TCP segment size, and `limit_tcp_stream_mss()` and `tcp_stream_mss()` lower and read it on a connected stream, on Windows through the socket's IP MTU cap.
+  - **Breaking** `NetworkInterface` gains `mtu`, the largest IP packet the interface carries, read on Linux, Android, macOS, iOS and Windows.
+  - **Breaking** `AssemblyBuffer::split_message()` takes the largest frame to send, header included, `FRAGMENT_LEN` is gone, and `FRAME_HEADER_LEN` is the frame header's size.
   - **Security** `SplitUrl` and `SplitUrlHost` reject a host holding a non-ASCII character instead of panicking on a byte index inside it.
   - AIMD congestion control, behind the `aimd` feature.
   - Best-effort UDP send-with-TTL in `socket_tools` (`UdpTtlSender`).
+  - `SegmentLimitedTcpStream` keeps a TCP stream's segments within a limit its `TcpSegmentLimit` lowers while the stream is open, and `TcpListenerMssHandle` changes the segment size a listener announces to the connections it accepts.
+  - `AssemblyBuffer::is_whole_message_frame()` says whether a frame carries a whole message by itself.
+  - `bind_async_udp_socket()` sends IPv4 datagrams without DF on Linux and Android, as on other platforms, so a router on a path with a smaller MTU fragments them instead of dropping them.
   - IPv4 send-with-TTL takes effect on macOS and iOS, which send from a twin socket bound to the sender's port, and on Windows, which sets it per packet, so a hole punch from them no longer reaches the far NAT first and makes the reply come from another port.
   - Windows UDP sockets no longer fail their next receive after an ICMP port unreachable or TTL expired, as on other platforms.
   - `tokio` 1.53.3 is the minimum: the platform resolver registers its file descriptor through the I/O-safe `AsyncFd` constructor.

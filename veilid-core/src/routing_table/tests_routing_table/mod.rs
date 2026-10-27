@@ -14,6 +14,9 @@ pub mod test_safety_routes_ready;
 pub mod test_save_schedule;
 pub mod test_serialize_routing_table;
 pub mod test_signed_node_info;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod test_transport_mtus;
+pub mod test_weighted_blame;
 
 pub use mocks::*;
 
@@ -31,6 +34,7 @@ pub async fn test_all() {
     test_restore_point::test_restore_point_needs_the_network().await;
     test_restore_point::test_last_sender_info_survives_restart().await;
     test_route_stats::test_all();
+    test_weighted_blame::test_charges_follow_the_blame_weight().await;
     test_route_stats::test_dead_route_hops_hold_in_their_epoch().await;
     test_serialize_routing_table::test_kick_preserves_best_node_id().await;
     test_serialize_routing_table::test_load_rejects_entries_without_node_ids().await;
@@ -44,8 +48,12 @@ pub async fn test_all() {
     test_persisted_cbor::test_persisted_network_estimator().await;
     route_spec_store::tests_route_spec_store::test_persisted_route_spec_store_content().await;
     route_spec_store::tests_route_spec_store::test_route_test_state_survives_restart().await;
+    route_spec_store::tests_route_spec_store::test_remote_routes::test_remote_route_testing_cadence(
+    );
     test_signed_node_info::test_signed_node_info().await;
     test_relay_info::test_relay_info_equivalent();
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_transport_mtus::test_publish_waits_for_transport_mtus().await;
     test_routing_metrics::test_bucket_depth();
     test_routing_metrics::test_practical_max_size_zero();
     test_routing_metrics::test_practical_max_size_small_network_holds_most_nodes();

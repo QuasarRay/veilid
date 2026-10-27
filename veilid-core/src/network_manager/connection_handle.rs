@@ -4,7 +4,7 @@ use super::*;
 pub struct ConnectionHandle {
     connection_id: NetworkConnectionId,
     flow: Flow,
-    channel: flume::Sender<(Option<Id>, Bytes)>,
+    channel: flume::Sender<(Option<Id>, Bytes, u16)>,
     dead: Arc<AtomicBool>,
     dialed: bool,
 }
@@ -19,7 +19,7 @@ impl ConnectionHandle {
     pub(super) fn new(
         connection_id: NetworkConnectionId,
         flow: Flow,
-        channel: flume::Sender<(Option<Id>, Bytes)>,
+        channel: flume::Sender<(Option<Id>, Bytes, u16)>,
         dead: Arc<AtomicBool>,
         dialed: bool,
     ) -> Self {
@@ -59,14 +59,15 @@ impl ConnectionHandle {
     // }
 
     #[cfg_attr(feature = "instrument", instrument(level="trace", target="net", skip(self, message), fields(message.len = message.len())))]
-    pub async fn send_async(&self, message: Bytes) -> ConnectionHandleSendResult {
+    /// Queues one message, whose TCP segments carry at most `mtu` bytes
+    pub async fn send_async(&self, message: Bytes, mtu: u16) -> ConnectionHandleSendResult {
         // A dead connection's processor no longer drains the channel; queueing would silently drop
         if self.dead.load(Ordering::Relaxed) {
             return ConnectionHandleSendResult::NotSent;
         }
         match self
             .channel
-            .send_async((Span::current().id(), message))
+            .send_async((Span::current().id(), message, mtu))
             .await
         {
             Ok(()) => ConnectionHandleSendResult::Sent,

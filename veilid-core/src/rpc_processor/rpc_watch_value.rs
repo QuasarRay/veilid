@@ -254,9 +254,9 @@ impl RPCProcessor {
             ));
         };
 
-        // Get target for ValueChanged notifications
+        // Where the watch's ValueChanged pushes go, for as long as it lasts: the watcher, or its
+        // reply route, which the watcher keeps alive
         let dest = network_result_try!(self.get_respond_to_destination(&msg));
-        let target = dest.get_target(&routing_table)?;
 
         if debug_target_enabled!("dht") {
             let debug_string = format!(
@@ -308,7 +308,7 @@ impl RPCProcessor {
                     expiration,
                     count,
                     watcher_member_id,
-                    target,
+                    dest,
                 };
 
                 // See if we have this record ourselves, if so, accept the watch

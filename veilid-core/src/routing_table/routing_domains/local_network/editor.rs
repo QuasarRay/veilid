@@ -95,6 +95,13 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorLocalNetwork<'a> {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    fn set_receive_mtus(&mut self, receive_mtus: Option<TransportMtus>) {
+        self.changes.push(RoutingDomainChangeLocalNetwork::Common(
+            RoutingDomainChange::SetReceiveMtus { receive_mtus },
+        ));
+    }
+
+    #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
     fn commit(&mut self) {
         // No locking if we have nothing to do
         if self.changes.is_empty() {
@@ -114,6 +121,7 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorLocalNetwork<'a> {
                 address_types: rdd.address_types(),
                 capabilities: rdd.capabilities(),
                 confirmed: rdd.confirmed(),
+                receive_mtus: rdd.receive_mtus(),
             };
 
             for change in self.changes.drain(..) {
@@ -137,6 +145,7 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorLocalNetwork<'a> {
                 address_types: rdd.address_types(),
                 capabilities: rdd.capabilities(),
                 confirmed: rdd.confirmed(),
+                receive_mtus: rdd.receive_mtus(),
             };
 
             let changed = old_snapshot.diff(&new_snapshot);
@@ -206,6 +215,12 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorLocalNetwork<'a> {
             veilid_log!(self info
                 "[LocalNetwork] changed confirmation: {:?}->{:?}",
                 old_snapshot.confirmed, new_snapshot.confirmed
+            );
+        }
+        if changed.receive_mtus_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed receive mtus: {:?}->{:?}",
+                old_snapshot.receive_mtus, new_snapshot.receive_mtus
             );
         }
 

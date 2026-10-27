@@ -166,13 +166,17 @@ impl WebsocketProtocolHandler {
 
         // Make our flow
         let wnc = WebsocketNetworkConnection::new(
-            registry,
+            registry.clone(),
             Flow::new_no_local(dial_info.peer_address()),
             wsmeta,
             wsio,
         );
-        Ok(NetworkResult::Value(Box::new(
-            WasmProtocolNetworkConnection::Ws(wnc),
-        )))
+        Ok(NetworkResult::Value(
+            registry
+                .network_manager()
+                .chaos()
+                // A browser exposes no segment size
+                .wrap_connection(Box::new(WasmProtocolNetworkConnection::Ws(wnc)), None),
+        ))
     }
 }

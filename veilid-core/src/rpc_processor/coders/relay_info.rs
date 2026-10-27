@@ -44,6 +44,13 @@ pub fn decode_relay_info(reader: &veilid_capnp::relay_info::Reader) -> Result<Re
 
     let relay_kind = decode_relay_kind(reader.get_relay_kind())?;
 
+    // Older nodes advertise no mtus, so absence is not an error
+    let receive_mtus = if reader.has_receive_mtus() {
+        decode_transport_mtus(&reader.get_receive_mtus()?)?
+    } else {
+        TransportMtus::default()
+    };
+
     Ok(RelayInfo::new(
         timestamp,
         node_ids,
@@ -51,6 +58,7 @@ pub fn decode_relay_info(reader: &veilid_capnp::relay_info::Reader) -> Result<Re
         address_types,
         dial_info_detail_list,
         relay_kind,
+        receive_mtus,
     ))
 }
 
@@ -111,6 +119,19 @@ pub fn encode_relay_info(
     }
 
     builder.set_relay_kind(encode_relay_kind(relay_info.relay_kind()));
+
+    if !relay_info.receive_mtus().is_empty() {
+        let mut rm_builder = builder.reborrow().init_receive_mtus(
+            relay_info
+                .receive_mtus()
+                .len()
+                .try_into()
+                .map_err(RPCError::map_protocol(
+                    "too many receive mtus in relay info",
+                ))?,
+        );
+        encode_transport_mtus(relay_info.receive_mtus(), &mut rm_builder);
+    }
 
     Ok(())
 }

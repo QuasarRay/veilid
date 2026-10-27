@@ -43,7 +43,7 @@ impl TransportType {
 ///
 /// TCP and WS share one path (as WebTransport's datagram and stream variants will share
 /// UDP's), so this is the granularity for asking whether our packets get out at all.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct LowLevelTransportType {
     pub low_level_protocol_type: LowLevelProtocolType,
     pub address_type: AddressType,

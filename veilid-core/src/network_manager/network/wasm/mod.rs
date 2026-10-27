@@ -204,6 +204,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<()>>> {
         Box::pin(async move {
             let _guard = self.unlocked_inner.startup_lock.enter()?;
@@ -253,7 +254,7 @@ impl PlatformNetwork for WasmNetwork {
                         )
                         .await
                         .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
                     #[cfg(feature = "enable-protocol-wss")]
                     ProtocolType::WSS => {
@@ -264,7 +265,7 @@ impl PlatformNetwork for WasmNetwork {
                         )
                         .await
                         .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
                 };
                 Ok(NetworkResult::Value(()))
@@ -297,6 +298,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
         timeout_ms: u32,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<Bytes>>> {
         Box::pin(async move {
@@ -372,7 +374,7 @@ impl PlatformNetwork for WasmNetwork {
                                 return Ok(nr.map(|_| unreachable!()));
                             }
                         };
-                        let send_res = pnc.send(data).await.wrap_err("send failure")?;
+                        let send_res = pnc.send(data, mtu).await.wrap_err("send failure")?;
                         if let Some(outcome) = TransportSendOutcome::from_network_result(&send_res)
                         {
                             network_manager
@@ -408,6 +410,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         flow: Flow,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<UniqueFlow>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
@@ -431,7 +434,7 @@ impl PlatformNetwork for WasmNetwork {
             // Try to send to the exact existing connection if one exists
             if let Some(conn) = network_manager.connection_manager().get_connection(flow) {
                 // A stalled connection parks channel sends; bound it so it fails
-                match timeout(self.send_timeout_ms, conn.send_async(data)).await {
+                match timeout(self.send_timeout_ms, conn.send_async(data, mtu)).await {
                     Ok(ConnectionHandleSendResult::Sent) => {
                         // Network accounting
                         network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
@@ -457,6 +460,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
+        mtu: u16,
     ) -> PinBoxFuture<'_, EyreResult<NetworkResult<UniqueFlow>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
@@ -481,7 +485,7 @@ impl PlatformNetwork for WasmNetwork {
             );
 
             // A stalled connection parks channel sends; bound it so it fails
-            match timeout(self.send_timeout_ms, conn.send_async(data)).await {
+            match timeout(self.send_timeout_ms, conn.send_async(data, mtu)).await {
                 Ok(ConnectionHandleSendResult::Sent) => {}
                 Ok(ConnectionHandleSendResult::NotSent) => {
                     return Ok(NetworkResult::NoConnection(io::Error::new(
@@ -668,6 +672,8 @@ impl WasmNetwork {
         // Start unconfirmed; confirm_address_families() (driven from tick) probes the
         // address families and sets confirmed=true once it has a verdict.
         public_internet_editor.set_confirmed(false);
+        // The browser sizes its own segments, so there is nothing to detect or advertise
+        public_internet_editor.set_receive_mtus(Some(TransportMtus::default()));
 
         self.inner.lock().last_confirm_request_ts.insert(
             RoutingDomain::PublicInternet,

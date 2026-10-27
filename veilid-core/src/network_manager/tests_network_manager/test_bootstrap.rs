@@ -208,6 +208,7 @@ pub async fn test_bootstrap_peer_json_binding() {
             )),
         }],
         vec![],
+        TransportMtus::default(),
     );
     let secret_keys =
         SecretKeyGroup::from(SecretKey::new(keypair.kind(), keypair.ref_value().secret()));

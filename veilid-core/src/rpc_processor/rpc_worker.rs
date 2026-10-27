@@ -128,6 +128,7 @@ impl RPCProcessor {
         flow: Flow,
         routing_domain: RoutingDomain,
         body: Bytes,
+        opt_datagram_len: Option<u16>,
     ) -> EyreResult<()> {
         let _guard = self
             .startup_context
@@ -145,6 +146,7 @@ impl RPCProcessor {
                 sender_noderef,
                 flow,
                 routing_domain,
+                opt_datagram_len,
             }),
             timestamp: Timestamp::now_non_decreasing(),
             body_len: ByteCount::new(body.len() as u64),

@@ -72,14 +72,8 @@ impl StorageManager {
         };
 
         let rpc_processor = self.rpc_processor();
-
-        let dest = rpc_processor
-            .resolve_target_to_destination(
-                vc.target.clone(),
-                SafetySelection::Unsafe(Sequencing::PreferOrdered),
-            )
-            .await
-            .map_err(VeilidAPIError::from)?;
+        // Answered as the watch request was: never over a safety route of ours
+        let dest = vc.dest.clone();
 
         network_result_value_or_log!(self rpc_processor
             .rpc_call_value_changed(dest.clone(), vc.record_key.clone(), vc.subkeys.clone(), vc.count, vc.watch_id.into(), vc.value.as_ref().map(|v| (**v).clone()) )

@@ -52,42 +52,6 @@ impl RouteSpecStore {
         Ok(id)
     }
 
-    /// Add a single remote private route for compilation
-    /// It is safe to add the same route more than once and it will return the same route id
-    /// Returns a route set id
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    pub fn import_single_remote_route(
-        &self,
-        private_route: Arc<PrivateRoute>,
-    ) -> VeilidAPIResult<RouteId> {
-        let cur_ts = Timestamp::now();
-
-        // Make a single route set
-        let private_routes = vec![private_route];
-
-        // make the route id
-        let id = self.generate_remote_route_id(&private_routes)?;
-
-        // validate the private routes
-        for private_route in &private_routes {
-            // ensure private route has first hop
-            if !matches!(private_route.hops, PrivateRouteHops::FirstHop(_)) {
-                apibail_generic!("private route must have first hop");
-            }
-        }
-
-        self.cache.write().add_remote_route(
-            cur_ts,
-            RemoteRouteSetId::from_route_id(id.clone()),
-            private_routes,
-        );
-
-        Ok(id)
-    }
-
     /// Release a remote private route that is no longer in use
     #[cfg_attr(
         feature = "instrument",

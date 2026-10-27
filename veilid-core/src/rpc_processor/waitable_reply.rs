@@ -11,11 +11,17 @@ pub struct WaitableReplyContext {
     pub opt_remote_private_route_ref: Option<RemoteRouteRef>,
     pub opt_reply_private_route_ref: Option<AllocatedRouteRef>,
     pub destination: Destination,
+    pub mtu_probe: bool,
 }
 
 impl WaitableReplyContext {
     pub fn is_routed(&self) -> bool {
         self.opt_safety_route_ref.is_some() || self.opt_remote_private_route_ref.is_some()
+    }
+
+    /// Whether both legs of the round trip went straight between us and the node
+    pub fn is_direct(&self) -> bool {
+        !self.is_routed() && self.opt_reply_private_route_ref.is_none()
     }
 
     /// Take the allocated route refs (safety + reply) held by this context.

@@ -34,3 +34,19 @@ impl fmt::Display for OutboundWatchPerNodeState {
         )
     }
 }
+
+impl OutboundWatchPerNodeState {
+    /// Whether this per-node watch is inside its own renew window or lost its ValueChanged route
+    pub fn needs_renewal(
+        &self,
+        cur_ts: Timestamp,
+        renew_ts: Timestamp,
+        route_is_dead: impl Fn(&PublicKey) -> bool,
+    ) -> bool {
+        (renew_ts >= self.expiration && cur_ts < self.expiration)
+            || self
+                .opt_value_changed_route
+                .as_ref()
+                .is_some_and(route_is_dead)
+    }
+}

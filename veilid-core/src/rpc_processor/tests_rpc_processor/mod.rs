@@ -1,8 +1,10 @@
 use super::*;
+mod test_destination;
 mod test_dial_info;
 mod test_fanout_call;
 mod test_fanout_queue;
 mod test_signed_value_data;
+mod test_transport_mtus;
 
 pub async fn test_all() {
     test_fanout_queue::test_seed_keeps_full_reserve().await;
@@ -27,6 +29,7 @@ pub async fn test_all() {
     test_fanout_call::test_demoted_straggler_is_cut_at_the_grace().await;
     test_fanout_queue::test_next_straggler_cut_matches_the_cut().await;
     test_signed_value_data::test_encode_and_decode_signed_value_data();
+    test_destination::test_same_target_ignores_how_it_is_reached();
     test_dial_info::test_encode_and_decode_dial_info_udp();
     test_dial_info::test_encode_and_decode_dial_info_tcp();
     test_dial_info::test_encode_and_decode_dial_info_ws();
@@ -34,4 +37,9 @@ pub async fn test_all() {
     test_dial_info::test_encode_and_decode_dial_info_wss();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv4();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv6();
+    test_transport_mtus::test_transport_mtus_skip_what_they_cannot_use();
+    test_transport_mtus::test_transport_mtus_reject_bad_lists();
+    test_transport_mtus::test_transport_mtus_bound_the_list();
+    test_transport_mtus::test_transport_mtus_absent_from_older_node_info();
+    test_transport_mtus::test_mtu_probe_bounds();
 }

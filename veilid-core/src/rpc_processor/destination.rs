@@ -168,25 +168,25 @@ impl Destination {
         }
     }
 
-    pub fn get_target(&self, routing_table: &RoutingTable) -> Result<Target, RPCError> {
-        match self {
-            Destination::Direct {
-                node,
-                safety_selection: _,
-            } => Ok(Target::NodeId(node.best_node_id())),
-            Destination::DialInfo { dial_info: _, node } => Ok(Target::NodeId(node.best_node_id())),
-            Destination::PrivateRoute {
-                private_route,
-                safety_selection: _,
-            } => {
-                // Add the remote private route if we're going to keep the id
-                let route_id = routing_table
-                    .route_spec_store()
-                    .import_single_remote_route(private_route.clone())
-                    .map_err(RPCError::protocol)?;
-
-                Ok(Target::RouteId(route_id))
+    /// Whether two destinations reach the same node or the same private route, whatever safety,
+    /// sequencing or flow each was asked to be reached with
+    pub fn same_target(&self, other: &Destination) -> bool {
+        match (self, other) {
+            (Destination::Direct { node: a, .. }, Destination::Direct { node: b, .. }) => {
+                a.same_entry(b)
             }
+            (Destination::DialInfo { node: a, .. }, Destination::DialInfo { node: b, .. }) => {
+                a.same_entry(b)
+            }
+            (
+                Destination::PrivateRoute {
+                    private_route: a, ..
+                },
+                Destination::PrivateRoute {
+                    private_route: b, ..
+                },
+            ) => a.public_key == b.public_key,
+            _ => false,
         }
     }
 

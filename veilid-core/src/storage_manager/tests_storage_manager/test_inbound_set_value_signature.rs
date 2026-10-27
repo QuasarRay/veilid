@@ -1,6 +1,7 @@
 use super::*;
+use crate::routing_table::{PrivateRoute, RouteNode};
+use crate::rpc_processor::Destination;
 use crate::tests::*;
-use crate::veilid_api::Target;
 
 // Forged descriptor+value (garbage signatures) must be rejected and not persisted
 pub async fn test_inbound_set_value_rejects_forged_signature() {
@@ -45,7 +46,13 @@ pub async fn test_inbound_set_value_rejects_forged_signature() {
     .expect("EncryptedValueData::try_new should succeed");
     let fake_signed_value = SignedValueData::new(value_data, garbage_sig.clone());
 
-    let attacker_target = Target::NodeId(NodeId::new(ck, BareNodeId::new(&[0u8; 32])));
+    let attacker_dest = Destination::private_route(
+        Arc::new(PrivateRoute::new_stub(
+            PublicKey::new(ck, BarePublicKey::new(&[0u8; 32])),
+            RouteNode::NodeId(NodeId::new(ck, BareNodeId::new(&[0u8; 32]))),
+        )),
+        SafetySelection::Unsafe(Sequencing::PreferOrdered),
+    );
 
     let result = storage_manager
         .inbound_set_value(
@@ -53,7 +60,7 @@ pub async fn test_inbound_set_value_rejects_forged_signature() {
             0,
             Arc::new(fake_signed_value),
             Some(Arc::new(fake_descriptor)),
-            attacker_target,
+            attacker_dest,
         )
         .await
         .expect("inbound_set_value should not bubble an internal error");

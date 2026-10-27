@@ -49,6 +49,22 @@ impl NativeNetwork {
             })
         });
 
+        // Set mtu detection tick task
+        {
+            let this = self.clone();
+            self.mtu_detection_task.set_routine(move |s, l, t| {
+                let this = this.clone();
+                Box::pin(async move {
+                    Box::pin(this.mtu_detection_task_routine(
+                        s,
+                        Timestamp::new(l),
+                        Timestamp::new(t),
+                    ))
+                    .await
+                })
+            });
+        }
+
         // Set upnp tick task
         {
             let this = self.clone();
@@ -93,6 +109,9 @@ impl NativeNetwork {
             }
         }
 
+        // Probes settle each address family's packet size
+        self.mtu_detection_task.tick().await?;
+
         // Tick the upnp renewal task only when UPnP is enabled (igd manager present)
         if self.igd_manager().is_some() {
             self.upnp_task.tick().await?;
@@ -102,6 +121,10 @@ impl NativeNetwork {
     }
 
     pub async fn cancel_tasks(&self) {
+        veilid_log!(self debug "stopping mtu detection task");
+        if let Err(e) = self.mtu_detection_task.stop().await {
+            veilid_log!(self warn "mtu_detection_task not stopped: {}", e);
+        }
         veilid_log!(self debug "stopping upnp task");
         if let Err(e) = self.upnp_task.stop().await {
             veilid_log!(self warn "upnp_task not stopped: {}", e);

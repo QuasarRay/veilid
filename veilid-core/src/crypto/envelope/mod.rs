@@ -10,6 +10,11 @@ pub const ENV0_SIGNATURE_LENGTH: usize = 64;
 pub const ENV0_MAX_ENVELOPE_SIZE: usize = 65507;
 pub const ENV0_MIN_ENVELOPE_SIZE: usize = 0x6A + 0x40; // Header + BareSignature
 
+/// The length of the ENV0 envelope that carries `body`, which is compressed before encryption
+pub fn env0_envelope_len(body: &[u8]) -> usize {
+    compress_prepend_size(body).len() + ENV0_MIN_ENVELOPE_SIZE
+}
+
 /// Envelope versions in order of preference, best envelope version is the first one, worst is the last one
 pub const VALID_ENVELOPE_VERSIONS: [EnvelopeVersion; 1] = [ENVELOPE_VERSION_ENV0];
 /// Number of envelope versions to keep on structures if many are present beyond the ones we consider valid

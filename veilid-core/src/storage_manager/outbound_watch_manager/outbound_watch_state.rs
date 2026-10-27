@@ -31,6 +31,18 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     /// Fallback interval: doubled per empty inspection, reset when the watch proves live or changed
     #[serde(default)]
     opt_fallback_inspect_interval: Option<TimestampDuration>,
+    /// Earliest the next fallback inspection may run, after a spread reset or under loss
+    #[serde(default, skip)]
+    opt_fallback_not_before: Option<Timestamp>,
+    /// Consecutive reconciles that ended short of consensus, which size the next retry
+    #[serde(default, skip)]
+    reconcile_retries: u32,
+    /// Renewals sent in the current run of push route deaths
+    #[serde(default, skip)]
+    route_renewals: u32,
+    /// When the last of them went out
+    #[serde(default, skip)]
+    opt_last_route_renewal_ts: Option<Timestamp>,
     /// Fallback inspection found missed changes; forces a reconcile for fresh notification routes
     needs_forced_reconcile: bool,
     /// Last seq hinted to the app per subkey; hints only rise, so replays and duplicates drop
@@ -108,16 +120,32 @@ impl OutboundWatchStateEditor<'_> {
     pub fn set_next_reconcile_ts(&mut self, next_reconcile_ts: Timestamp) {
         self.state.opt_next_reconcile_ts = Some(next_reconcile_ts);
     }
+    pub fn set_reconcile_retries(&mut self, reconcile_retries: u32) {
+        self.state.reconcile_retries = reconcile_retries;
+    }
+    /// A renewal went out because a push route died; a death after the ceiling of quiet starts a
+    /// new run
+    pub fn record_route_renewal(&mut self, now: Timestamp, ceiling: TimestampDuration) {
+        if self
+            .state
+            .opt_last_route_renewal_ts
+            .is_some_and(|ts| now.duration_since(ts) > ceiling)
+        {
+            self.state.route_renewals = 0;
+        }
+        self.state.route_renewals = self.state.route_renewals.saturating_add(1);
+        self.state.opt_last_route_renewal_ts = Some(now);
+    }
     pub fn update_last_consensus_node_count(&mut self) {
         self.state.opt_last_consensus_node_count = Some(self.state.nodes().len());
     }
     pub fn touch_value_changed(&mut self, ts: Timestamp) {
+        // Keeps the backed-off interval so a burst of deliveries cannot line up a re-check wave
         self.state.last_value_changed_ts = Some(ts);
-        // A delivered change is proof the watch works; start the backoff over
-        self.state.opt_fallback_inspect_interval = None;
     }
     pub fn touch_fallback_inspect(&mut self, ts: Timestamp) {
         self.state.last_fallback_inspect_ts = Some(ts);
+        self.state.opt_fallback_not_before = None;
     }
     /// An inspection was answered with nothing newer: wait longer before asking again,
     /// up to `max_interval`
@@ -126,16 +154,43 @@ impl OutboundWatchStateEditor<'_> {
         self.state.opt_fallback_inspect_interval =
             Some(TimestampDuration::new(cur.as_u64().saturating_mul(2)).min(max_interval));
     }
-    /// Something that could have hidden a missed update: a productive inspection, or
-    /// the watch's node set or parameters moving
-    pub fn reset_fallback_inspect_backoff(&mut self) {
+    /// Something that could have hidden a missed update: a productive inspection, the watch's
+    /// node set or parameters moving, or a failure on its delivery path. A failure many watches
+    /// share passes `opt_spread_from`, its time: the next inspection then waits for this watch's
+    /// own phase of the base interval, so theirs spread over it rather than all coming due at once.
+    pub fn reset_fallback_inspect_backoff(&mut self, opt_spread_from: Option<Timestamp>) {
         self.state.opt_fallback_inspect_interval = None;
+        self.state.opt_fallback_not_before = opt_spread_from.map(|now| {
+            let reference_ts = self.state.fallback_reference_ts();
+            let base = WATCH_FALLBACK_INSPECT_INTERVAL.as_u64();
+            let periods = now.duration_since(reference_ts).as_u64().div_ceil(base);
+            reference_ts.later(TimestampDuration::new(periods * base))
+        });
     }
     pub fn set_forced_reconcile(&mut self) {
         self.state.needs_forced_reconcile = true;
     }
     pub fn clear_forced_reconcile(&mut self) {
         self.state.needs_forced_reconcile = false;
+    }
+    /// Under our own loss the next fallback inspection waits the interval stretched by
+    /// 1/`survival`, fixed now so that recovering does not bring every stretched watch due at once
+    pub fn stretch_fallback_inspect(&mut self, survival: f64, max_interval: TimestampDuration) {
+        if survival >= 1.0 {
+            return;
+        }
+        let interval = self.state.fallback_inspect_interval(max_interval);
+        let stretched = if survival > 0.0 {
+            interval.f64_mul(1.0 / survival).min(max_interval)
+        } else {
+            max_interval
+        };
+        let due = self.state.fallback_reference_ts().later(stretched);
+        self.state.opt_fallback_not_before = Some(
+            self.state
+                .opt_fallback_not_before
+                .map_or(due, |nb| nb.max(due)),
+        );
     }
     pub fn set_last_reported_subkey_seq(&mut self, subkey: ValueSubkey, seq: ValueSeqNum) {
         self.state.last_reported_subkey_seqs.insert(subkey, seq);
@@ -159,6 +214,10 @@ impl OutboundWatchState {
             last_value_changed_ts: None,
             last_fallback_inspect_ts: None,
             opt_fallback_inspect_interval: None,
+            opt_fallback_not_before: None,
+            reconcile_retries: 0,
+            route_renewals: 0,
+            opt_last_route_renewal_ts: None,
             needs_forced_reconcile: false,
             last_reported_subkey_seqs: BTreeMap::new(),
             unread_reported_subkeys: BTreeMap::new(),
@@ -276,6 +335,13 @@ impl OutboundWatchState {
         res
     }
 
+    /// Whether a fallback inspection has fired with no change pushed since. The fallback stamps
+    /// its time as it fires, so `needs_fallback_inspect` cannot answer this for its own report
+    pub fn unpushed_since_fallback(&self) -> bool {
+        self.last_fallback_inspect_ts
+            .is_some_and(|f| self.last_value_changed_ts.is_none_or(|v| v < f))
+    }
+
     /// Whether the current backed-off interval has passed in silence since the latest of
     /// establishment, the last fallback inspection and the last delivered change
     pub fn needs_fallback_inspect(
@@ -283,34 +349,63 @@ impl OutboundWatchState {
         cur_ts: Timestamp,
         max_interval: TimestampDuration,
     ) -> bool {
-        let reference_ts = [self.last_fallback_inspect_ts, self.last_value_changed_ts]
+        if self.opt_fallback_not_before.is_some_and(|ts| cur_ts < ts) {
+            return false;
+        }
+        cur_ts
+            >= self
+                .fallback_reference_ts()
+                .later(self.fallback_inspect_interval(max_interval))
+    }
+
+    /// The latest of establishment, the last fallback inspection and the last delivered change
+    fn fallback_reference_ts(&self) -> Timestamp {
+        [self.last_fallback_inspect_ts, self.last_value_changed_ts]
             .into_iter()
             .flatten()
-            .fold(self.watch_established_ts, Timestamp::max);
-
-        cur_ts >= reference_ts.later(self.fallback_inspect_interval(max_interval))
+            .fold(self.watch_established_ts, Timestamp::max)
     }
 
     /// Whether the fallback change inspection is due. Once the interval reaches its ceiling, a
-    /// watch at consensus also waits for its renewal window: every node accepted it within one
-    /// per-node lifetime, so one inspection per renewal covers it. A watch short of consensus
-    /// keeps the ceiling, which is its delivery latency.
+    /// watch at consensus that has had a push since its last inspection waits for its renewal
+    /// window: every node accepted it within one per-node lifetime and its pushes arrive, so one
+    /// inspection per renewal covers it. Without a push it keeps the ceiling, which bounds how
+    /// long pushes failing silently can hide changes, as it does for a watch short of consensus.
+    /// `opt_loss_end` is when the latest Offline or Degraded period ended, with this watch's
+    /// share of an interval: pushes from before it may have lost their successors, so the
+    /// watch inspects again from that point on, spread so watches do not all go at once.
     pub fn fallback_inspect_due(
         &self,
         cur_ts: Timestamp,
         consensus_count: usize,
         renew_window: TimestampDuration,
         max_interval: TimestampDuration,
+        opt_loss_end: Option<(Timestamp, TimestampDuration)>,
     ) -> bool {
         if !self.needs_fallback_inspect(cur_ts, max_interval) {
             return false;
         }
         if self.nodes.len() < consensus_count
             || self.fallback_inspect_interval(max_interval) < max_interval
+            || !self.pushed_since_fallback()
         {
             return true;
         }
+        if let Some((loss_end_ts, spread)) = opt_loss_end {
+            if self.last_value_changed_ts.is_none_or(|ts| ts < loss_end_ts) {
+                return cur_ts >= loss_end_ts.later(spread);
+            }
+        }
         cur_ts.later(renew_window) >= self.min_expiration
+    }
+
+    /// Whether a change was pushed since the last fallback inspection, or since establishment
+    /// before the first
+    fn pushed_since_fallback(&self) -> bool {
+        let since = self
+            .last_fallback_inspect_ts
+            .unwrap_or(self.watch_established_ts);
+        self.last_value_changed_ts.is_some_and(|ts| ts >= since)
     }
 
     /// The interval currently in force for this watch's fallback inspection
@@ -319,6 +414,36 @@ impl OutboundWatchState {
         self.opt_fallback_inspect_interval
             .unwrap_or(WATCH_FALLBACK_INSPECT_INTERVAL)
             .min(max_interval)
+    }
+
+    /// Consecutive reconciles that ended short of consensus
+    pub fn reconcile_retries(&self) -> u32 {
+        self.reconcile_retries
+    }
+
+    /// Whether a renewal for a dead push route may go out now: the first of a run at once, the
+    /// rest through `failure_backoff` from `retry_base` up to the fallback ceiling
+    pub fn route_renewal_due(
+        &self,
+        cur_ts: Timestamp,
+        retry_base: TimestampDuration,
+        max_interval: TimestampDuration,
+        opt_survival: Option<f64>,
+    ) -> bool {
+        let Some(last_ts) = self.opt_last_route_renewal_ts else {
+            return true;
+        };
+        let since = cur_ts.duration_since(last_ts);
+        if self.route_renewals == 0 || since > max_interval {
+            return true;
+        }
+        failure_backoff(
+            retry_base,
+            max_interval,
+            self.route_renewals - 1,
+            opt_survival,
+        )
+        .is_some_and(|delay| since >= delay)
     }
 
     /// Whether a forced reconcile is needed (fallback inspection found missed changes).

@@ -230,9 +230,8 @@ impl RPCProcessor {
         // Destructure
         let (opaque_record_key, subkey, value, descriptor) = set_value_q.destructure();
 
-        // Get target for ValueChanged notifications
+        // The writer, whose own watch is left out of this change's ValueChanged pushes
         let dest = network_result_try!(self.get_respond_to_destination(&msg));
-        let target = dest.get_target(&routing_table)?;
 
         // Get the nodes that we know about that are closer to the the key than our own node
         let closer_to_key_peers = network_result_try!(routing_table
@@ -271,7 +270,7 @@ impl RPCProcessor {
                         subkey,
                         Arc::new(value),
                         descriptor.map(Arc::new),
-                        target
+                        dest
                     )
                     .await
                     .map_err(RPCError::internal)?);

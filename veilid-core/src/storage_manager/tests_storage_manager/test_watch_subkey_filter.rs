@@ -1,6 +1,19 @@
 use super::*;
+use crate::routing_table::{PrivateRoute, RouteNode};
+use crate::rpc_processor::Destination;
 use crate::tests::*;
-use crate::veilid_api::Target;
+
+/// A watcher's reply route, asked to be reached with `sequencing`
+fn route_destination(tag: u8, sequencing: Sequencing) -> Destination {
+    let ck = CRYPTO_KIND_VLD0;
+    Destination::private_route(
+        Arc::new(PrivateRoute::new_stub(
+            PublicKey::new(ck, BarePublicKey::new(&[tag; 32])),
+            RouteNode::NodeId(NodeId::new(ck, BareNodeId::new(&[tag; 32]))),
+        )),
+        SafetySelection::Unsafe(sequencing),
+    )
+}
 
 /// Whether a change notification carries the VALUE is decided per WATCHER.
 ///
@@ -63,7 +76,7 @@ pub async fn test_watch_value_reported_per_watcher_range() {
             expiration: Timestamp::new(Timestamp::now().as_u64() + 3_600_000_000u64),
             count: 100,
             watcher_member_id: MemberId::new(ck, BareMemberId::new(&[tag; 32])),
-            target: Target::NodeId(NodeId::new(ck, BareNodeId::new(&[tag; 32]))),
+            dest: route_destination(tag, Sequencing::PreferOrdered),
         };
         store.watch_record(opaque_record_key.clone(), params, None)
     };
@@ -137,4 +150,87 @@ pub async fn test_watch_value_reported_per_watcher_range() {
 
 pub async fn test_all() {
     test_watch_value_reported_per_watcher_range().await;
+    test_set_from_watcher_route_skips_it().await;
+}
+
+/// A set arriving from a watcher's own reply route skips that watcher however the set asked to be
+/// answered, and every other watcher's change carries the destination its watch keeps
+pub async fn test_set_from_watcher_route_skips_it() {
+    let (update_callback, config) = fixture_veilid_core();
+    let api = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+    let registry = api.core_context().unwrap().registry();
+    let storage_manager = registry.storage_manager();
+    let crypto = api.crypto().unwrap();
+
+    let ck = CRYPTO_KIND_VLD0;
+    let vcrypto = crypto.get(ck).expect("vld0 cryptosystem");
+    let owner_pk = vcrypto.generate_keypair().key();
+    let avcrypto = vcrypto.as_async();
+    let schema_data: Bytes = DHTSchema::dflt(2).expect("schema").compile().into();
+    let opaque_record_key =
+        make_opaque_record_key(&avcrypto, owner_pk.ref_value(), &schema_data).await;
+    let sig = Signature::new(ck, BareSignature::new(&[0u8; 64]));
+    let descriptor = SignedValueDescriptor::new(owner_pk.clone(), schema_data, sig.clone());
+    let store = storage_manager
+        .get_local_record_store()
+        .expect("local record store");
+    let record = Record::<LocalRecordDetail>::try_new(
+        Timestamp::now(),
+        Arc::new(descriptor),
+        LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferOrdered)),
+    )
+    .expect("record");
+    store
+        .try_new_record(opaque_record_key.clone(), record)
+        .await
+        .expect("try_new_record");
+
+    for tag in [7u8, 8u8] {
+        let params = InboundWatchParameters {
+            subkeys: ValueSubkeyRangeSet::single(1),
+            expiration: Timestamp::new(Timestamp::now().as_u64() + 3_600_000_000u64),
+            count: 100,
+            watcher_member_id: MemberId::new(ck, BareMemberId::new(&[tag; 32])),
+            dest: route_destination(tag, Sequencing::PreferOrdered),
+        };
+        let watch_result = store
+            .watch_record(opaque_record_key.clone(), params, None)
+            .await
+            .expect("watch_record");
+        assert!(matches!(
+            watch_result,
+            InboundWatchValueResult::Created { .. }
+        ));
+    }
+
+    let vd = EncryptedValueData::try_new(
+        ValueSeqNum::from(1),
+        Bytes::from_static(b"element"),
+        owner_pk.clone(),
+        None,
+    )
+    .expect("value data");
+    let subkey_values: SubkeyValueList = vec![(1, Arc::new(SignedValueData::new(vd, sig)))];
+    let writer = route_destination(7, Sequencing::EnsureOrdered);
+    assert!(writer != route_destination(7, Sequencing::PreferOrdered));
+    store
+        .set_subkeys_single_record(
+            &opaque_record_key,
+            &subkey_values,
+            InboundWatchUpdateMode::ExcludeDestination(writer),
+            CommitActionFlushMode::Immediate,
+        )
+        .await
+        .expect("set_subkeys_single_record");
+
+    let changes = store.take_value_changes().await;
+    assert_eq!(changes.len(), 1, "only the other watcher: {changes:?}");
+    assert_eq!(
+        changes[0].dest,
+        route_destination(8, Sequencing::PreferOrdered)
+    );
+
+    api.shutdown().await;
 }

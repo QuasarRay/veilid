@@ -308,6 +308,9 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     fn confirmed(&self) -> bool {
         self.common.confirmed()
     }
+    fn receive_mtus(&self) -> Option<TransportMtus> {
+        self.common.receive_mtus()
+    }
     fn capabilities(&self) -> BTreeSet<VeilidCapability> {
         self.common.capabilities()
     }

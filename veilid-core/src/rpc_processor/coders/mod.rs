@@ -19,6 +19,7 @@ mod signal_info;
 mod signed_value_data;
 mod signed_value_descriptor;
 mod socket_address;
+mod transport_mtus;
 #[cfg(feature = "unstable-tunnels")]
 mod tunnel;
 
@@ -43,6 +44,7 @@ pub use signal_info::*;
 pub use signed_value_data::*;
 pub use signed_value_descriptor::*;
 pub use socket_address::*;
+pub use transport_mtus::*;
 #[cfg(feature = "unstable-tunnels")]
 pub use tunnel::*;
 

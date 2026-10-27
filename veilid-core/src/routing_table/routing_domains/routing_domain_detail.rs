@@ -30,6 +30,8 @@ pub trait RoutingDomainDetail:
     fn origin_routing_domains(&self) -> RoutingDomainSet;
     /// Whether or not the network dialinfo has been confirmed by the network manager
     fn confirmed(&self) -> bool;
+    /// The largest packets this node takes per transport, None while they are still being detected
+    fn receive_mtus(&self) -> Option<TransportMtus>;
     /// What Veilid capabilities are supported by RPCs in this routing domain
     fn capabilities(&self) -> BTreeSet<VeilidCapability>;
     /// What relays are configured for this domain

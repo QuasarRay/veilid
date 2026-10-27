@@ -12,7 +12,9 @@ pub enum RoutingDomainInboundStage {
     Unusable,
     /// Network setup, dialinfo confirmation, address types + protocol types are valid, but 1+ relays must be selected because of missing dialinfo.
     NeedsRelays,
-    /// Network setup, dialinfo confirmation, address types + protocol types are valid, and all relays needed are selected.
+    /// Network setup, dialinfo confirmation, address types + protocol types are valid, all relays needed are selected, but our transport mtus are still being detected.
+    NeedsTransportMtus,
+    /// Network setup, dialinfo confirmation, address types + protocol types are valid, all relays needed are selected, and our transport mtus are known.
     ReadyToPublish,
 }
 
@@ -26,6 +28,7 @@ impl fmt::Display for RoutingDomainInboundStage {
                 }
                 RoutingDomainInboundStage::Unusable => write!(f, "Unusable"),
                 RoutingDomainInboundStage::NeedsRelays => write!(f, "NeedsRelays"),
+                RoutingDomainInboundStage::NeedsTransportMtus => write!(f, "NeedsTransportMtus"),
                 RoutingDomainInboundStage::ReadyToPublish => write!(f, "ReadyToPublish"),
             }
         } else {
@@ -36,6 +39,9 @@ impl fmt::Display for RoutingDomainInboundStage {
                 }
                 RoutingDomainInboundStage::Unusable => write!(f, "Unusable"),
                 RoutingDomainInboundStage::NeedsRelays => write!(f, "Needs Relays"),
+                RoutingDomainInboundStage::NeedsTransportMtus => {
+                    write!(f, "Needs Transport MTUs")
+                }
                 RoutingDomainInboundStage::ReadyToPublish => write!(f, "Ready To Publish"),
             }
         }

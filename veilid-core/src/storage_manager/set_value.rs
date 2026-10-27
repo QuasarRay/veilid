@@ -879,7 +879,7 @@ impl StorageManager {
         subkey: ValueSubkey,
         value: Arc<SignedValueData>,
         descriptor: Option<Arc<SignedValueDescriptor>>,
-        target: Target,
+        dest: Destination,
     ) -> VeilidAPIResult<NetworkResult<InboundSetValueResult>> {
         let remote_record_store = self.get_remote_record_store()?;
 
@@ -981,7 +981,7 @@ impl StorageManager {
                 opaque_record_key,
                 subkey,
                 value,
-                InboundWatchUpdateMode::ExcludeTarget(target),
+                InboundWatchUpdateMode::ExcludeDestination(dest),
                 CommitActionFlushMode::Deferred,
             )
             .await;

@@ -45,7 +45,7 @@ const REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY: TimestampDuration = TimestampDuration::
 /// Amount of time a route can remain idle before it gets tested
 const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
 /// Number of unique failing destinations before invalidating compiled route cache for a route
-const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
+pub(super) const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
 /// Number of consecutive send failures before invalidating compiled route cache for a safety route
 const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
 /// Consecutive loopback failures that kill an ordering. Datagram legs compound across hops, so

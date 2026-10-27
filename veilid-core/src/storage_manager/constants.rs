@@ -16,7 +16,8 @@ pub const SEND_VALUE_CHANGES_INTERVAL_SECS: u32 = 1;
 pub const CHECK_OUTBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
 /// Frequency to reconcile watches that are at consensus
 pub const RECONCILE_OUTBOUND_WATCHES_INTERVAL: TimestampDuration = TimestampDuration::new_secs(60);
-/// Frequency to retry reconciliation of watches that are not at consensus
+/// First retry of a reconcile that ended short of consensus; later ones back off toward the
+/// reconcile interval
 pub const RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL: TimestampDuration =
     TimestampDuration::new_secs(5);
 /// Renew per-node watches this many get-value timeouts before expiry, room for the renewal fanout
@@ -40,8 +41,11 @@ pub const REHYDRATE_BATCH_SIZE: usize = 16;
 pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 /// Number of subkey sets to push in parallel during transactional rehydration
 pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
-/// Delay before retrying a failed change inspection
+/// First retry of a failed change inspection; later ones back off toward the fallback ceiling
 pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
+/// Change inspections in flight at once, as many requests as a minimum-core peer serves together
+pub const MAX_CHANGE_INSPECTIONS_IN_FLIGHT: usize =
+    network_manager::RELAY_WORKERS_PER_CORE as usize;
 /// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
 pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
 /// Records worth of remembered rehydration checks

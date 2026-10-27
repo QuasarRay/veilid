@@ -61,7 +61,13 @@ impl NetworkManager {
 
         // Reply with bootstrap records
         let net = self.net();
-        match pin_future_closure!(net.send_data_to_existing_flow(flow, json_bytes)).await? {
+        match pin_future_closure!(net.send_data_to_existing_flow(
+            flow,
+            json_bytes,
+            SAFE_TRANSPORT_MTU
+        ))
+        .await?
+        {
             NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
             NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
             _ => Ok(NetworkResult::no_connection_other(

@@ -132,6 +132,7 @@ pub fn fix_peer_info_at(
         AddressTypeSet::new(),
         vec![fix_dial_info_detail()],
         vec![],
+        TransportMtus::default(),
     );
 
     PeerInfo::try_new_from_node_info(
@@ -155,6 +156,7 @@ pub fn fix_unsigned_peer_info(
         AddressTypeSet::new(),
         vec![fix_dial_info_detail()],
         vec![],
+        TransportMtus::default(),
     );
 
     PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
