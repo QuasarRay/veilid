@@ -59,7 +59,7 @@ impl StorageManager {
                 "Fallback inspection triggered for watch: {}",
                 record_key
             );
-            owm.enqueue_change_inspect(record_key.clone(), subkeys);
+            owm.enqueue_change_inspect(record_key.clone(), subkeys, ChangeInspectTrigger::Watch);
 
             if let Some(ow) = owm.outbound_watches.get_mut(&record_key.opaque()) {
                 ow.touch_fallback_inspect(&owm.per_node_states, cur_ts);
@@ -173,13 +173,26 @@ impl StorageManager {
         }
 
         // Run due change inspections, oldest first and up to the in-flight cap
-        for (k, subkeys) in owm.take_due_change_inspections(cur_ts) {
+        for (k, subkeys, trigger) in owm.take_due_change_inspections(cur_ts) {
             let opaque_record_key = k.opaque();
+            // A watch at consensus asks its own nodes for no peer list, most of an answer's bytes
+            let at_consensus = owm
+                .outbound_watches
+                .get(&opaque_record_key)
+                .and_then(|w| w.state())
+                .is_some_and(|state| state.nodes().len() >= consensus_count);
+            let fanout_config = if at_consensus {
+                FanoutConfig::NO_PEERS
+            } else {
+                FanoutConfig::default()
+            };
             let op_fut = Self::get_change_inspection_operation_inner(
                 self.registry(),
                 local_record_store.clone(),
                 k,
                 subkeys,
+                trigger,
+                fanout_config,
             );
             // Cleared in a wrapper so both inspection variants release it
             let registry = self.registry();

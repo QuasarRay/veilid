@@ -1,5 +1,6 @@
 use super::*;
 
+mod test_change_inspect_trigger;
 mod test_commit_rounds;
 mod test_encrypted_value_data;
 mod test_freeze_recovery;
@@ -39,6 +40,7 @@ pub async fn test_all() {
     test_transaction_stage_consensus::test_all();
     test_unanswered_inspect::test_all().await;
     test_watch_bookkeeping::test_all().await;
+    test_change_inspect_trigger::test_all();
     test_watch_fallback_backoff::test_all();
     test_watch_node_cap::test_all();
     test_watch_route_pinning::test_all().await;

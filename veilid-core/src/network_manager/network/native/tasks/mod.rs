@@ -40,42 +40,17 @@ impl NativeNetwork {
         }
 
         // Set network interfaces tick task
-        let this = self.clone();
-        self.network_interfaces_task.set_routine(move |s, l, t| {
-            let this = this.clone();
-            Box::pin(async move {
-                this.network_interfaces_task_routine(s, Timestamp::new(l), Timestamp::new(t))
-                    .await
-            })
-        });
+        impl_setup_task_async_clone!(
+            self,
+            network_interfaces_task,
+            network_interfaces_task_routine
+        );
 
         // Set mtu detection tick task
-        {
-            let this = self.clone();
-            self.mtu_detection_task.set_routine(move |s, l, t| {
-                let this = this.clone();
-                Box::pin(async move {
-                    Box::pin(this.mtu_detection_task_routine(
-                        s,
-                        Timestamp::new(l),
-                        Timestamp::new(t),
-                    ))
-                    .await
-                })
-            });
-        }
+        impl_setup_task_clone!(self, mtu_detection_task, mtu_detection_task_routine);
 
         // Set upnp tick task
-        {
-            let this = self.clone();
-            self.upnp_task.set_routine(move |s, l, t| {
-                let this = this.clone();
-                Box::pin(async move {
-                    this.upnp_task_routine(s, Timestamp::new(l), Timestamp::new(t))
-                        .await
-                })
-            });
-        }
+        impl_setup_task_async_clone!(self, upnp_task, upnp_task_routine);
     }
 
     #[cfg_attr(

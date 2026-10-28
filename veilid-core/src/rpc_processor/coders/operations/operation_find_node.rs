@@ -6,12 +6,14 @@ const MAX_FIND_NODE_A_PEERS_LEN: usize = veilid_capnp::MAX_FIND_NODE_A_PEERS_LEN
 pub(in crate::rpc_processor) struct RPCOperationFindNodeQ {
     hash_coordinate: HashCoordinate,
     capabilities: Vec<VeilidCapability>,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationFindNodeQ {
     pub fn try_new(
         hash_coordinate: HashCoordinate,
         capabilities: Vec<VeilidCapability>,
+        fanout_config: FanoutConfig,
     ) -> Result<Self, RPCError> {
         if capabilities.len() > MAX_CAPABILITIES {
             return Err(RPCError::internal("capabilities length too long"));
@@ -20,6 +22,7 @@ impl RPCOperationFindNodeQ {
         Ok(Self {
             hash_coordinate,
             capabilities,
+            fanout_config,
         })
     }
 
@@ -30,8 +33,8 @@ impl RPCOperationFindNodeQ {
     //     Ok(())
     // }
 
-    pub fn destructure(self) -> (HashCoordinate, Vec<VeilidCapability>) {
-        (self.hash_coordinate, self.capabilities)
+    pub fn destructure(self) -> (HashCoordinate, Vec<VeilidCapability>, FanoutConfig) {
+        (self.hash_coordinate, self.capabilities, self.fanout_config)
     }
 
     pub fn decode(
@@ -57,7 +60,9 @@ impl RPCOperationFindNodeQ {
             })
             .unwrap_or_default();
 
-        Self::try_new(node_id.to_hash_coordinate(), capabilities)
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
+
+        Self::try_new(node_id.to_hash_coordinate(), capabilities, fanout_config)
     }
     pub fn encode(
         &self,
@@ -80,6 +85,8 @@ impl RPCOperationFindNodeQ {
 
             s.clone_from_slice(&capvec);
         }
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
         Ok(())
     }
 }

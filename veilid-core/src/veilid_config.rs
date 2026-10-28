@@ -983,8 +983,10 @@ pub struct VeilidConfigInternalDHT {
     pub validate_dial_info_receipt_time_ms: u32,
     /// Maximum lifetime of a DHT watch, in milliseconds.
     pub max_watch_expiration_ms: u32,
-    /// Longest interval between change inspections of a watch, in milliseconds; a watch short
-    /// of consensus, or not yet established, delivers changes at most this late.
+    /// Longest interval between change inspections of a watch, in milliseconds: the interval
+    /// doubles up to it while inspections find nothing. Half the watch lifetime by default, so a
+    /// quiet watch inspects before each renewal; a watch short of consensus delivers changes at
+    /// most this late.
     pub max_watch_inspect_interval_ms: u32,
     /// Maximum concurrent watches by anonymous watchers (signer not a schema member).
     pub public_watch_limit: u32,
@@ -1013,7 +1015,7 @@ impl Default for VeilidConfigInternalDHT {
             min_peer_refresh_time_ms: 60000,
             validate_dial_info_receipt_time_ms: 1000,
             max_watch_expiration_ms: 600000,
-            max_watch_inspect_interval_ms: 120000,
+            max_watch_inspect_interval_ms: 300000,
             public_watch_limit: 32,
             member_watch_limit: 8,
             public_transaction_limit: 8,
@@ -1575,6 +1577,7 @@ impl VeilidConfig {
 #[derive(Clone)]
 #[must_use]
 pub struct VeilidStartupOptions {
+    /// Where the node delivers its updates to the app
     update_cb: UpdateCallback,
     /// Shared by every clone, so a change reaches every component's `config()`
     config: Arc<ArcSwap<VeilidConfig>>,

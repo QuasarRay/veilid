@@ -11,6 +11,7 @@ pub(in crate::rpc_processor) struct RPCOperationWatchValueQ {
     duration: TimestampDuration,
     count: u32,
     watch_id: Option<u64>,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationWatchValueQ {
@@ -20,6 +21,7 @@ impl RPCOperationWatchValueQ {
         duration: TimestampDuration,
         count: u32,
         watch_id: Option<u64>,
+        fanout_config: FanoutConfig,
     ) -> Result<Self, RPCError> {
         if subkeys.ranges_len() > MAX_WATCH_VALUE_Q_SUBKEY_RANGES_LEN {
             return Err(RPCError::internal("WatchValueQ subkeys length too long"));
@@ -36,6 +38,7 @@ impl RPCOperationWatchValueQ {
             duration,
             count,
             watch_id,
+            fanout_config,
         })
     }
 
@@ -54,6 +57,7 @@ impl RPCOperationWatchValueQ {
         TimestampDuration,
         u32,
         Option<u64>,
+        FanoutConfig,
     ) {
         (
             self.key,
@@ -61,6 +65,7 @@ impl RPCOperationWatchValueQ {
             self.duration,
             self.count,
             self.watch_id,
+            self.fanout_config,
         )
     }
 
@@ -98,8 +103,9 @@ impl RPCOperationWatchValueQ {
         } else {
             None
         };
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
 
-        Self::try_new(key, subkeys, duration, count, watch_id)
+        Self::try_new(key, subkeys, duration, count, watch_id, fanout_config)
     }
 
     pub fn encode(
@@ -123,6 +129,8 @@ impl RPCOperationWatchValueQ {
         builder.set_duration(self.duration.as_u64());
         builder.set_count(self.count);
         builder.set_watch_id(self.watch_id.unwrap_or(0u64));
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
         Ok(())
     }
 }

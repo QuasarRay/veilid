@@ -141,6 +141,42 @@ pub async fn test_record_index() {
         }
     }
 
+    // The record count limit with storage to spare: the remote store at its record cap
+    for crypto_kind in VALID_CRYPTO_KINDS {
+        let vcrypto = crypto
+            .get(crypto_kind)
+            .expect("should get valid cryptosystem");
+        let context_name = format!("count_limit_{}", vcrypto.kind());
+        let record_table_name = format!("records_{}", context_name);
+        let subkey_table_name = format!("subkeys_{}", context_name);
+
+        let _ = table_store.delete(&record_table_name).await;
+        let _ = table_store.delete(&subkey_table_name).await;
+
+        let record_table = table_store
+            .open_pooled(&record_table_name, 1, 1)
+            .await
+            .expect("should open");
+        let subkey_table = table_store
+            .open_pooled(&subkey_table_name, 1, 1)
+            .await
+            .expect("should open");
+
+        let mut limits = remote_config;
+        limits.max_records = Some(RECORD_COUNT);
+        let unlocked_inner = Arc::new(RecordStoreUnlockedInner {
+            registry: registry.clone(),
+            name: context_name.clone(),
+            limits,
+            record_table,
+            subkey_table,
+            opt_inbound_expiry: None,
+        });
+
+        info!("{}: test_record_count_limit", context_name);
+        test_record_count_limit(unlocked_inner, &vcrypto).await;
+    }
+
     mock_registry::terminate(registry).await;
 }
 
@@ -791,6 +827,61 @@ pub async fn test_reopen_persistence(
             value.signed_value_data().value_data().seq(),
             ValueSeqNum::from(5),
             "row should survive reopen"
+        );
+    }
+}
+
+/// At the record count limit, making room for a new record evicts the least recently used one
+/// itself, so the cache never evicts behind the index's back when the record is inserted
+pub async fn test_record_count_limit(
+    unlocked_inner: Arc<RecordStoreUnlockedInner>,
+    vcrypto: &CryptoSystemGuard<'_>,
+) {
+    let limit = unlocked_inner.limits.max_records.expect("count limit");
+    let mut record_index = TestRecordIndex::try_new(unlocked_inner)
+        .await
+        .expect("should make new recordindex");
+    let desc = random_signed_value_descriptor(vcrypto, Some(MAX_SUBKEY));
+    let new_record = || {
+        Record::<LocalRecordDetail>::try_new(
+            Timestamp::now(),
+            desc.clone(),
+            LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
+        )
+        .expect("should create record data")
+    };
+    let keys: Vec<_> = (0..=limit)
+        .map(|n| nth_opaque_record_key(vcrypto, n))
+        .collect();
+    for key in &keys[..limit] {
+        record_index
+            .create_record(key.clone(), new_record())
+            .expect("should create record");
+    }
+
+    // The slot is the only pressure: no bytes to fit, one record to admit
+    record_index
+        .make_room_for_record(0, None)
+        .expect("should make room");
+    assert!(
+        !record_index.contains_record(&keys[0]),
+        "the least recently used record goes before the new one is inserted"
+    );
+    for key in &keys[1..limit] {
+        assert!(record_index.contains_record(key), "only one record goes");
+    }
+
+    record_index
+        .create_record(keys[limit].clone(), new_record())
+        .expect("should create record at the limit");
+    assert!(
+        record_index.contains_record(&keys[limit]),
+        "the new record is in"
+    );
+    for key in &keys[1..limit] {
+        assert!(
+            record_index.contains_record(key),
+            "the create itself evicts nothing more"
         );
     }
 }

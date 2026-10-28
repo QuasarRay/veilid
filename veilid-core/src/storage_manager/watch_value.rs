@@ -14,6 +14,7 @@ struct OutboundWatchValueContext {
 /// The record of a node accepting a watch
 #[derive(Debug, Clone)]
 pub(super) struct AcceptedWatch {
+    /// The id the accepting node gave the watch
     pub watch_id: u64,
     /// The node that accepted the watch
     pub node_ref: NodeRef,
@@ -227,6 +228,26 @@ impl StorageManager {
     }
 
     /// Get the set of nodes in our active watches
+    /// The nodes holding our watch on a record
+    pub(super) fn get_outbound_watch_node_refs(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+    ) -> Vec<NodeRef> {
+        let owm = self.outbound_watch_manager.lock();
+        let Some(state) = owm
+            .outbound_watches
+            .get(opaque_record_key)
+            .and_then(|w| w.state())
+        else {
+            return vec![];
+        };
+        state
+            .nodes()
+            .iter()
+            .filter_map(|pnk| owm.per_node_states.get(pnk)?.watch_node_ref.clone())
+            .collect()
+    }
+
     pub fn get_outbound_watch_nodes(&self) -> Vec<Destination> {
         let owm = self.outbound_watch_manager.lock();
 
@@ -377,6 +398,7 @@ impl StorageManager {
                     0,
                     watcher,
                     Some(watch_id),
+                    FanoutConfig::default(),
                 )
                 .await?,
         )?;
@@ -428,6 +450,7 @@ impl StorageManager {
                 params.count,
                 watcher,
                 Some(watch_id),
+                FanoutConfig::default(),
             ))
             .await?,
         )?;
@@ -553,6 +576,7 @@ impl StorageManager {
                                 params.count,
                                 watcher,
                                 watch_id,
+                                FanoutConfig::default(),
                             )
                             .await?
                         {
@@ -1250,7 +1274,7 @@ impl StorageManager {
         // Inspect on params change (includes first establishment) or a first-time
         // node registration, so changes made while unwatched are reported promptly
         if opt_old_state_params != Some(desired) || did_add_new_nodes {
-            owm.enqueue_change_inspect(record_key, watch_subkeys);
+            owm.enqueue_change_inspect(record_key, watch_subkeys, ChangeInspectTrigger::Reconcile);
         }
     }
 
@@ -1323,16 +1347,18 @@ impl StorageManager {
         None
     }
 
-    /// Perform an inspection of the record's subkeys to see if we have the latest data
-    /// If not, then get the first changed subkey and post a ValueChanged update about it
-    /// Can be processed in the foreground, or by the background operation queue
-    /// Build the change-inspection operation for a record, routing to the transactional
-    /// variant when the record currently participates in a transaction set.
+    /// Build the change-inspection operation for a record: an inspection of its subkeys for
+    /// anything newer online. One changed subkey is fetched and reported with its value; a wider
+    /// range is announced for the app to read what it wants of it. Routes to the transactional
+    /// variant when the record currently participates in a transaction set. The caller, which
+    /// holds the watch manager, says whether the watch's own nodes can answer with no peer list.
     pub(super) fn get_change_inspection_operation_inner(
         registry: VeilidComponentRegistry,
         local_record_store: RecordStore<LocalRecordDetail>,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
+        trigger: ChangeInspectTrigger,
+        fanout_config: FanoutConfig,
     ) -> PinBoxFutureStatic<()> {
         let opaque_record_key = record_key.opaque();
         let opt_membership = match local_record_store.with_record(&opaque_record_key, |r| {
@@ -1343,10 +1369,19 @@ impl StorageManager {
         };
         match opt_membership {
             Some(membership) => Self::get_change_inspection_operation_transactional_inner(
-                registry, record_key, subkeys, membership,
+                registry,
+                record_key,
+                subkeys,
+                membership,
+                trigger,
+                fanout_config,
             ),
             None => Self::get_change_inspection_operation_non_transactional_inner(
-                registry, record_key, subkeys,
+                registry,
+                record_key,
+                subkeys,
+                trigger,
+                fanout_config,
             ),
         }
     }
@@ -1355,6 +1390,8 @@ impl StorageManager {
         registry: VeilidComponentRegistry,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
+        trigger: ChangeInspectTrigger,
+        fanout_config: FanoutConfig,
     ) -> PinBoxFutureStatic<()> {
         let fut = {
             let opaque_record_key = record_key.opaque();
@@ -1363,13 +1400,14 @@ impl StorageManager {
 
                 let res = async {
                     let report = this
-                        .inspect_record(
+                        .inspect_record_with_fanout(
                             record_key.clone(),
                             subkeys.clone(),
                             DHTReportScope::SyncGet,
+                            fanout_config,
                         )
                         .await?;
-                    let mut newer_online_subkeys = report.newer_online_subkeys();
+                    let newer_online_subkeys = report.newer_online_subkeys();
 
                     // Telemetry to decide whether the periodic inspection earns its cost
                     if newer_online_subkeys.is_empty() {
@@ -1384,38 +1422,38 @@ impl StorageManager {
                         !newer_online_subkeys.is_empty(),
                     );
 
-                    // Get changed first changed subkey until we find one to report
-                    while !newer_online_subkeys.is_empty() {
-                        let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
-
-                        let value = this
-                            .get_value(record_key.clone(), first_changed_subkey, true)
-                            .await?;
-
-                        if let Some(value) = value {
-                            // By subkey: the seq lists follow the report's range, not the
-                            // newer subset (a counter here skipped a seat in the field)
-                            let local_seq = report
-                                .local_seq_for(first_changed_subkey)
-                                .unwrap_or(ValueSeqNum::NONE);
-                            if value.seq() > local_seq {
-                                // Committed change: get_value already wrote the local store, so we
-                                // don't track a reported seq here.
-                                this.report_change_inspect_value(
-                                    record_key.clone(),
-                                    &opaque_record_key,
-                                    newer_online_subkeys,
-                                    first_changed_subkey,
-                                    value,
-                                    false,
-                                )
-                                .await;
-                                break;
-                            }
+                    if newer_online_subkeys.len() == 1 {
+                        let changed_subkey = newer_online_subkeys.first().unwrap_or_log();
+                        // By subkey: the seq lists follow the report's range, not the newer subset
+                        let local_seq = report
+                            .local_seq_for(changed_subkey)
+                            .unwrap_or(ValueSeqNum::NONE);
+                        let opt_value = this
+                            .get_value(record_key.clone(), changed_subkey, true)
+                            .await?
+                            .filter(|value| value.seq() > local_seq);
+                        if let Some(value) = opt_value {
+                            // get_value already wrote the local store, so no reported seq to track
+                            this.report_change_inspect(
+                                record_key.clone(),
+                                &opaque_record_key,
+                                newer_online_subkeys,
+                                Some((changed_subkey, value)),
+                                false,
+                                trigger,
+                            )
+                            .await;
                         }
-
-                        // If we didn't send an update, remove the first changed subkey and try again
-                        newer_online_subkeys.pop_first();
+                    } else if !newer_online_subkeys.is_empty() {
+                        this.report_change_inspect(
+                            record_key.clone(),
+                            &opaque_record_key,
+                            newer_online_subkeys,
+                            None,
+                            false,
+                            trigger,
+                        )
+                        .await;
                     }
                     VeilidAPIResult::Ok(())
                 }
@@ -1425,24 +1463,26 @@ impl StorageManager {
                     // A failed inspection leaves missed value changes missed forever;
                     // requeue while the watch still exists
                     veilid_log!(this debug "Failed to inspect record for changes, will retry: {}", e);
-                    this.requeue_failed_change_inspect(record_key, subkeys);
+                    this.requeue_failed_change_inspect(record_key, subkeys, trigger);
                 }
             }
         };
         pin_dyn_future!(fut)
     }
 
-    /// Report a changed subkey's value to the app during a change inspection: decrement the watch
-    /// count, force a reconcile if value changes were missed, and (for the non-committing hint
-    /// path) record the reported sequence number. Holds the watch record lock across the update.
-    async fn report_change_inspect_value(
+    /// Report what a change inspection found, one subkey with its value or a range the app reads
+    /// for itself: decrement the watch count, force a reconcile for fresh routes if pushes were
+    /// missed, unless a reconcile is what asked for the inspection, and (for the non-committing
+    /// hint path) record the reported sequence number. Holds the watch record lock across the
+    /// update.
+    async fn report_change_inspect(
         &self,
         record_key: RecordKey,
         opaque_record_key: &OpaqueRecordKey,
         changed_subkeys: ValueSubkeyRangeSet,
-        first_changed_subkey: ValueSubkey,
-        value: ValueData,
+        opt_value: Option<(ValueSubkey, ValueData)>,
         record_reported_seq: bool,
+        trigger: ChangeInspectTrigger,
     ) {
         let record_lock = self
             .record_lock_table
@@ -1466,13 +1506,12 @@ impl StorageManager {
             let cur_ts = Timestamp::now_non_decreasing();
             let missing_value_changes = state.unpushed_since_fallback()
                 || state.needs_fallback_inspect(cur_ts, self.timings().watch_inspect_max_interval);
-            let seq = value.seq();
             state.edit(&owm.per_node_states, |editor| {
                 editor.set_remaining_count(remaining_count);
-                if record_reported_seq {
-                    editor.set_last_reported_subkey_seq(first_changed_subkey, seq);
+                if let (Some((subkey, value)), true) = (&opt_value, record_reported_seq) {
+                    editor.set_last_reported_subkey_seq(*subkey, value.seq());
                 }
-                if missing_value_changes {
+                if missing_value_changes && trigger.may_force_reconcile() {
                     editor.set_forced_reconcile();
                 }
             });
@@ -1484,7 +1523,7 @@ impl StorageManager {
             record_key,
             changed_subkeys,
             remaining_count,
-            Some(value),
+            opt_value.map(|(_, value)| value),
         );
     }
 
@@ -1532,6 +1571,8 @@ impl StorageManager {
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
         transaction_membership: TransactionMembership,
+        trigger: ChangeInspectTrigger,
+        fanout_config: FanoutConfig,
     ) -> PinBoxFutureStatic<()> {
         let fut = {
             let opaque_record_key = record_key.opaque();
@@ -1547,10 +1588,11 @@ impl StorageManager {
                 let res = async {
                     // Non-transactional pre-check: skip the transaction when nothing is newer online
                     let report = this
-                        .inspect_record(
+                        .inspect_record_with_fanout(
                             record_key.clone(),
                             subkeys.clone(),
                             DHTReportScope::SyncGet,
+                            fanout_config,
                         )
                         .await?;
                     if report.newer_online_subkeys().is_empty() {
@@ -1573,6 +1615,7 @@ impl StorageManager {
                                 closure_record_key,
                                 opaque_record_key,
                                 closure_subkeys,
+                                trigger,
                             )
                             .await;
                             VeilidAPIResult::Ok(())
@@ -1586,7 +1629,7 @@ impl StorageManager {
                     Ok(()) => {}
                     // Contended, unanswered, or the begin did not complete
                     Err(VeilidAPIError::TryAgain { .. } | VeilidAPIError::Timeout) => {
-                        this.requeue_failed_change_inspect(record_key, subkeys);
+                        this.requeue_failed_change_inspect(record_key, subkeys, trigger);
                     }
                     Err(e) => {
                         veilid_log!(this debug "transactional change inspection failed: {}", e);
@@ -1597,15 +1640,16 @@ impl StorageManager {
         pin_dyn_future!(fut)
     }
 
-    /// Inspect a transactional record's changes and report the first changed subkey as a
-    /// non-committing hint. Runs inside the caller's transaction (which is rolled back), so the
-    /// local store is never modified.
+    /// Inspect a transactional record's changes and report them as a non-committing hint: one
+    /// changed subkey with its value, a wider range as it stands. Runs inside the caller's
+    /// transaction (which is rolled back), so the local store is never modified.
     async fn transactional_change_inspect_and_report(
         &self,
         transaction_handle: OutboundTransactionHandle,
         record_key: RecordKey,
         opaque_record_key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
+        trigger: ChangeInspectTrigger,
     ) {
         let report = match self.transaction_inspect(
             transaction_handle,
@@ -1619,13 +1663,12 @@ impl StorageManager {
                 return;
             }
         };
-        let mut newer_online_subkeys = report.newer_online_subkeys();
+        let newer_online_subkeys = report.newer_online_subkeys();
 
-        while !newer_online_subkeys.is_empty() {
-            let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
-
+        if newer_online_subkeys.len() == 1 {
+            let changed_subkey = newer_online_subkeys.first().unwrap_or_log();
             let value = match self
-                .transaction_get(transaction_handle, record_key.clone(), first_changed_subkey)
+                .transaction_get(transaction_handle, record_key.clone(), changed_subkey)
                 .await
             {
                 Ok(v) => v,
@@ -1634,27 +1677,31 @@ impl StorageManager {
                     return;
                 }
             };
-
-            if let Some(value) = value {
-                let local_seq = report
-                    .local_seq_for(first_changed_subkey)
-                    .unwrap_or(ValueSeqNum::NONE);
-                if value.seq() > local_seq {
-                    // Non-committing hint: track the reported seq since nothing is written locally
-                    self.report_change_inspect_value(
-                        record_key,
-                        &opaque_record_key,
-                        newer_online_subkeys,
-                        first_changed_subkey,
-                        value,
-                        true,
-                    )
-                    .await;
-                    return;
-                }
+            let local_seq = report
+                .local_seq_for(changed_subkey)
+                .unwrap_or(ValueSeqNum::NONE);
+            if let Some(value) = value.filter(|value| value.seq() > local_seq) {
+                // Non-committing hint: track the reported seq since nothing is written locally
+                self.report_change_inspect(
+                    record_key,
+                    &opaque_record_key,
+                    newer_online_subkeys,
+                    Some((changed_subkey, value)),
+                    true,
+                    trigger,
+                )
+                .await;
             }
-
-            newer_online_subkeys.pop_first();
+        } else if !newer_online_subkeys.is_empty() {
+            self.report_change_inspect(
+                record_key,
+                &opaque_record_key,
+                newer_online_subkeys,
+                None,
+                false,
+                trigger,
+            )
+            .await;
         }
     }
 
@@ -2305,6 +2352,7 @@ impl StorageManager {
         &self,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
+        trigger: ChangeInspectTrigger,
     ) {
         let cur_ts = Timestamp::now_non_decreasing();
         let survival = self
@@ -2331,7 +2379,7 @@ impl StorageManager {
         } else {
             retry_ts
         };
-        owm.enqueue_change_inspect_after(record_key, subkeys, not_before);
+        owm.enqueue_change_inspect_after(record_key, subkeys, not_before, trigger);
     }
 
     /// Check all watches for changes
@@ -2359,7 +2407,11 @@ impl StorageManager {
         veilid_log!(self debug "change inspecting {} watches", change_inspects.len());
 
         for change_inspect in change_inspects {
-            owm.enqueue_change_inspect(change_inspect.0, change_inspect.1);
+            owm.enqueue_change_inspect(
+                change_inspect.0,
+                change_inspect.1,
+                ChangeInspectTrigger::Watch,
+            );
         }
     }
 }

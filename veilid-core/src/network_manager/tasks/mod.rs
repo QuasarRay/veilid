@@ -12,32 +12,36 @@ impl NetworkManager {
         );
 
         // Set transport stats health log task
-        {
-            let registry = self.registry();
-            self.transport_stats_log_task
-                .set_routine(move |_s, _l, _t| {
-                    let registry = registry.clone();
-                    Box::pin(async move {
-                        registry.network_manager().transport_stats().log_health();
-                        Ok(())
-                    })
-                });
-        }
+        impl_setup_task!(
+            self,
+            Self,
+            transport_stats_log_task,
+            transport_stats_log_task_routine
+        );
 
         // Set address filter task
-        {
-            let registry = self.registry();
-            self.address_filter_task.set_routine(move |s, l, t| {
-                let registry = registry.clone();
-                Box::pin(async move {
-                    registry
-                        .network_manager()
-                        .address_filter()
-                        .address_filter_task_routine(s, Timestamp::new(l), Timestamp::new(t))
-                        .await
-                })
-            });
-        }
+        impl_setup_task_async!(self, Self, address_filter_task, address_filter_task_routine);
+    }
+
+    fn transport_stats_log_task_routine(
+        &self,
+        _stop_token: StopToken,
+        _last_ts: Timestamp,
+        _cur_ts: Timestamp,
+    ) -> EyreResult<()> {
+        self.transport_stats().log_health();
+        Ok(())
+    }
+
+    async fn address_filter_task_routine(
+        &self,
+        stop_token: StopToken,
+        last_ts: Timestamp,
+        cur_ts: Timestamp,
+    ) -> EyreResult<()> {
+        self.address_filter()
+            .address_filter_task_routine(stop_token, last_ts, cur_ts)
+            .await
     }
 
     pub async fn tick_event_handler(&self, _evt: Arc<TickEvent>) {

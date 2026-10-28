@@ -36,6 +36,7 @@ impl RPCProcessor {
         opaque_record_key: OpaqueRecordKey,
         descriptor_mode: DescriptorMode,
         signing_keypair: KeyPair,
+        fanout_config: FanoutConfig,
     ) -> RPCNetworkResult<Answer<TransactBeginAnswer>> {
         let _guard = self
             .startup_context
@@ -80,6 +81,7 @@ impl RPCProcessor {
                 None
             },
             want_descriptor,
+            fanout_config,
         )?;
         let question = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
@@ -252,7 +254,8 @@ impl RPCProcessor {
         };
 
         // Destructure
-        let (opaque_record_key, opt_descriptor, want_descriptor) = transact_begin_q.destructure();
+        let (opaque_record_key, opt_descriptor, want_descriptor, fanout_config) =
+            transact_begin_q.destructure();
         let Some(signer) = &msg.opt_signer else {
             return Ok(NetworkResult::invalid_message(
                 "transact begin requires signer",
@@ -267,7 +270,7 @@ impl RPCProcessor {
         };
 
         // Get the nodes that we know about that are closer to the the key than our own node
-        let closer_to_key_peers = network_result_try!(routing_table
+        let mut closer_to_key_peers = network_result_try!(routing_table
             .get_reliable_nodes_closer_to_key_peer_info(
                 routing_domain,
                 opaque_record_key.to_hash_coordinate(),
@@ -386,6 +389,9 @@ impl RPCProcessor {
         }
 
         // Make TransactBegin answer
+        closer_to_key_peers.truncate(
+            fanout_config.peers_limit(veilid_capnp::MAX_TRANSACT_BEGIN_A_PEERS_LEN as usize),
+        );
         let transact_begin_a = RPCOperationTransactBeginA::try_new(
             accepted,
             need_descriptor,

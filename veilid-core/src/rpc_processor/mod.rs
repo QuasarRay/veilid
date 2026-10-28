@@ -62,7 +62,8 @@ pub(crate) use answer::*;
 pub(crate) use coders::{
     canonical_message_builder_to_bytes_writer_packed,
     canonical_message_builder_to_bytes_writer_unpacked, decode_node_info, decode_private_route,
-    encode_node_info, encode_private_route, encode_route_hop, RPCDecodeContext, TransactCommand,
+    encode_node_info, encode_private_route, encode_route_hop, FanoutConfig, RPCDecodeContext,
+    TransactCommand,
 };
 pub(crate) use descriptor_mode::*;
 pub(crate) use destination::*;
@@ -474,6 +475,7 @@ impl RPCProcessor {
                     ),
                     node_id.to_hash_coordinate(),
                     vec![],
+                    FanoutConfig::default(),
                 ))
                 .await?
                 {

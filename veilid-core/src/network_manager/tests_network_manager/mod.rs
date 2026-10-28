@@ -14,6 +14,8 @@ mod test_hole_punch_ttl;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod test_hop_mtu;
 mod test_loss_estimator;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_mtu_probe_processor;
 mod test_online_detector;
 mod test_protected_reconnect;
 mod test_transport_stats;
@@ -45,6 +47,8 @@ pub async fn test_all() {
     test_family_mtu::test_all();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_hop_mtu::test_hop_mtu_sizes_by_the_next_hop().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_mtu_probe_processor::test_all().await;
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_hole_punch_ttl::test_all();
     test_transport_stats::test_all();

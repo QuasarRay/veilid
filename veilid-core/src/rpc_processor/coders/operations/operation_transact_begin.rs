@@ -15,6 +15,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactBeginQ {
     key: OpaqueRecordKey,
     descriptor: Option<SignedValueDescriptor>,
     want_descriptor: bool,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationTransactBeginQ {
@@ -22,6 +23,7 @@ impl RPCOperationTransactBeginQ {
         key: OpaqueRecordKey,
         descriptor: Option<SignedValueDescriptor>,
         want_descriptor: bool,
+        fanout_config: FanoutConfig,
     ) -> Result<Self, RPCError> {
         // Should not provide descriptor and want descriptor
         if descriptor.is_some() && want_descriptor {
@@ -32,6 +34,7 @@ impl RPCOperationTransactBeginQ {
             key,
             descriptor,
             want_descriptor,
+            fanout_config,
         })
     }
 
@@ -55,8 +58,20 @@ impl RPCOperationTransactBeginQ {
         Ok(())
     }
 
-    pub fn destructure(self) -> (OpaqueRecordKey, Option<SignedValueDescriptor>, bool) {
-        (self.key, self.descriptor, self.want_descriptor)
+    pub fn destructure(
+        self,
+    ) -> (
+        OpaqueRecordKey,
+        Option<SignedValueDescriptor>,
+        bool,
+        FanoutConfig,
+    ) {
+        (
+            self.key,
+            self.descriptor,
+            self.want_descriptor,
+            self.fanout_config,
+        )
     }
 
     pub fn decode(
@@ -81,11 +96,13 @@ impl RPCOperationTransactBeginQ {
         if descriptor.is_some() && want_descriptor {
             return Err(RPCError::protocol("want_descriptor but already provided"));
         }
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
 
         Ok(Self {
             key,
             descriptor,
             want_descriptor,
+            fanout_config,
         })
     }
     pub fn encode(
@@ -101,6 +118,8 @@ impl RPCOperationTransactBeginQ {
         }
 
         builder.set_want_descriptor(self.want_descriptor);
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
 
         Ok(())
     }

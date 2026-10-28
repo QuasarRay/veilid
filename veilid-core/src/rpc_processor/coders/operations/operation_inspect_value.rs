@@ -17,6 +17,7 @@ pub(in crate::rpc_processor) struct RPCOperationInspectValueQ {
     key: OpaqueRecordKey,
     subkeys: ValueSubkeyRangeSet,
     want_descriptor: bool,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationInspectValueQ {
@@ -24,11 +25,13 @@ impl RPCOperationInspectValueQ {
         key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         want_descriptor: bool,
+        fanout_config: FanoutConfig,
     ) -> Result<Self, RPCError> {
         Ok(Self {
             key,
             subkeys,
             want_descriptor,
+            fanout_config,
         })
     }
 
@@ -39,8 +42,13 @@ impl RPCOperationInspectValueQ {
     //     Ok(())
     // }
 
-    pub fn destructure(self) -> (OpaqueRecordKey, ValueSubkeyRangeSet, bool) {
-        (self.key, self.subkeys, self.want_descriptor)
+    pub fn destructure(self) -> (OpaqueRecordKey, ValueSubkeyRangeSet, bool, FanoutConfig) {
+        (
+            self.key,
+            self.subkeys,
+            self.want_descriptor,
+            self.fanout_config,
+        )
     }
 
     pub fn decode(
@@ -73,10 +81,12 @@ impl RPCOperationInspectValueQ {
         }
 
         let want_descriptor = reader.get_want_descriptor();
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
         Ok(Self {
             key,
             subkeys,
             want_descriptor,
+            fanout_config,
         })
     }
     pub fn encode(
@@ -98,6 +108,8 @@ impl RPCOperationInspectValueQ {
             skr_builder.set_end(*skr.end());
         }
         builder.set_want_descriptor(self.want_descriptor);
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
         Ok(())
     }
 }

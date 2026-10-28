@@ -5,19 +5,11 @@ impl_veilid_log_facility!("rtab");
 impl LocalNetworkRoutingDomainController {
     pub fn setup_tasks(&self) {
         // Set ping validator LocalNetwork tick task
-        let this = self.clone();
-        self.ping_validator_local_network_task
-            .set_routine(move |s, l, t| {
-                let this = this.clone();
-                Box::pin(async move {
-                    this.ping_validator_local_network_task_routine(
-                        s,
-                        Timestamp::new(l),
-                        Timestamp::new(t),
-                    )
-                    .await
-                })
-            });
+        impl_setup_task_clone!(
+            self,
+            ping_validator_local_network_task,
+            ping_validator_local_network_task_routine
+        );
     }
 
     pub async fn tick(&self) -> EyreResult<()> {
@@ -52,8 +44,7 @@ impl LocalNetworkRoutingDomainController {
 
     // Task routine for LocalNetwork status pings
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
-    #[allow(clippy::unused_async)]
-    pub async fn ping_validator_local_network_task_routine(
+    pub fn ping_validator_local_network_task_routine(
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,

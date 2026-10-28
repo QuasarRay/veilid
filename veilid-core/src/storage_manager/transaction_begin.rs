@@ -190,6 +190,7 @@ impl StorageManager {
                                     opaque_record_key.clone(),
                                     descriptor_mode.clone(),
                                     params.record_params.signing_keypair.clone(),
+                                    FanoutConfig::default(),
                                 )
                                 .await?
                             {

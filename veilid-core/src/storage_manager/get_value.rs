@@ -301,6 +301,7 @@ impl StorageManager {
                                 opaque_record_key.clone(),
                                 subkey,
                                 descriptor_mode,
+                                FanoutConfig::default(),
                             )
                             .await?
                         {

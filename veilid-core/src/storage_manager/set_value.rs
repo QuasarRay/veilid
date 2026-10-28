@@ -586,6 +586,7 @@ impl StorageManager {
                                     subkey,
                                     (*sent_value).clone(),
                                     descriptor_mode.clone(),
+                                    FanoutConfig::default(),
                                 )
                                 .await?
                             {

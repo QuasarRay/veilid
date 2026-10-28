@@ -33,6 +33,7 @@ impl RPCProcessor {
         opaque_record_key: OpaqueRecordKey,
         subkey: ValueSubkey,
         descriptor_mode: GetDescriptorMode,
+        fanout_config: FanoutConfig,
     ) -> RPCNetworkResult<Answer<GetValueAnswer>> {
         let _guard = self
             .startup_context
@@ -64,6 +65,7 @@ impl RPCProcessor {
             opaque_record_key.clone(),
             subkey,
             matches!(descriptor_mode, GetDescriptorMode::WantDescriptor),
+            fanout_config,
         )?;
         let question = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
@@ -208,10 +210,10 @@ impl RPCProcessor {
         };
 
         // Destructure
-        let (opaque_record_key, subkey, want_descriptor) = get_value_q.destructure();
+        let (opaque_record_key, subkey, want_descriptor, fanout_config) = get_value_q.destructure();
 
         // Get the nodes that we know about that are closer to the the key than our own node
-        let closer_to_key_peers = network_result_try!(routing_table
+        let mut closer_to_key_peers = network_result_try!(routing_table
             .get_reliable_nodes_closer_to_key_peer_info(
                 routing_domain,
                 opaque_record_key.to_hash_coordinate(),
@@ -278,6 +280,8 @@ impl RPCProcessor {
         }
 
         // Make GetValue answer
+        closer_to_key_peers
+            .truncate(fanout_config.peers_limit(veilid_capnp::MAX_GET_VALUE_A_PEERS_LEN as usize));
         let get_value_a = RPCOperationGetValueA::try_new(
             accepted,
             get_result_value.map(|x| (*x).clone()),

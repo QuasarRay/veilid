@@ -3,6 +3,7 @@
 //! - Only an egress move or a change of the egress interface's mtu starts it over
 //! - A probe is a full-size StatusQ asking for a full-size answer, sent beside a plain one to the
 //!   same peer: the plain answer arriving alone says the big packets were lost
+//! - A pass probes its peers at once; the tick hands passes to a processor and reads results
 
 use super::*;
 use futures_util::future::{select, Either};
@@ -14,10 +15,31 @@ const MTU_PROBE_CANDIDATES: usize = 8;
 const MTU_PROBE_PEERS: usize = 4;
 /// Peers an unsettled family remembers as tried, after which it forgets them all
 const MTU_PROBE_TRIED_MAX: usize = 256;
-/// Once the plain answer is in, the probe's answer gets this many of its round trips
+/// An answer gets this many of the round trips that predict it
 const MTU_PROBE_RTT_FACTOR: u64 = 3;
-/// The probe's answer gets at least this percent of the RPC timeout
+/// An answer gets at least this percent of the RPC timeout
 const MTU_PROBE_GRACE_PERCENT: u32 = 33;
+
+/// A peer a pass probes, over the dial info and at the size it is to carry
+pub(super) struct MtuProbeCandidate {
+    /// Who answers the probe
+    node: NodeRef,
+    /// The UDP dial info the probe takes
+    dial_info: DialInfo,
+    /// The full size the family would carry
+    size: u16,
+}
+
+/// What a peer's answer gets: a multiple of the round trip that predicts it, floored by a
+/// share of the RPC timeout and capped at the timeout
+fn probe_grace_ms(rpc_timeout_ms: u32, rtt_ms: u64) -> u32 {
+    let floor_ms = u64::from(rpc_timeout_ms * MTU_PROBE_GRACE_PERCENT / 100);
+    let grace_ms = rtt_ms
+        .saturating_mul(MTU_PROBE_RTT_FACTOR)
+        .max(floor_ms)
+        .min(u64::from(rpc_timeout_ms));
+    u32::try_from(grace_ms).unwrap_or(rpc_timeout_ms)
+}
 
 impl NativeNetwork {
     /// Starts over every in-use family whose egress moved or whose interface mtu changed
@@ -141,54 +163,91 @@ impl NativeNetwork {
         Some(receive_mtus)
     }
 
-    /// Probes every family a probe can still settle, and puts what the probes show into effect
-    pub(super) async fn mtu_detection_task_routine(
+    /// Spawns the pass processor for this network start; the tick feeds it and reads its results
+    pub(super) fn start_mtu_probe_processor(&self) {
+        let (pass_tx, pass_rx) = flume::unbounded();
+        let (result_tx, result_rx) = flume::unbounded();
+        let this = self.clone();
+        let prober: MtuProber<MtuProbeCandidate> = Arc::new(move |candidate| {
+            let this = this.clone();
+            Box::pin(async move { Box::pin(this.mtu_probe(candidate)).await })
+        });
+
+        let mut inner = self.inner.lock();
+        let Some(stop_token) = inner.stop_source.as_ref().map(|s| s.token()) else {
+            veilid_log!(self error "mtu probe processor needs the network's stop source");
+            return;
+        };
+        let jh = spawn(
+            "mtu probe processor",
+            mtu_probe_processor(prober, stop_token, pass_rx, result_tx),
+        );
+        inner.mtu_probe_passes = Some(pass_tx);
+        inner.mtu_probe_results = Some(result_rx);
+        inner.join_handles.push(jh);
+    }
+
+    /// Puts what finished passes showed into effect, and starts a pass for every family a probe
+    /// can still settle
+    pub(super) fn mtu_detection_task_routine(
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,
         _cur_ts: Timestamp,
     ) -> EyreResult<()> {
+        let mut changed = false;
+
+        // Finished passes first, so a family they leave unsettled can start another
+        let results = {
+            let inner = self.inner.lock();
+            inner
+                .mtu_probe_results
+                .as_ref()
+                .map(|results| results.try_iter().collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        for result in results {
+            // A pass that settles nothing leaves a detecting family at the safe size
+            let verdict = probe_verdict(&result.outcomes).unwrap_or(FamilyMtuState::Unprobed);
+            changed |= self.settle_family_mtu(result.address_type, result.generation, verdict);
+        }
+
         let pending = self
             .inner
             .lock()
             .family_mtus
             .iter()
             .filter(|(_, family_mtu)| {
-                matches!(
-                    family_mtu.state,
-                    FamilyMtuState::Detecting | FamilyMtuState::Unprobed
-                )
+                !family_mtu.probing
+                    && matches!(
+                        family_mtu.state,
+                        FamilyMtuState::Detecting | FamilyMtuState::Unprobed
+                    )
             })
             .map(|(address_type, family_mtu)| (*address_type, family_mtu.clone()))
             .collect::<Vec<_>>();
 
-        let mut changed = false;
         for (address_type, family_mtu) in pending {
             let (full_udp, _) = family_mtu.limits(address_type);
-            let candidates = self.mtu_probe_candidates(address_type, full_udp, &family_mtu.tried);
-
-            let mut outcomes = Vec::new();
-            let mut tried = Vec::new();
-            for (node, dial_info) in candidates.into_iter().take(MTU_PROBE_PEERS) {
-                tried.push(node.best_node_id());
-                let outcome = Box::pin(self.mtu_probe(node, dial_info, full_udp)).await;
-                outcomes.push(outcome);
-                // One full round trip settles the family; losses wait on every peer's word
-                if outcome == MtuProbeOutcome::Full {
-                    break;
+            let candidates = self
+                .mtu_probe_candidates(address_type, full_udp, &family_mtu.tried)
+                .into_iter()
+                .take(MTU_PROBE_PEERS)
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                // No peer to ask: a detecting family settles safe rather than hold up publication
+                if family_mtu.state == FamilyMtuState::Detecting
+                    && self.public_internet_waits_on_mtus()
+                {
+                    changed |= self.settle_family_mtu(
+                        address_type,
+                        family_mtu.generation,
+                        FamilyMtuState::Unprobed,
+                    );
                 }
+                continue;
             }
-            let mut verdict = probe_verdict(&outcomes);
-
-            // A family still detecting settles at the safe size rather than hold up publication
-            if verdict.is_none()
-                && family_mtu.state == FamilyMtuState::Detecting
-                && (!tried.is_empty() || self.public_internet_waits_on_mtus())
-            {
-                verdict = Some(FamilyMtuState::Unprobed);
-            }
-
-            changed |= self.settle_family_mtu(address_type, family_mtu.generation, tried, verdict);
+            self.start_family_probe(address_type, family_mtu.generation, candidates);
         }
 
         if changed {
@@ -204,7 +263,7 @@ impl NativeNetwork {
         address_type: AddressType,
         full_udp: u16,
         tried: &BTreeSet<NodeId>,
-    ) -> Vec<(NodeRef, DialInfo)> {
+    ) -> Vec<MtuProbeCandidate> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;
         let dial_info_filter = DialInfoFilter::all()
@@ -255,13 +314,29 @@ impl NativeNetwork {
         candidates.sort_by_key(|(at_full, _, _)| !*at_full);
         candidates
             .into_iter()
-            .map(|(_, node, dial_info)| (node, dial_info))
+            .map(|(_, node, dial_info)| MtuProbeCandidate {
+                node,
+                dial_info,
+                size: full_udp,
+            })
             .collect()
     }
 
-    /// Sends one peer a full-size probe and a plain StatusQ together over a UDP dial info
-    async fn mtu_probe(&self, node: NodeRef, dial_info: DialInfo, size: u16) -> MtuProbeOutcome {
+    /// Sends one peer a full-size probe and a plain StatusQ together over a UDP dial info. A
+    /// peer that says nothing within what its round trips predict settles nothing
+    async fn mtu_probe(&self, candidate: MtuProbeCandidate) -> MtuProbeOutcome {
+        let MtuProbeCandidate {
+            node,
+            dial_info,
+            size,
+        } = candidate;
         let rpc_processor = self.rpc_processor();
+        let rpc_timeout_ms = self.config().internal().network.rpc.timeout_ms;
+        let known_rtt_ms = node
+            .peer_stats()
+            .latency
+            .map_or(0, |latency| latency.average.as_u64() / 1000);
+        let first_word_ms = probe_grace_ms(rpc_timeout_ms, known_rtt_ms);
         let destination = Destination::dial_info(dial_info, node);
         // Only the datagram the answer arrived in says what the path carried
         let filled = size.saturating_sub(MTU_PROBE_FILL_SLACK);
@@ -277,32 +352,30 @@ impl NativeNetwork {
 
         let probe = pin!(rpc_processor.rpc_call_status(destination.clone(), Some(size)));
         let plain = pin!(rpc_processor.rpc_call_status(destination, None));
-        match select(probe, plain).await {
+        let Ok(first) = timeout(first_word_ms, select(probe, plain)).await else {
+            return MtuProbeOutcome::Inconclusive;
+        };
+        match first {
             Either::Left((probe_res, plain)) => {
                 if answered_full(&probe_res) {
                     return MtuProbeOutcome::Full;
                 }
                 let lost = probe_lost(&probe_res);
-                match plain.await {
-                    Ok(StatusResult::Sent(_)) if lost => MtuProbeOutcome::Lost,
+                match timeout(first_word_ms, plain).await {
+                    Ok(Ok(StatusResult::Sent(_))) if lost => MtuProbeOutcome::Lost,
                     _ => MtuProbeOutcome::Inconclusive,
                 }
             }
             Either::Right((plain_res, probe)) => {
                 let Ok(StatusResult::Sent(plain_answer)) = plain_res else {
-                    return if answered_full(&probe.await) {
-                        MtuProbeOutcome::Full
-                    } else {
-                        MtuProbeOutcome::Inconclusive
+                    return match timeout(first_word_ms, probe).await {
+                        Ok(probe_res) if answered_full(&probe_res) => MtuProbeOutcome::Full,
+                        _ => MtuProbeOutcome::Inconclusive,
                     };
                 };
-                let rpc_timeout_ms = self.config().internal().network.rpc.timeout_ms;
-                let floor_ms = u64::from(rpc_timeout_ms * MTU_PROBE_GRACE_PERCENT / 100);
                 let rtt_ms = plain_answer.answer.answer_context.latency.as_u64() / 1000;
-                let grace_ms = (rtt_ms * MTU_PROBE_RTT_FACTOR)
-                    .max(floor_ms)
-                    .min(u64::from(rpc_timeout_ms));
-                match timeout(grace_ms as u32, probe).await {
+                let grace_ms = probe_grace_ms(rpc_timeout_ms, rtt_ms);
+                match timeout(grace_ms, probe).await {
                     Ok(probe_res) if answered_full(&probe_res) => MtuProbeOutcome::Full,
                     Ok(probe_res) if probe_lost(&probe_res) => MtuProbeOutcome::Lost,
                     // The plain answer is in and the probe's never came within its grace
@@ -324,13 +397,47 @@ impl NativeNetwork {
         )
     }
 
-    /// Records the peers tried and any verdict, unless the family started over meanwhile
+    /// Hands a pass to the processor and records its peers as tried, unless the family started
+    /// over meanwhile
+    fn start_family_probe(
+        &self,
+        address_type: AddressType,
+        generation: u64,
+        candidates: Vec<MtuProbeCandidate>,
+    ) {
+        let mut inner = self.inner.lock();
+        let Some(passes) = inner.mtu_probe_passes.clone() else {
+            return;
+        };
+        let Some(family_mtu) = inner.family_mtus.get_mut(&address_type) else {
+            return;
+        };
+        if family_mtu.generation != generation {
+            return;
+        }
+        family_mtu.tried.extend(
+            candidates
+                .iter()
+                .map(|candidate| candidate.node.best_node_id()),
+        );
+        if family_mtu.tried.len() > MTU_PROBE_TRIED_MAX {
+            family_mtu.tried.clear();
+        }
+        veilid_log!(self debug "{} mtu: probing {} peers at {}", address_type, candidates.len(), candidates[0].size);
+        let pass = MtuProbePass {
+            address_type,
+            generation,
+            candidates,
+        };
+        family_mtu.probing = passes.send(pass).is_ok();
+    }
+
+    /// Records a verdict and ends the family's pass, unless the family started over meanwhile
     fn settle_family_mtu(
         &self,
         address_type: AddressType,
         generation: u64,
-        tried: Vec<NodeId>,
-        opt_verdict: Option<FamilyMtuState>,
+        verdict: FamilyMtuState,
     ) -> bool {
         let mut inner = self.inner.lock();
         let Some(family_mtu) = inner.family_mtus.get_mut(&address_type) else {
@@ -339,13 +446,7 @@ impl NativeNetwork {
         if family_mtu.generation != generation {
             return false;
         }
-        family_mtu.tried.extend(tried);
-        if family_mtu.tried.len() > MTU_PROBE_TRIED_MAX {
-            family_mtu.tried.clear();
-        }
-        let Some(verdict) = opt_verdict else {
-            return false;
-        };
+        family_mtu.probing = false;
         if family_mtu.state == verdict {
             return false;
         }

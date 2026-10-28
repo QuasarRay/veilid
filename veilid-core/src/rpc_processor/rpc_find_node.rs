@@ -15,6 +15,7 @@ impl RPCProcessor {
         dest: Destination,
         hash_coordinate: HashCoordinate,
         capabilities: Vec<VeilidCapability>,
+        fanout_config: FanoutConfig,
     ) -> RPCNetworkResult<Answer<Vec<Arc<UnverifiedPeerInfo>>>> {
         let _guard = self
             .startup_context
@@ -35,9 +36,12 @@ impl RPCProcessor {
             ));
         }
 
-        let find_node_q_detail = RPCQuestionDetail::FindNodeQ(Box::new(
-            RPCOperationFindNodeQ::try_new(hash_coordinate.clone(), capabilities.clone())?,
-        ));
+        let find_node_q_detail =
+            RPCQuestionDetail::FindNodeQ(Box::new(RPCOperationFindNodeQ::try_new(
+                hash_coordinate.clone(),
+                capabilities.clone(),
+                fanout_config,
+            )?));
         let find_node_q = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
             find_node_q_detail,
@@ -102,17 +106,19 @@ impl RPCProcessor {
             },
             _ => return Err(RPCError::internal("not a question")),
         };
-        let (hash_coordinate, capabilities) = find_node_q.destructure();
+        let (hash_coordinate, capabilities, fanout_config) = find_node_q.destructure();
 
         // Get a chunk of the routing table near the requested node id
         let routing_table = self.routing_table();
         let routing_domain = msg.header.routing_domain();
 
-        let closest_nodes = routing_table.get_preferred_closest_nodes_peer_info(
+        let mut closest_nodes = routing_table.get_preferred_closest_nodes_peer_info(
             routing_domain,
             hash_coordinate,
             &capabilities,
         );
+        closest_nodes
+            .truncate(fanout_config.peers_limit(veilid_capnp::MAX_FIND_NODE_A_PEERS_LEN as usize));
 
         // Make FindNode answer
         let find_node_a =

@@ -3179,7 +3179,7 @@
           "minimum": 0
         },
         "max_watch_inspect_interval_ms": {
-          "description": "Longest interval between change inspections of a watch, in milliseconds; a watch short\nof consensus, or not yet established, delivers changes at most this late.",
+          "description": "Longest interval between change inspections of a watch, in milliseconds: the interval\ndoubles up to it while inspections find nothing. Half the watch lifetime by default, so a\nquiet watch inspects before each renewal; a watch short of consensus delivers changes at\nmost this late.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0

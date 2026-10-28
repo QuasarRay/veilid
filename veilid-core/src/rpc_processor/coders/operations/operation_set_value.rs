@@ -16,6 +16,7 @@ pub(in crate::rpc_processor) struct RPCOperationSetValueQ {
     subkey: ValueSubkey,
     value: SignedValueData,
     descriptor: Option<SignedValueDescriptor>,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationSetValueQ {
@@ -24,12 +25,14 @@ impl RPCOperationSetValueQ {
         subkey: ValueSubkey,
         value: SignedValueData,
         descriptor: Option<SignedValueDescriptor>,
+        fanout_config: FanoutConfig,
     ) -> Self {
         Self {
             key,
             subkey,
             value,
             descriptor,
+            fanout_config,
         }
     }
 
@@ -48,8 +51,15 @@ impl RPCOperationSetValueQ {
         ValueSubkey,
         SignedValueData,
         Option<SignedValueDescriptor>,
+        FanoutConfig,
     ) {
-        (self.key, self.subkey, self.value, self.descriptor)
+        (
+            self.key,
+            self.subkey,
+            self.value,
+            self.descriptor,
+            self.fanout_config,
+        )
     }
 
     pub fn decode(
@@ -73,7 +83,8 @@ impl RPCOperationSetValueQ {
         } else {
             None
         };
-        Ok(Self::new(key, subkey, value, descriptor))
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
+        Ok(Self::new(key, subkey, value, descriptor, fanout_config))
     }
     pub fn encode(
         &self,
@@ -88,6 +99,8 @@ impl RPCOperationSetValueQ {
             let mut d_builder = builder.reborrow().init_descriptor();
             encode_signed_value_descriptor(descriptor, &mut d_builder)?;
         }
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
         Ok(())
     }
 }

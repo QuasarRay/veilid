@@ -31,6 +31,8 @@ pub(crate) struct FamilyMtu {
     pub generation: u64,
     /// Peers already probed since then
     pub tried: BTreeSet<NodeId>,
+    /// A pass of probes is out for this generation
+    pub probing: bool,
 }
 
 impl FamilyMtu {
@@ -44,6 +46,7 @@ impl FamilyMtu {
             state,
             generation,
             tried: BTreeSet::new(),
+            probing: false,
         }
     }
 

@@ -101,6 +101,7 @@ impl StorageManager {
                 InspectResult::default(),
                 false,
                 InspectFanoutStop::Descriptor,
+                FanoutConfig::default(),
             )
             .await?;
 

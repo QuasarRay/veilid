@@ -15,6 +15,7 @@ pub(in crate::rpc_processor) struct RPCOperationGetValueQ {
     key: OpaqueRecordKey,
     subkey: ValueSubkey,
     want_descriptor: bool,
+    fanout_config: FanoutConfig,
 }
 
 impl RPCOperationGetValueQ {
@@ -22,11 +23,13 @@ impl RPCOperationGetValueQ {
         key: OpaqueRecordKey,
         subkey: ValueSubkey,
         want_descriptor: bool,
+        fanout_config: FanoutConfig,
     ) -> Result<Self, RPCError> {
         Ok(Self {
             key,
             subkey,
             want_descriptor,
+            fanout_config,
         })
     }
 
@@ -37,8 +40,13 @@ impl RPCOperationGetValueQ {
     //     Ok(())
     // }
 
-    pub fn destructure(self) -> (OpaqueRecordKey, ValueSubkey, bool) {
-        (self.key, self.subkey, self.want_descriptor)
+    pub fn destructure(self) -> (OpaqueRecordKey, ValueSubkey, bool, FanoutConfig) {
+        (
+            self.key,
+            self.subkey,
+            self.want_descriptor,
+            self.fanout_config,
+        )
     }
 
     pub fn decode(
@@ -50,10 +58,12 @@ impl RPCOperationGetValueQ {
         let key = decode_opaque_record_key(&k_reader)?;
         let subkey = reader.get_subkey();
         let want_descriptor = reader.get_want_descriptor();
+        let fanout_config = FanoutConfig::decode(&reader.get_fanout_config()?);
         Ok(Self {
             key,
             subkey,
             want_descriptor,
+            fanout_config,
         })
     }
     pub fn encode(
@@ -64,6 +74,8 @@ impl RPCOperationGetValueQ {
         encode_opaque_record_key(&self.key, &mut k_builder);
         builder.set_subkey(self.subkey);
         builder.set_want_descriptor(self.want_descriptor);
+        self.fanout_config
+            .encode(&mut builder.reborrow().init_fanout_config());
         Ok(())
     }
 }

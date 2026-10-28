@@ -6,6 +6,7 @@ fn family_mtu(interface_mtu: Option<u32>, state: FamilyMtuState) -> FamilyMtu {
         state,
         generation: 0,
         tried: BTreeSet::new(),
+        probing: false,
     }
 }
 

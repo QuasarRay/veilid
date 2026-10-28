@@ -22,7 +22,8 @@ impl RoutingTable {
             Box::pin(rpc_processor.rpc_call_find_node(
                 Destination::direct(node_ref, None),
                 hash_coordinate,
-                capabilities
+                capabilities,
+                FanoutConfig::default(),
             ))
             .await?
         );

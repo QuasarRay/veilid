@@ -22,6 +22,7 @@ const maxTransactBeginAPeersLen :UInt32 = 20;
 const maxSupplyBlockAPeersLen :UInt32 = 20;
 const maxFindBlockAPeersLen :UInt32 = 10;
 const maxFindBlockASuppliersLen :UInt32 = 10;
+const defaultFanoutConfigMaxPeers :UInt32 = 20;
 
 # Subkey range lists
 const maxWatchValueQSubkeyRangesLen :UInt32 = 512;
@@ -310,9 +311,14 @@ struct OperationReturnReceipt @0x9403031d5341761c {
     receipt                 @0  :Data;                  # receipt being returned to its origin
 }
 
+struct FanoutConfig @0xbf8e5d2a6a8d59c4 {
+    maxPeers                @0  :UInt32 = .defaultFanoutConfigMaxPeers; # most peers wanted in the answer, closest to the key first; a node caps it at its own limit
+}
+
 struct OperationFindNodeQ @0xb1dee545e359e779 {
     nodeId                  @0  :NodeId;                # node id to locate
     capabilities            @1  :List(Capability);      # required capabilities returned peers must have
+    fanoutConfig            @2  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationFindNodeA @0xc033b926302deb1a {
@@ -373,6 +379,7 @@ struct OperationGetValueQ @0x83b34ce1e72afc7f {
     key                     @0  :OpaqueRecordKey;       # DHT Key = Hash(ownerKeyKind) of: [ ownerKeyValue, schema ]
     subkey                  @1  :Subkey;                # the index of the subkey
     wantDescriptor          @2  :Bool;                  # whether or not to include the descriptor for the key
+    fanoutConfig            @3  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 
@@ -388,6 +395,7 @@ struct OperationSetValueQ @0xb315a71cd3f555b3 {
     subkey                  @1  :Subkey;                # the index of the subkey
     value                   @2  :SignedValueData;       # subkey contents (older or equal seq number gets dropped)
     descriptor              @3  :SignedValueDescriptor; # optional: the descriptor if needed
+    fanoutConfig            @4  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationSetValueA @0xb5ff5b18c0d7b918 {
@@ -403,6 +411,7 @@ struct OperationWatchValueQ @0xddae6e08cea11e84 {
     duration                @2  :UInt64;                # requested duration when this watch will expire in usec since creation (watch can return less, 0 for max)
     count                   @3  :UInt32;                # requested number of changes to watch for (0 = cancel, 1 = single shot, 2+ = counter, UINT32_MAX = continuous)
     watchId                 @4  :UInt64;                # if 0, request a new watch. if >0, existing watch id 
+    fanoutConfig            @5  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationWatchValueA @0xaeed4433b1c35108 {
@@ -416,6 +425,7 @@ struct OperationInspectValueQ @0xe4d014b5a2f6ffaf {
     key                     @0  :OpaqueRecordKey;       # DHT Key = Hash(ownerKeyKind) of: [ ownerKeyValue, schema ]
     subkeys                 @1  :List(SubkeyRange);     # subkey range to inspect (up to 1024 total subkeys), if empty this implies 0..=511
     wantDescriptor          @2  :Bool;                  # whether or not to include the descriptor for the key
+    fanoutConfig            @3  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationInspectValueA @0x8540edb633391b2a {
@@ -446,6 +456,7 @@ struct OperationTransactBeginQ @0xf8629eff87ac729d {
     key                     @0  :OpaqueRecordKey;       # key for record to transact on
     descriptor              @1  :SignedValueDescriptor; # optional: the descriptor if needed
     wantDescriptor          @2  :Bool;                  # whether or not to include the descriptor for the key
+    fanoutConfig            @3  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationTransactBeginA @0xd2b5a46f55268aa4 {
@@ -478,6 +489,7 @@ struct OperationTransactCommandA @0xe68ff85399f3622c {
 struct OperationSupplyBlockQ @0xe0d00fd8091dd2e0 {
     blockId                 @0  :BlockId;               # hash of the block we can supply
     routeId                 @1  :RouteId;               # the private route endpoint for this block supplier
+    fanoutConfig            @2  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationSupplyBlockA @0xc7421cd5b08b8abe {
@@ -487,6 +499,7 @@ struct OperationSupplyBlockA @0xc7421cd5b08b8abe {
 
 struct OperationFindBlockQ @0xbda4ed3b68c636d3 {
     blockId                 @0  :BlockId;               # hash of the block to locate
+    fanoutConfig            @1  :FanoutConfig;          # what the answer's peer list should hold
 }
 
 struct OperationFindBlockA @0xfea1afb737b1a2a5 {

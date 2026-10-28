@@ -37,6 +37,7 @@ impl RPCProcessor {
         subkey: ValueSubkey,
         value: SignedValueData,
         descriptor_mode: SetDescriptorMode,
+        fanout_config: FanoutConfig,
     ) -> RPCNetworkResult<Answer<SetValueAnswer>> {
         let _guard = self
             .startup_context
@@ -82,6 +83,7 @@ impl RPCProcessor {
             } else {
                 None
             },
+            fanout_config,
         );
         let question = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
@@ -228,13 +230,14 @@ impl RPCProcessor {
         };
 
         // Destructure
-        let (opaque_record_key, subkey, value, descriptor) = set_value_q.destructure();
+        let (opaque_record_key, subkey, value, descriptor, fanout_config) =
+            set_value_q.destructure();
 
         // The writer, whose own watch is left out of this change's ValueChanged pushes
         let dest = network_result_try!(self.get_respond_to_destination(&msg));
 
         // Get the nodes that we know about that are closer to the the key than our own node
-        let closer_to_key_peers = network_result_try!(routing_table
+        let mut closer_to_key_peers = network_result_try!(routing_table
             .get_reliable_nodes_closer_to_key_peer_info(
                 routing_domain,
                 opaque_record_key.to_hash_coordinate(),
@@ -305,6 +308,8 @@ impl RPCProcessor {
         }
 
         // Make SetValue answer
+        closer_to_key_peers
+            .truncate(fanout_config.peers_limit(veilid_capnp::MAX_SET_VALUE_A_PEERS_LEN as usize));
         let set_value_a = RPCOperationSetValueA::try_new(
             accepted,
             need_descriptor,

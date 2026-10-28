@@ -129,11 +129,12 @@ fn test_change_inspections_drain_oldest_first_and_capped() {
             k.clone(),
             ValueSubkeyRangeSet::single(0),
             Timestamp::new(n as u64 + 1),
+            ChangeInspectTrigger::Watch,
         );
     }
     let cur_ts = Timestamp::new(1_000);
-    let taken = |batch: &[(RecordKey, ValueSubkeyRangeSet)]| {
-        batch.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>()
+    let taken = |batch: &[(RecordKey, ValueSubkeyRangeSet, ChangeInspectTrigger)]| {
+        batch.iter().map(|(k, _, _)| k.clone()).collect::<Vec<_>>()
     };
 
     let first = owm.take_due_change_inspections(cur_ts);
@@ -143,7 +144,7 @@ fn test_change_inspections_drain_oldest_first_and_capped() {
         "no slot is free"
     );
 
-    for (k, _) in &first[..5] {
+    for (k, _, _) in &first[..5] {
         owm.change_inspects_in_flight.remove(&k.opaque());
     }
     let next = owm.take_due_change_inspections(cur_ts);

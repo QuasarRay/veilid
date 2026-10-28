@@ -14,6 +14,31 @@ use super::*;
 
 impl_veilid_log_facility!("stor");
 
+/// What asked for a change inspection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::storage_manager) enum ChangeInspectTrigger {
+    /// The watch's own schedule: the fallback timer, a sweep, or a retry of either
+    Watch,
+    /// A reconcile that changed the watch's nodes, so its routes are already fresh
+    Reconcile,
+}
+
+impl ChangeInspectTrigger {
+    /// Whether a productive inspection may force a reconcile for fresh notification routes
+    pub fn may_force_reconcile(self) -> bool {
+        self == Self::Watch
+    }
+
+    /// Two requests for one record keep the one that may still force a reconcile
+    pub fn merged_with(self, other: Self) -> Self {
+        if self == Self::Watch || other == Self::Watch {
+            Self::Watch
+        } else {
+            Self::Reconcile
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchManager {
     /// Registry for logging
@@ -27,7 +52,8 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     pub per_node_states: HashMap<PerNodeKey, OutboundWatchPerNodeState>,
     /// Value changes awaiting inspection before reporting, with the earliest time each may run
     #[serde(skip)]
-    pub needs_change_inspection: HashMap<RecordKey, (ValueSubkeyRangeSet, Timestamp)>,
+    pub needs_change_inspection:
+        HashMap<RecordKey, (ValueSubkeyRangeSet, Timestamp, ChangeInspectTrigger)>,
     /// Subkeys owed a repeat hint per record, drained by the outbound watch check tick
     #[serde(skip)]
     pub pending_rehints: HashMap<RecordKey, ValueSubkeyRangeSet>,
@@ -91,8 +117,12 @@ impl fmt::Display for OutboundWatchManager {
             keys.sort_unstable();
 
             for k in keys {
-                let (subkeys, not_before) = self.needs_change_inspection.get(&k).unwrap_or_log();
-                out += &format!("  {}: {} not_before={}\n", k, subkeys, not_before);
+                let (subkeys, not_before, trigger) =
+                    self.needs_change_inspection.get(&k).unwrap_or_log();
+                out += &format!(
+                    "  {}: {} not_before={} trigger={:?}\n",
+                    k, subkeys, not_before, trigger
+                );
             }
         }
         out += "]\n";
@@ -334,9 +364,14 @@ impl OutboundWatchManager {
     }
 
     /// Set a record up to be inspected for changed subkeys
-    pub fn enqueue_change_inspect(&mut self, record_key: RecordKey, subkeys: ValueSubkeyRangeSet) {
+    pub fn enqueue_change_inspect(
+        &mut self,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        trigger: ChangeInspectTrigger,
+    ) {
         // Due now; the enqueue time orders it behind earlier requests
-        self.enqueue_change_inspect_after(record_key, subkeys, Timestamp::now());
+        self.enqueue_change_inspect_after(record_key, subkeys, Timestamp::now(), trigger);
     }
 
     /// Takes the change inspections due at `cur_ts`, oldest first, up to the free in-flight slots,
@@ -344,24 +379,24 @@ impl OutboundWatchManager {
     pub fn take_due_change_inspections(
         &mut self,
         cur_ts: Timestamp,
-    ) -> Vec<(RecordKey, ValueSubkeyRangeSet)> {
+    ) -> Vec<(RecordKey, ValueSubkeyRangeSet, ChangeInspectTrigger)> {
         let free_slots =
             MAX_CHANGE_INSPECTIONS_IN_FLIGHT.saturating_sub(self.change_inspects_in_flight.len());
         let mut due = self
             .needs_change_inspection
             .iter()
-            .filter(|(k, (_, not_before))| {
+            .filter(|(k, (_, not_before, _))| {
                 *not_before <= cur_ts && !self.change_inspects_in_flight.contains(&k.opaque())
             })
-            .map(|(k, (_, not_before))| (*not_before, k.clone()))
+            .map(|(k, (_, not_before, _))| (*not_before, k.clone()))
             .collect::<Vec<_>>();
         due.sort_by_key(|(not_before, _)| *not_before);
         due.into_iter()
             .take(free_slots)
             .filter_map(|(_, k)| {
-                let (subkeys, _) = self.needs_change_inspection.remove(&k)?;
+                let (subkeys, _, trigger) = self.needs_change_inspection.remove(&k)?;
                 self.change_inspects_in_flight.insert(k.opaque());
-                Some((k, subkeys))
+                Some((k, subkeys, trigger))
             })
             .collect()
     }
@@ -372,8 +407,9 @@ impl OutboundWatchManager {
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
         not_before: Timestamp,
+        trigger: ChangeInspectTrigger,
     ) {
-        veilid_log!(self debug "change inspect: record_key={} subkeys={} not_before={}", record_key, subkeys, not_before);
+        veilid_log!(self debug "change inspect: record_key={} subkeys={} not_before={} trigger={:?}", record_key, subkeys, not_before, trigger);
 
         let opaque_record_key = record_key.opaque();
 
@@ -392,10 +428,11 @@ impl OutboundWatchManager {
         // Merged entries keep the latest not_before so retry backoff is not defeated
         self.needs_change_inspection
             .entry(record_key)
-            .and_modify(|(sk, nb)| {
+            .and_modify(|(sk, nb, tr)| {
                 *sk = sk.union(&subkeys);
                 *nb = (*nb).max(not_before);
+                *tr = tr.merged_with(trigger);
             })
-            .or_insert((subkeys, not_before));
+            .or_insert((subkeys, not_before, trigger));
     }
 }

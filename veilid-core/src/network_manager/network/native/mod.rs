@@ -15,6 +15,7 @@ use super::*;
 use discovery_context::*;
 use low_level_protocol_tcp::*;
 use low_level_protocol_udp::UdpListenerCommand;
+use mtu_detection::*;
 use network_state::*;
 use protocol::tcp::RawTcpProtocolHandler;
 use protocol::udp::RawUdpProtocolHandler;
@@ -127,6 +128,10 @@ struct NetworkInner {
     network_state: Option<Arc<NetworkState>>,
     /// where each in-use address family's packet size stands
     family_mtus: BTreeMap<AddressType, FamilyMtu>,
+    /// passes of mtu probes handed to the processor while the network is up
+    mtu_probe_passes: Option<flume::Sender<MtuProbePass<MtuProbeCandidate>>>,
+    /// what finished passes showed, read by the tick
+    mtu_probe_results: Option<flume::Receiver<MtuProbePassResult>>,
     /// handles on the TCP listeners, to change the segment size they announce
     listener_mss_handles: BTreeMap<SocketAddr, TcpListenerMssHandle>,
 }
@@ -923,6 +928,8 @@ impl NativeNetwork {
             igd_manager: None,
             network_state: None,
             family_mtus: BTreeMap::new(),
+            mtu_probe_passes: None,
+            mtu_probe_results: None,
             listener_mss_handles: BTreeMap::new(),
         }
     }
@@ -1354,6 +1361,7 @@ impl NativeNetwork {
             let mut inner = self.inner.lock();
             inner.stop_source = Some(StopSource::new());
         }
+        self.start_mtu_probe_processor();
 
         // Made per attach so a config change applies at the next one, and a detached node
         // never emits SSDP; require_inbound_relay implies upnp off

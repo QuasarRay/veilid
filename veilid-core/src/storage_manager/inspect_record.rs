@@ -153,6 +153,19 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
+        self.inspect_record_with_fanout(record_key, subkeys, scope, FanoutConfig::default())
+            .await
+    }
+
+    /// `inspect_record` with a say in the fanout: a watch at consensus asks the nodes it already
+    /// knows and wants no peers back. The API path above has no such nodes, so it is the default.
+    pub(super) async fn inspect_record_with_fanout(
+        &self,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        scope: DHTReportScope,
+        fanout_config: FanoutConfig,
+    ) -> VeilidAPIResult<DHTRecordReport> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
@@ -308,6 +321,7 @@ impl StorageManager {
                 },
                 matches!(scope, DHTReportScope::UpdateSet | DHTReportScope::SyncSet),
                 InspectFanoutStop::SubkeyConsensus,
+                fanout_config,
             )
             .await?;
 
@@ -375,6 +389,7 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    #[expect(clippy::too_many_arguments)]
     pub(super) async fn outbound_inspect_value(
         &self,
         opaque_record_key: &OpaqueRecordKey,
@@ -383,6 +398,7 @@ impl StorageManager {
         local_inspect_result: InspectResult,
         use_set_scope: bool,
         stop: InspectFanoutStop,
+        fanout_config: FanoutConfig,
     ) -> VeilidAPIResult<OutboundInspectValueResult> {
         let routing_domain = RoutingDomain::PublicInternet;
         let requested_subkeys = subkeys.clone();
@@ -414,10 +430,16 @@ impl StorageManager {
             )
         };
 
-        // Get the nodes we know are caching this value to seed the fanout
-        let init_fanout_queue = self
-            .get_value_nodes(opaque_record_key)?
-            .unwrap_or_default()
+        // Seed the fanout with the value's holders, and a peerless one with our watch's nodes too
+        let mut value_nodes = self.get_value_nodes(opaque_record_key)?.unwrap_or_default();
+        if fanout_config.max_peers == 0 {
+            for node_ref in self.get_outbound_watch_node_refs(opaque_record_key) {
+                if !value_nodes.contains(&node_ref) {
+                    value_nodes.push(node_ref);
+                }
+            }
+        }
+        let init_fanout_queue = value_nodes
             .into_iter()
             .filter(|x| {
                 x.node_info(routing_domain)
@@ -485,6 +507,7 @@ impl StorageManager {
                                 opaque_record_key.clone(),
                                 subkeys.clone(),
                                 descriptor_mode,
+                                fanout_config,
                             )
                             .await?
                         {
@@ -737,6 +760,8 @@ impl StorageManager {
         );
         fanout_call
             .set_demote_routed_unresponsive(matches!(safety_selection, SafetySelection::Safe(_)));
+        // With no peers coming back, only the nodes we seeded can answer, so ask them first
+        fanout_call.set_prefer_init_nodes(fanout_config.max_peers == 0);
 
         let shutdown_stop_source = self
             .startup_lock

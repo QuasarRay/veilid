@@ -1714,17 +1714,46 @@ where
         Ok(space)
     }
 
-    fn make_room_for_record(
+    /// Evicts least recently used records until a record of `record_size` fits the storage
+    /// limit and, for a new record, the record count limit
+    pub(super) fn make_room_for_record(
         &mut self,
         record_size: u64,
         opt_old_record_size: Option<u64>,
     ) -> VeilidAPIResult<()> {
+        // A new record takes a slot the cache would otherwise free behind our back
+        let count_dead = match opt_old_record_size {
+            None => self
+                .record_cache
+                .len()
+                .saturating_add(1)
+                .saturating_sub(self.record_cache.capacity()),
+            Some(_) => 0,
+        };
+        let size_dead = self.records_over_storage_limit(record_size, opt_old_record_size)?;
+
+        // Purge the required number of records
+        for _n in 0..count_dead.max(size_dead) {
+            let (dead_k, dead_v) = self.record_cache.remove_lru().unwrap_or_log();
+            self.purge_record_and_subkeys(dead_k, dead_v, true)?;
+        }
+
+        Ok(())
+    }
+
+    /// How many least recently used records must go for a record of `record_size` to fit the
+    /// storage limit
+    fn records_over_storage_limit(
+        &mut self,
+        record_size: u64,
+        opt_old_record_size: Option<u64>,
+    ) -> VeilidAPIResult<usize> {
         let record_size_estimator = self.record_size_estimator();
 
         // Get starting size and limit
         let Some(storage_size_limit) = self.record_cache_space.limit() else {
             // No limit, just go for it
-            return Ok(());
+            return Ok(0);
         };
         let mut current_record_cache_size = self.record_cache_space.with_value(|x| x)?;
 
@@ -1791,13 +1820,7 @@ where
             dead_count += 1;
         }
 
-        // Purge the required number of records
-        for _n in 0..dead_count {
-            let (dead_k, dead_v) = self.record_cache.remove_lru().unwrap_or_log();
-            self.purge_record_and_subkeys(dead_k, dead_v, true)?;
-        }
-
-        Ok(())
+        Ok(dead_count)
     }
 
     fn purge_record_and_subkeys(

@@ -2,6 +2,7 @@ use super::*;
 mod test_destination;
 mod test_dial_info;
 mod test_fanout_call;
+mod test_fanout_config;
 mod test_fanout_queue;
 mod test_signed_value_data;
 mod test_transport_mtus;
@@ -37,6 +38,8 @@ pub async fn test_all() {
     test_dial_info::test_encode_and_decode_dial_info_wss();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv4();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv6();
+    test_fanout_config::test_absent_fanout_config_is_the_default();
+    test_fanout_config::test_fanout_config_round_trip_and_cap();
     test_transport_mtus::test_transport_mtus_skip_what_they_cannot_use();
     test_transport_mtus::test_transport_mtus_reject_bad_lists();
     test_transport_mtus::test_transport_mtus_bound_the_list();

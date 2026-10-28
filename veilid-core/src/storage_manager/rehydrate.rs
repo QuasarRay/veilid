@@ -203,6 +203,7 @@ impl StorageManager {
                 InspectResult::default(),
                 true,
                 InspectFanoutStop::SubkeyConsensus,
+                FanoutConfig::default(),
             )
             .await?;
 
