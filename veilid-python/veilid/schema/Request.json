@@ -2263,7 +2263,7 @@
           "type": "object",
           "properties": {
             "force_refresh": {
-              "description": "Force a network data refresh rather than using the local copy.",
+              "description": "Ask the network even with a local copy, whose value at the same seq it may then replace.",
               "type": "boolean"
             },
             "key": {

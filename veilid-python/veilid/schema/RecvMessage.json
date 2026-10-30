@@ -3948,7 +3948,7 @@
           ]
         },
         {
-          "description": "None if the value was set, or the newer network value if the set was stale.",
+          "description": "None if the value was set uncontested, or the value most nodes hold if the network holds a\nnewer value or more than one value at the sequence number written.",
           "type": "object",
           "properties": {
             "rc_op": {

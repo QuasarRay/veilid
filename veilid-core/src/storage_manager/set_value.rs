@@ -2,16 +2,6 @@ use super::*;
 
 impl_veilid_log_facility!("stor");
 
-/// The nodes known to hold one value at the context's sequence number
-struct ValueHolders {
-    /// The value held
-    value: Arc<SignedValueData>,
-    /// The nodes holding it
-    nodes: HashSet<NodeId>,
-    /// The holder closest to the record key
-    closest: Option<NodeId>,
-}
-
 /// The context of the outbound_set_value operation
 pub(super) struct OutboundSetValueContext {
     /// The latest value of the subkey, may be the value passed in
@@ -19,9 +9,7 @@ pub(super) struct OutboundSetValueContext {
     /// The number of non-sets since the last set we have received
     pub missed_since_last_set: usize,
     /// Holders of each value seen at the latest value's sequence number
-    holders: Vec<ValueHolders>,
-    /// Orders node ids by distance to the record key, closest first
-    node_sort: FanoutQueueSort<'static>,
+    tally: ValueTally,
 }
 
 impl OutboundSetValueContext {
@@ -29,8 +17,7 @@ impl OutboundSetValueContext {
         Self {
             value,
             missed_since_last_set: 0,
-            holders: Vec::new(),
-            node_sort: Box::new(RoutingTable::make_closest_node_id_sort(hash_coordinate)),
+            tally: ValueTally::new(hash_coordinate),
         }
     }
 
@@ -51,7 +38,7 @@ impl OutboundSetValueContext {
             if sent_value.value_data() == self.value.value_data() {
                 // No newer value was found and returned, so increase our consensus count
                 self.missed_since_last_set = 0;
-                self.add_holder(sent_value, node_id);
+                self.tally.add_holder(sent_value, node_id);
 
                 veilid_log!(registry debug target:"network_result", "SetValue returned no value");
                 return FanoutCallDisposition::Accepted;
@@ -85,9 +72,8 @@ impl OutboundSetValueContext {
             veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer value: {}", rcvd_seq, ctx_seq, value);
 
             self.value = Arc::new(value);
-            self.holders.clear();
-            let value = self.value.clone();
-            self.add_holder(&value, node_id);
+            self.tally.clear();
+            self.tally.add_holder(&self.value, node_id);
             // One node has shown us this value so far
             self.missed_since_last_set = 0;
 
@@ -96,8 +82,7 @@ impl OutboundSetValueContext {
             // If the sequence numbers were the same and the values were the same, then mark it as accepted
             // since this contributes to our consensus
             veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
-            let value = self.value.clone();
-            self.add_holder(&value, node_id);
+            self.tally.add_holder(&self.value, node_id);
             FanoutCallDisposition::Accepted
         } else {
             self.classify_rival(registry, node_id, Arc::new(value))
@@ -112,8 +97,7 @@ impl OutboundSetValueContext {
         node_id: &NodeId,
         value: Arc<SignedValueData>,
     ) -> FanoutCallDisposition {
-        let rival = self.add_holder(&value, node_id);
-        if !self.beats_current(rival) {
+        if !self.tally.add_rival_holder(&value, node_id, &self.value) {
             veilid_log!(registry debug "SetValue got a conflicting value at our seq, marking as conflict: {}", value);
             return FanoutCallDisposition::Conflict;
         }
@@ -124,61 +108,9 @@ impl OutboundSetValueContext {
         FanoutCallDisposition::AcceptedSwitch
     }
 
-    /// Record that `node_id` holds `value`, returning the index of that value's holders
-    fn add_holder(&mut self, value: &Arc<SignedValueData>, node_id: &NodeId) -> usize {
-        let index = match self.holders_of(value) {
-            Some(index) => index,
-            None => {
-                self.holders.push(ValueHolders {
-                    value: value.clone(),
-                    nodes: HashSet::new(),
-                    closest: None,
-                });
-                self.holders.len() - 1
-            }
-        };
-        let holders = &mut self.holders[index];
-        if holders.nodes.insert(node_id.clone())
-            && holders
-                .closest
-                .as_ref()
-                .is_none_or(|closest| (self.node_sort)(node_id, closest) == cmp::Ordering::Less)
-        {
-            holders.closest = Some(node_id.clone());
-        }
-        index
-    }
-
     /// Whether some node holds another value at our value's sequence number
     pub(super) fn conflicted(&self) -> bool {
-        self.holders
-            .iter()
-            .any(|holders| holders.value.value_data() != self.value.value_data())
-    }
-
-    fn holders_of(&self, value: &SignedValueData) -> Option<usize> {
-        self.holders
-            .iter()
-            .position(|holders| holders.value.value_data() == value.value_data())
-    }
-
-    /// Whether the holders at `index` beat our current value's: more nodes, or as many with a
-    /// closer closest holder
-    fn beats_current(&self, index: usize) -> bool {
-        let rival = &self.holders[index];
-        let Some(current) = self.holders_of(&self.value).map(|i| &self.holders[i]) else {
-            return true;
-        };
-        match rival.nodes.len().cmp(&current.nodes.len()) {
-            cmp::Ordering::Greater => true,
-            cmp::Ordering::Less => false,
-            cmp::Ordering::Equal => match (&rival.closest, &current.closest) {
-                (Some(rival_closest), Some(current_closest)) => {
-                    (self.node_sort)(rival_closest, current_closest) == cmp::Ordering::Less
-                }
-                _ => false,
-            },
-        }
+        self.tally.conflicted(&self.value)
     }
 }
 

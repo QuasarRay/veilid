@@ -687,6 +687,11 @@ impl RoutingContext {
     /// Returns `None` if the value subkey has not yet been set.
     /// Returns `Some(data)` if the value subkey has valid data.
     ///
+    /// A network get takes the newest sequence number the nodes it reaches hold. Where they hold
+    /// different values at it, the value most of them hold wins, with a tie going to the value held
+    /// closest to the record key, as in `set_dht_value`. A newer value replaces the local copy; a
+    /// different value at the same sequence number replaces it only with `force_refresh`.
+    ///
     /// Non-blocking when a local value exists and `force_refresh` is false; otherwise blocks on a network fanout and returns `TryAgain` if offline.
     ///
     /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open, `::Generic` if `record_key` is an
@@ -711,13 +716,21 @@ impl RoutingContext {
                 .storage_manager()
                 .check_record_key(&record_key)?;
             let storage_manager = self.api.core_context()?.storage_manager();
+            let refresh = {
+                use crate::storage_manager::GetValueRefresh;
+                if force_refresh {
+                    GetValueRefresh::Force
+                } else {
+                    GetValueRefresh::Local
+                }
+            };
 
             let recorder = DurationRecorder::new("RoutingContext::get_dht_value", |name, start| {
                 veilid_log!(self debug
                     "{}[start={:#}](self: {:?}, key: {:?}, subkey: {:?}, force_refresh: {:?})", name, start, self, record_key, subkey, force_refresh);
             });
             recorder.record_fut(
-                Box::pin(storage_manager.get_value(record_key, subkey, force_refresh)),
+                Box::pin(storage_manager.get_value(record_key, subkey, refresh)),
                 |name, start, dur, ret| {
                     veilid_log!(self debug
                         "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);

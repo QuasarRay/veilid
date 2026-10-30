@@ -246,10 +246,15 @@ impl VeilidRoutingContext {
 
     /// Gets the latest value of a subkey.
     ///
-    /// May pull the latest value from the network, but by settings 'force_refresh' you can force a network data refresh.
+    /// May pull the latest value from the network, but by setting `forceRefresh` you can force a network data refresh.
     ///
     /// Returns `undefined` if the value subkey has not yet been set.
     /// Returns a Uint8Array of `data` if the value subkey has valid data.
+    ///
+    /// A network get takes the newest sequence number the nodes it reaches hold. Where they hold
+    /// different values at it, the value most of them hold wins, with a tie going to the value held
+    /// closest to the record key, as in `setDHTValue`. A newer value replaces the local copy; a
+    /// different value at the same sequence number replaces it only with `forceRefresh`.
     ///
     /// Returns the local value without network access unless `forceRefresh` is set, which awaits a network get fanout.
     ///

@@ -40,6 +40,7 @@ mod transaction;
 mod transaction_begin;
 mod transaction_command;
 mod types;
+mod value_tally;
 mod watch_value;
 
 #[cfg(any(test, feature = "test-util"))]
@@ -75,9 +76,10 @@ use rpc_processor::*;
 use stats::*;
 use stop_token::future::FutureExt as _;
 use storage_manager_locks::*;
+use value_tally::ValueTally;
 
 pub(crate) use constants::STORAGE_MANAGER_METADATA;
-pub(crate) use get_value::InboundGetValueResult;
+pub(crate) use get_value::{GetValueRefresh, InboundGetValueResult};
 pub(crate) use inspect_record::InboundInspectValueResult;
 pub(crate) use outbound_transaction_manager::OutboundTransactionHandle;
 pub(crate) use set_value::InboundSetValueResult;

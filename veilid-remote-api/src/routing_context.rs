@@ -99,7 +99,7 @@ pub enum RoutingContextRequestOp {
         key: RecordKey,
         /// Subkey to read.
         subkey: ValueSubkey,
-        /// Force a network data refresh rather than using the local copy.
+        /// Ask the network even with a local copy, whose value at the same seq it may then replace.
         force_refresh: bool,
     },
     /// Push a changed subkey value to the network.
@@ -230,9 +230,10 @@ pub enum RoutingContextResponseOp {
         #[serde(flatten)]
         result: ApiResult<Option<ValueData>>,
     },
-    /// None if the value was set, or the newer network value if the set was stale.
+    /// None if the value was set uncontested, or the value most nodes hold if the network holds a
+    /// newer value or more than one value at the sequence number written.
     SetDhtValue {
-        /// Newer network value if the set was stale, or an error.
+        /// The value most nodes hold when the set was stale or contested, or an error.
         #[serde(flatten)]
         result: ApiResult<Option<ValueData>>,
     },

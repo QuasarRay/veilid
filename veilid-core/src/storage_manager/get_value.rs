@@ -2,14 +2,96 @@ use super::*;
 
 impl_veilid_log_facility!("stor");
 
+/// How a get treats the local copy of a subkey
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GetValueRefresh {
+    /// Answer from the local copy when there is one
+    Local,
+    /// Ask the network, and store only a value newer than the local copy
+    Newer,
+    /// Ask the network, and let its settled value replace the local copy at the same sequence number
+    Force,
+}
+
 /// The context of the outbound_get_value operation
-struct OutboundGetValueContext {
+pub(super) struct OutboundGetValueContext {
     /// The latest value of the subkey, may be the value passed in
     pub value: Option<Arc<SignedValueData>>,
     /// How to handle the descriptor
     pub descriptor_mode: GetDescriptorMode,
     /// The parsed schema from the descriptor if we have one
     pub schema: Option<DHTSchema>,
+    /// Holders of each value seen at the latest value's sequence number
+    tally: ValueTally,
+}
+
+impl OutboundGetValueContext {
+    pub(super) fn try_new(
+        last_get_result: GetResult,
+        hash_coordinate: HashCoordinate,
+    ) -> VeilidAPIResult<Self> {
+        let schema = match &last_get_result.opt_descriptor {
+            Some(descriptor) => Some(descriptor.schema()?),
+            None => None,
+        };
+        Ok(Self {
+            value: last_get_result.opt_value,
+            descriptor_mode: GetDescriptorMode::new(last_get_result.opt_descriptor),
+            schema,
+            tally: ValueTally::new(hash_coordinate),
+        })
+    }
+
+    /// Classify a value a node answered with. At the newest sequence number the value more nodes
+    /// hold wins, and as many holders go to the one held closer to the record key. A local copy
+    /// only sets the floor: no node's answer stands behind it.
+    pub(super) fn classify_answer(
+        &mut self,
+        registry: &VeilidComponentRegistry,
+        node_id: &NodeId,
+        value: SignedValueData,
+    ) -> FanoutCallDisposition {
+        let Some(current) = self.value.clone() else {
+            let value = Arc::new(value);
+            self.tally.add_holder(&value, node_id);
+            self.value = Some(value);
+            return FanoutCallDisposition::Accepted;
+        };
+
+        let rcvd_seq = value.value_data().seq();
+        let ctx_seq = current.value_data().seq();
+        if rcvd_seq < ctx_seq {
+            return FanoutCallDisposition::Stale;
+        }
+        if rcvd_seq > ctx_seq {
+            let value = Arc::new(value);
+            self.tally.clear();
+            self.tally.add_holder(&value, node_id);
+            self.value = Some(value);
+            // Nodes already asked would answer the same, so none are asked again
+            return FanoutCallDisposition::AcceptedNewer;
+        }
+        if value.value_data() == current.value_data() {
+            self.tally.add_holder(&current, node_id);
+            return FanoutCallDisposition::Accepted;
+        }
+
+        let rival = Arc::new(value);
+        if !self.tally.add_rival_holder(&rival, node_id, &current) {
+            veilid_log!(registry debug "GetValue got a conflicting value at the newest seq, marking as conflict: {}", rival);
+            return FanoutCallDisposition::Conflict;
+        }
+        veilid_log!(registry debug "GetValue switching to a conflicting value held by more or closer nodes: {}", rival);
+        self.value = Some(rival);
+        FanoutCallDisposition::AcceptedSwitch
+    }
+
+    /// Whether some node holds another value at the settled value's sequence number
+    pub(super) fn conflicted(&self) -> bool {
+        self.value
+            .as_ref()
+            .is_some_and(|value| self.tally.conflicted(value))
+    }
 }
 
 /// The result of the outbound_get_value operation
@@ -43,7 +125,7 @@ impl StorageManager {
         &self,
         record_key: RecordKey,
         subkey: ValueSubkey,
-        force_refresh: bool,
+        refresh: GetValueRefresh,
     ) -> VeilidAPIResult<Option<ValueData>> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
@@ -51,7 +133,11 @@ impl StorageManager {
 
         // Try the GetValue shortcut first to see if we can skip the lock
         let subkey_lock = match self
-            .get_value_lock_shortcut(record_key.clone(), subkey, force_refresh)
+            .get_value_lock_shortcut(
+                record_key.clone(),
+                subkey,
+                refresh != GetValueRefresh::Local,
+            )
             .await?
         {
             GetValueLockShortcutResult::Shortcut(opt_value_data) => return Ok(opt_value_data),
@@ -75,7 +161,7 @@ impl StorageManager {
             .await?;
 
         // Return the existing value if we have one if we are not forcing a refresh
-        if !force_refresh {
+        if refresh == GetValueRefresh::Local {
             if let Some(last_get_result_value) = last_get_result.opt_value {
                 return Ok(Some(
                     self.maybe_decrypt_value_data(&record_key, last_get_result_value.value_data())
@@ -90,14 +176,6 @@ impl StorageManager {
 
         // A network-enabled get clears this record's transaction membership
         self.clear_record_transaction_set(&opaque_record_key)?;
-
-        // May have last descriptor / value
-        // Use the safety selection we opened the record with
-        let last_seq = last_get_result
-            .opt_value
-            .as_ref()
-            .map(|v| v.value_data().seq())
-            .unwrap_or_default();
 
         // Gate on concurrency + the download budget (a get pulls a full value down)
         let _gate_permit = self.acquire_gated_get().await;
@@ -117,7 +195,7 @@ impl StorageManager {
 
         // Process the returned result
         let out_encrypted = self
-            .process_outbound_get_value_result_locked(&subkey_lock, last_seq, result)
+            .process_outbound_get_value_result_locked(&subkey_lock, refresh, result)
             .await?;
         let out = if let Some(vd) = out_encrypted {
             Some(self.maybe_decrypt_value_data(&record_key, &vd).await?)
@@ -260,22 +338,12 @@ impl StorageManager {
             })
             .collect();
 
-        // Parse the schema
-        let schema = if let Some(d) = &last_get_result.opt_descriptor {
-            Some(d.schema()?)
-        } else {
-            None
-        };
-
-        // Make the descriptor mode
-        let descriptor_mode = GetDescriptorMode::new(last_get_result.opt_descriptor.clone());
-
         // Make operation context
-        let context = Arc::new(Mutex::new(OutboundGetValueContext {
-            value: last_get_result.opt_value,
-            descriptor_mode,
-            schema,
-        }));
+        let hash_coordinate = opaque_record_key.to_hash_coordinate();
+        let context = Arc::new(Mutex::new(OutboundGetValueContext::try_new(
+            last_get_result,
+            hash_coordinate.clone(),
+        )?));
 
         // Routine to call to generate fanout
         let call_routine = {
@@ -291,6 +359,10 @@ impl StorageManager {
                     let safety_selection = safety_selection.clone();
                     let fut = async move {
                         let rpc_processor = registry.rpc_processor();
+                        let node_id = next_node
+                            .node_ids()
+                            .get(opaque_record_key.kind())
+                            .unwrap_or_log();
                         let descriptor_mode = context.lock().descriptor_mode.clone();
                         let gva = match rpc_processor
                             .rpc_call_get_value(
@@ -398,50 +470,14 @@ impl StorageManager {
                             });
                         }
 
-                        // If we have a prior value, see if this is a newer sequence number
-                        {
-                            let mut ctx = context.lock();
-                            let disposition = if let Some(prior_value) = &ctx.value {
-                                let prior_seq = prior_value.value_data().seq();
-                                let new_seq = value.value_data().seq();
-
-                                if new_seq == prior_seq {
-                                    // If sequence number is the same, the data should be the same
-                                    if prior_value.value_data() != value.value_data() {
-                                        // Value data mismatch means skip this node
-                                        // This is okay because even the conflicting value is signed,
-                                        // so the application just needs to push a newer value
-                                        FanoutCallDisposition::Conflict
-                                    } else {
-                                        // Increase the consensus count for the existing value
-                                        FanoutCallDisposition::Accepted
-                                    }
-                                } else if new_seq > prior_seq {
-                                    // If the sequence number is greater, start over with the new value
-                                    ctx.value = Some(Arc::new(value));
-
-                                    // Restart the consensus since we have a new value, but
-                                    // don't retry nodes we've already seen because they will return
-                                    // the same answer
-                                    FanoutCallDisposition::AcceptedNewer
-                                } else {
-                                    // If the sequence number is older, ignore it
-                                    FanoutCallDisposition::Stale
-                                }
-                            } else {
-                                // If we have no prior value, keep it
-                                ctx.value = Some(Arc::new(value));
-                                // No value was returned
-                                FanoutCallDisposition::Accepted
-                            };
-                            // Return peers if we have some
-                            veilid_log!(registry debug target:"network_result", "GetValue fanout call returned peers {}", gva.answer.peers.len());
-
-                            Ok(FanoutCallOutput {
-                                peer_info_list: gva.answer.peers,
-                                disposition,
-                            })
-                        }
+                        let disposition =
+                            context.lock().classify_answer(&registry, &node_id, value);
+                        // Return peers if we have some
+                        veilid_log!(registry debug target:"network_result", "GetValue fanout call returned peers {}", gva.answer.peers.len());
+                        Ok(FanoutCallOutput {
+                            peer_info_list: gva.answer.peers,
+                            disposition,
+                        })
                     };
                     #[cfg(feature = "instrument")]
                     let fut = fut.instrument(tracing::trace_span!(
@@ -478,7 +514,6 @@ impl StorageManager {
         };
 
         // Call the fanout in a spawned task
-        let hash_coordinate = opaque_record_key.to_hash_coordinate();
         let shutdown_stop_source = self
             .startup_lock
             .stop_token()
@@ -514,9 +549,9 @@ impl StorageManager {
                 veilid_log!(self debug "GetValue fanout error: {}", e);
             })?;
 
-        veilid_log!(self debug "GetValue Fanout: {:#}", fanout_result);
-
         let ctx = context.lock();
+        veilid_log!(self debug "GetValue Fanout: {:#} conflicted={}", fanout_result, ctx.conflicted());
+
         Ok(OutboundGetValueResult {
             fanout_result,
             get_result: GetResult {
@@ -533,7 +568,7 @@ impl StorageManager {
     pub(super) async fn process_outbound_get_value_result_locked(
         &self,
         subkey_lock: &StorageManagerSubkeyLockGuard,
-        last_seq: ValueSeqNum,
+        refresh: GetValueRefresh,
         result: get_value::OutboundGetValueResult,
     ) -> VeilidAPIResult<Option<EncryptedValueData>> {
         // See if we got a value back
@@ -558,14 +593,53 @@ impl StorageManager {
             apibail_key_not_found!(opaque_record_key);
         }
 
-        // If we got a new value back then write it to the opened record
-        if get_result_value.value_data().seq() != last_seq {
-            self.handle_set_single_local_value_with_subkey_lock(
-                subkey_lock,
-                get_result_value.clone(),
-            )
-            .await?;
+        // Read the local copy again: a pushed change may have landed while the fanout ran
+        let opt_local_value = self
+            .handle_get_single_local_value(&opaque_record_key, subkey, false)
+            .await?
+            .opt_value;
+        match opt_local_value {
+            Some(local_value)
+                if !self.get_result_replaces_local(
+                    refresh,
+                    &opaque_record_key,
+                    subkey,
+                    &local_value,
+                    &get_result_value,
+                ) =>
+            {
+                // A get returns what is stored
+                Ok(Some(local_value.value_data().clone()))
+            }
+            _ => {
+                self.handle_set_single_local_value_with_subkey_lock(
+                    subkey_lock,
+                    get_result_value.clone(),
+                )
+                .await?;
+                Ok(Some(get_result_value.value_data().clone()))
+            }
         }
-        Ok(Some(get_result_value.value_data().clone()))
+    }
+
+    /// Whether a get's settled value replaces the local copy: a newer one always does, one at the
+    /// same sequence number only on a forced refresh, and never over a write of ours still waiting
+    /// to reach the network
+    fn get_result_replaces_local(
+        &self,
+        refresh: GetValueRefresh,
+        opaque_record_key: &OpaqueRecordKey,
+        subkey: ValueSubkey,
+        local_value: &SignedValueData,
+        value: &SignedValueData,
+    ) -> bool {
+        let seq = value.value_data().seq();
+        let local_seq = local_value.value_data().seq();
+        if seq != local_seq {
+            return seq > local_seq;
+        }
+        refresh == GetValueRefresh::Force
+            && value.value_data() != local_value.value_data()
+            && !self.has_offline_subkey_write(opaque_record_key, subkey)
     }
 }

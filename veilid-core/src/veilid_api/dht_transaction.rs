@@ -56,7 +56,7 @@ impl DHTTransaction {
         self.inner
             .lock()
             .opt_transaction_handle
-            .ok_or_else(|| VeilidAPIError::generic("Transaction not found"))
+            .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))
     }
 
     /// The handle for a completing operation, which may only be taken once.
@@ -66,7 +66,7 @@ impl DHTTransaction {
             .lock()
             .opt_transaction_handle
             .take()
-            .ok_or_else(|| VeilidAPIError::generic("Transaction not found"))
+            .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))
     }
 
     /// Get the [VeilidAPI] object that created this [DHTTransaction].

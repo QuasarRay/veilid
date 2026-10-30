@@ -399,21 +399,32 @@ impl VeilidAPI {
     /// Read a subkey, refreshing this node's cached copy from the shared DHT.
     ///
     /// A cached value satisfies the read unless a refresh was demanded. Only a read that has to
-    /// reach the network cares whether this node is attached.
+    /// reach the network cares whether this node is attached. What the network returns is stored by
+    /// the real rule (`StorageManager::get_result_replaces_local`): a newer value replaces the
+    /// cached one, a different value at the same sequence number only on a forced refresh with no
+    /// write of this node's still queued, and an older one never.
     pub(crate) fn mock_get_dht_value(
         &self,
         record_key: RecordKey,
         subkey: ValueSubkey,
         force_refresh: bool,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        if check_fault(MockFaultOp::Get, Some(&record_key), Some(subkey))? {
+        let action = check_fault(MockFaultOp::Get, Some(&record_key), Some(subkey))?;
+        if matches!(action, MockFaultAction::Silent) {
             return Ok(None);
         }
         let key = self.mock_key()?;
-        let cached = MockNetwork::with_node(&key, |node| {
+        let (cached, pending) = MockNetwork::with_node(&key, |node| {
             node.opened(&record_key)?;
-            VeilidAPIResult::Ok(node.local_value(&record_key, subkey))
+            let pending = node
+                .offline_writes
+                .get(&record_key.opaque())
+                .is_some_and(|p| p.contains_key(&subkey));
+            VeilidAPIResult::Ok((node.local_value(&record_key, subkey), pending))
         })??;
+        if let MockFaultAction::Rival(data) = action {
+            self.mock_plant_rival(&record_key, subkey, data)?;
+        }
 
         if !force_refresh {
             if let Some(cached) = cached {
@@ -439,14 +450,83 @@ impl VeilidAPI {
             VeilidAPIResult::Ok(record.subkeys.get(&subkey).cloned())
         })?;
 
-        if let Some(value) = value.clone() {
-            MockNetwork::with_node(&key, |node| {
-                node.set_local_value(&record_key, subkey, value);
-            })?;
-        }
+        let value = match (value, cached) {
+            (None, cached) => cached,
+            (Some(value), Some(local))
+                if value.seq() < local.seq()
+                    || (value.seq() == local.seq()
+                        && (!force_refresh || value == local || pending)) =>
+            {
+                Some(local)
+            }
+            (Some(value), _) => {
+                MockNetwork::with_node(&key, |node| {
+                    node.set_local_value(&record_key, subkey, value.clone());
+                })?;
+                Some(value)
+            }
+        };
         value
             .map(|v| self.mock_crypt_value_data(&record_key, subkey, &v))
             .transpose()
+    }
+
+    /// Replace the shared DHT's value for a subkey with a different one at the same sequence
+    /// number and from the same writer, the outcome of a split write settling the other way.
+    ///
+    /// No watcher hears it, so only a read that reaches the network sees it.
+    fn mock_plant_rival(
+        &self,
+        record_key: &RecordKey,
+        subkey: ValueSubkey,
+        data: Option<Vec<u8>>,
+    ) -> VeilidAPIResult<()> {
+        let crypto = self.crypto()?;
+        with_records(|records| {
+            let record = records
+                .get_mut(&record_key.opaque())
+                .ok_or_else(|| VeilidAPIError::key_not_found(record_key.opaque()))?;
+            let Some(stored) = record.subkeys.get(&subkey) else {
+                apibail_generic!(
+                    "injected fault: no value to rival at {}:{}",
+                    record_key,
+                    subkey
+                );
+            };
+            let plaintext = self.mock_crypt_value(record_key, subkey, stored.data())?;
+            let rival = match data {
+                Some(data) => data,
+                None if plaintext.is_empty() => vec![0],
+                None => plaintext.iter().map(|b| !b).collect(),
+            };
+            if rival == plaintext {
+                apibail_invalid_argument!(
+                    "rival must differ from the stored value",
+                    "data",
+                    hex::encode(&rival)
+                );
+            }
+            if check_subkey_value_data(
+                &crypto,
+                &record.schema,
+                &record.owner,
+                subkey,
+                stored.ref_writer(),
+                rival.len(),
+            )
+            .is_err()
+            {
+                apibail_generic!("failed schema validation: {}:{}", record_key, subkey);
+            }
+            let rival = ValueData::try_new_with_seq(
+                stored.seq(),
+                self.mock_crypt_value(record_key, subkey, &rival)?,
+                stored.ref_writer().clone(),
+            )?;
+            record.subkeys.insert(subkey, rival);
+            record.version += 1;
+            Ok(())
+        })
     }
 
     /// Write a subkey through to the shared DHT.
@@ -464,7 +544,10 @@ impl VeilidAPI {
         options: Option<SetDHTValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
         // A silent write reports success and drops the value, the failure nothing retries
-        if check_fault(MockFaultOp::Set, Some(&record_key), Some(subkey))? {
+        if matches!(
+            check_fault(MockFaultOp::Set, Some(&record_key), Some(subkey))?,
+            MockFaultAction::Silent
+        ) {
             return Ok(None);
         }
         let key = self.mock_key()?;

@@ -94,14 +94,21 @@ mock-api debug commands:
     record list local       list the records this node holds copies of
     nodeid                  show this node's ids
     config [insecure] [key] dump config json, or one dot-path key
-    fault arm OP MODE [--count N] [--record PREFIX] [--subkeys A,B]
+    fault arm OP MODE [--count N] [--record PREFIX] [--subkeys A,B] [--data D]
                             fail an operation the way the network would.
                             OP is what to fail:
                               begin commit get set inspect open create
                             MODE is how it fails:
                               try_again timeout key_not_found generic silent
+                              rival
                             silent means succeed and produce nothing, and
                             applies to get and set only.
+                            rival applies to get only: before the get runs,
+                            the network's value becomes a different one at
+                            the same seq, unannounced, so only a read that
+                            reaches the network sees it. --data gives its
+                            bytes (text, or # and hex); by default it is the
+                            stored bytes inverted.
                             --count limits how many times it fires, default
                             until cleared; --record and --subkeys narrow it
                             to one record or a few of its subkeys.

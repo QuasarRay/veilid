@@ -1429,7 +1429,7 @@ impl StorageManager {
                             .local_seq_for(changed_subkey)
                             .unwrap_or(ValueSeqNum::NONE);
                         let opt_value = this
-                            .get_value(record_key.clone(), changed_subkey, true)
+                            .get_value(record_key.clone(), changed_subkey, GetValueRefresh::Newer)
                             .await?
                             .filter(|value| value.seq() > local_seq);
                         if let Some(value) = opt_value {

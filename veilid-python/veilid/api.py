@@ -206,6 +206,11 @@ class RoutingContext(ABC):
         May pull from the network; force_refresh forces a network refresh. Returns None if the
         subkey has not been set, or the ValueData if it has.
 
+        A network get takes the newest sequence number the nodes it reaches hold. Where they hold
+        different values at it, the value most of them hold wins, with a tie going to the value held
+        closest to the record key, as in set_dht_value. A newer value replaces the local copy; a
+        different value at the same sequence number replaces it only with force_refresh.
+
         Raises VeilidAPIErrorInvalidArgument if the record is not open or key is malformed,
         VeilidAPIErrorGeneric if key is an unsupported kind, VeilidAPIErrorTryAgain (retryable) if a
         network refresh is needed and the node is offline, VeilidAPIErrorKeyNotFound if the record

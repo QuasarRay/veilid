@@ -528,6 +528,77 @@ async fn test_flush_dht_record(api: VeilidAPI) {
 ///
 /// Records hold ciphertext, so a report that hands its watcher what is stored hands it
 /// undecipherable bytes. Nothing else in this suite reads a value out of an update.
+async fn test_get_dht_value_rival(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+    let rec = rc
+        .create_dht_record(TEST_CRYPTO_KIND, DHTSchema::dflt(2).unwrap(), None)
+        .await
+        .unwrap();
+    let dht_key = rec.key();
+    let held = b"held".to_vec();
+    rc.set_dht_value(dht_key.clone(), 0, held.clone(), None)
+        .await
+        .unwrap();
+
+    api.debug(format!(
+        "fault arm get rival --count 1 --record {} --data rival",
+        dht_key.opaque()
+    ))
+    .await
+    .unwrap();
+
+    // A read the local copy satisfies plants the rival without seeing it
+    let local = rc
+        .get_dht_value(dht_key.clone(), 0, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(local.data(), held.as_slice());
+
+    // Only a forced read replaces the local copy at the same seq
+    let forced = rc
+        .get_dht_value(dht_key.clone(), 0, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(forced.data(), b"rival");
+    assert_eq!(forced.seq(), local.seq());
+    let stored = rc
+        .get_dht_value(dht_key.clone(), 0, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.data(), b"rival");
+
+    // Without data the rival inverts the stored bytes
+    api.debug(format!(
+        "fault arm get rival --count 1 --record {}",
+        dht_key.opaque()
+    ))
+    .await
+    .unwrap();
+    let inverted = rc
+        .get_dht_value(dht_key.clone(), 0, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let expected: Vec<u8> = b"rival".iter().map(|b| !b).collect();
+    assert_eq!(inverted.data(), expected.as_slice());
+    assert_eq!(inverted.seq(), local.seq());
+
+    // An unwritten subkey has nothing to rival
+    api.debug(format!(
+        "fault arm get rival --count 1 --record {} --subkeys 1",
+        dht_key.opaque()
+    ))
+    .await
+    .unwrap();
+    assert!(rc.get_dht_value(dht_key.clone(), 1, true).await.is_err());
+
+    rc.close_dht_record(dht_key.clone()).await.unwrap();
+    rc.delete_dht_record(dht_key).await.unwrap();
+}
+
 async fn test_watch_value_change_is_decrypted() {
     let updates = Arc::new(Mutex::new(Vec::<VeilidUpdate>::new()));
     let captured = updates.clone();
@@ -596,6 +667,7 @@ pub async fn test_all() {
     test_set_get_dht_value(api.clone()).await;
     test_open_writer_dht_value(api.clone()).await;
     test_flush_dht_record(api.clone()).await;
+    test_get_dht_value_rival(api.clone()).await;
 
     api.shutdown().await;
 

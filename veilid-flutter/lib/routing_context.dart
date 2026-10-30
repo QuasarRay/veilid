@@ -166,6 +166,12 @@ abstract class VeilidRoutingContext {
   /// Set [forceRefresh] to force a network refresh. Returns `null` if the subkey
   /// has not yet been set.
   ///
+  /// A network get takes the newest sequence number the nodes it reaches hold.
+  /// Where they hold different values at it, the value most of them hold wins,
+  /// with a tie going to the value held closest to the record key, as in
+  /// [setDHTValue]. A newer value replaces the local copy; a different value at
+  /// the same sequence number replaces it only with [forceRefresh].
+  ///
   /// Non-blocking when a local value exists and [forceRefresh] is false;
   /// otherwise blocks on a network fanout and returns `TryAgain` if offline.
   ///

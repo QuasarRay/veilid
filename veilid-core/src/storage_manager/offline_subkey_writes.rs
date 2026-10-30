@@ -39,6 +39,21 @@ impl StorageManager {
         self.mark_metadata_dirty();
     }
 
+    /// Whether a write of ours to `subkey` is still waiting to reach the network
+    pub(super) fn has_offline_subkey_write(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        subkey: ValueSubkey,
+    ) -> bool {
+        self.inner
+            .lock()
+            .offline_subkey_writes
+            .get(opaque_record_key)
+            .is_some_and(|osw| {
+                osw.subkeys.contains(subkey) || osw.subkeys_in_flight.contains(subkey)
+            })
+    }
+
     /// If we write to a subkey, we first clear out any existing offline write to that subkey.
     /// If the new write succeeds, then this stays cleared
     /// If the new write was offline, then it will add it back in

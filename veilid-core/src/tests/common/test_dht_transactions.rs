@@ -173,6 +173,134 @@ async fn test_transaction_sets_gets_and_commit(api: VeilidAPI) {
     delete_dht_records(&rc, &keys).await;
 }
 
+async fn test_transaction_repeated_set_seq(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+    let keys = create_dht_records(&rc, 1, 1).await;
+    let key = keys[0].clone();
+    rc.set_dht_value(key.clone(), 0, b"base".to_vec(), None)
+        .await
+        .unwrap();
+
+    // Every set of a subkey counts from the base, so a repeat replaces the first at its seq
+    let tx = api.transact_dht_records(keys.clone(), None).await.unwrap();
+    for data in [b"first".as_slice(), b"second"] {
+        let res = tx.set(key.clone(), 0, data.to_vec(), None).await.unwrap();
+        assert!(res.is_none(), "set should return None");
+    }
+    tx.commit().await.expect("should commit");
+
+    let value = rc.get_dht_value(key, 0, true).await.unwrap().unwrap();
+    assert_eq!(value.seq(), 1.into());
+    assert_eq!(value.data(), b"second");
+    delete_dht_records(&rc, &keys).await;
+}
+
+async fn test_transaction_set_back_to_base(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+    let keys = create_dht_records(&rc, 1, 1).await;
+    let key = keys[0].clone();
+    rc.set_dht_value(key.clone(), 0, b"base".to_vec(), None)
+        .await
+        .unwrap();
+
+    // Restoring the base resends it at its seq, which every node already holds
+    let tx = api.transact_dht_records(keys.clone(), None).await.unwrap();
+    let res = tx
+        .set(key.clone(), 0, b"first".to_vec(), None)
+        .await
+        .unwrap();
+    assert!(res.is_none(), "set should return None");
+    let held = tx
+        .set(key.clone(), 0, b"base".to_vec(), None)
+        .await
+        .unwrap()
+        .expect("nodes should answer with the base");
+    assert_eq!(held.seq(), 0.into());
+    assert_eq!(held.data(), b"base");
+    tx.commit().await.expect("should commit");
+
+    let value = rc.get_dht_value(key, 0, true).await.unwrap().unwrap();
+    assert_eq!(value.seq(), 0.into());
+    assert_eq!(value.data(), b"base");
+    delete_dht_records(&rc, &keys).await;
+}
+
+async fn test_transaction_set_below_network(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+    let rec = rc
+        .create_dht_record(TEST_CRYPTO_KIND, DHTSchema::dflt(1).unwrap(), None)
+        .await
+        .unwrap();
+    let key = rec.key();
+    let owner = rec.owner_keypair().unwrap();
+    for data in [b"zero", b"once"] {
+        rc.set_dht_value(key.clone(), 0, data.to_vec(), None)
+            .await
+            .unwrap();
+    }
+
+    // Without a local copy the first set counts from nothing, below what the network holds
+    api.debug("record purge local".to_owned()).await.unwrap();
+    let _ = rc
+        .open_dht_record(key.clone(), Some(owner), None)
+        .await
+        .unwrap();
+
+    let tx = api
+        .transact_dht_records(vec![key.clone()], None)
+        .await
+        .unwrap();
+    let held = tx
+        .set(key.clone(), 0, b"twice".to_vec(), None)
+        .await
+        .unwrap()
+        .expect("nodes should answer with what they hold");
+    assert_eq!(held.seq(), 1.into());
+    assert_eq!(held.data(), b"once");
+    let res = tx
+        .set(key.clone(), 0, b"twice".to_vec(), None)
+        .await
+        .unwrap();
+    assert!(res.is_none(), "set should count from what came back");
+    tx.commit().await.expect("should commit");
+
+    let value = rc
+        .get_dht_value(key.clone(), 0, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value.seq(), 2.into());
+    assert_eq!(value.data(), b"twice");
+    rc.close_dht_record(key.clone()).await.unwrap();
+    rc.delete_dht_record(key).await.unwrap();
+}
+
+async fn test_transaction_failed_commit_releases(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+    let keys = create_dht_records(&rc, 1, 1).await;
+
+    let tx = api.transact_dht_records(keys.clone(), None).await.unwrap();
+    let res = tx
+        .set(keys[0].clone(), 0, b"lost".to_vec(), None)
+        .await
+        .unwrap();
+    assert!(res.is_none(), "set should return None");
+    api.debug("fault arm commit generic --count 1".to_owned())
+        .await
+        .unwrap();
+    assert!(tx.commit().await.is_err(), "commit should fail");
+
+    // The failed commit ended the transaction, so its record is free and nothing landed
+    let tx = api
+        .transact_dht_records(keys.clone(), None)
+        .await
+        .expect("record should be free after a failed commit");
+    tx.rollback().await.expect("should rollback");
+    let value = rc.get_dht_value(keys[0].clone(), 0, true).await.unwrap();
+    assert!(value.is_none(), "failed commit should write nothing");
+    delete_dht_records(&rc, &keys).await;
+}
+
 async fn test_transaction_fail_non_transactional_sets(api: VeilidAPI) {
     let rc = api.routing_context().unwrap();
     let keys = create_dht_records(&rc, SIMPLE_DHT_RECORD_COUNT, SIMPLE_DHT_SUBKEY_COUNT).await;
@@ -510,6 +638,18 @@ pub async fn test_all() {
 
     info!("--- test_transaction_sets_gets_and_commit ---");
     test_transaction_sets_gets_and_commit(api.clone()).await;
+
+    info!("--- test_transaction_repeated_set_seq ---");
+    test_transaction_repeated_set_seq(api.clone()).await;
+
+    info!("--- test_transaction_set_back_to_base ---");
+    test_transaction_set_back_to_base(api.clone()).await;
+
+    info!("--- test_transaction_set_below_network ---");
+    test_transaction_set_below_network(api.clone()).await;
+
+    info!("--- test_transaction_failed_commit_releases ---");
+    test_transaction_failed_commit_releases(api.clone()).await;
 
     info!("--- test_transaction_fail_non_transactional_sets ---");
     test_transaction_fail_non_transactional_sets(api.clone()).await;

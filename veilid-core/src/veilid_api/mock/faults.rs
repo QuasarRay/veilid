@@ -50,7 +50,7 @@ impl MockFaultOp {
     }
 }
 
-/// How a faulted operation fails.
+/// How a faulted operation goes wrong.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum MockFaultMode {
     /// What a node that could not reach consensus returns, which every caller retries
@@ -63,6 +63,8 @@ pub(crate) enum MockFaultMode {
     Generic,
     /// Succeed and produce nothing, the partial read a reader must defer on
     Silent,
+    /// The network holds a different value at the stored sequence number, as a split write settles
+    Rival,
 }
 
 impl MockFaultMode {
@@ -73,6 +75,7 @@ impl MockFaultMode {
             "key_not_found" => Self::KeyNotFound,
             "generic" => Self::Generic,
             "silent" => Self::Silent,
+            "rival" => Self::Rival,
             _ => return None,
         })
     }
@@ -84,6 +87,7 @@ impl MockFaultMode {
             Self::KeyNotFound => "key_not_found",
             Self::Generic => "generic",
             Self::Silent => "silent",
+            Self::Rival => "rival",
         }
     }
 }
@@ -101,6 +105,18 @@ struct MockFault {
     subkeys: Option<Vec<ValueSubkey>>,
     /// Firings so far
     fired: u32,
+    /// Bytes a rival carries, or `None` for the stored bytes inverted
+    data: Option<Vec<u8>>,
+}
+
+/// What an operation does once [check_fault] lets it run.
+pub(crate) enum MockFaultAction {
+    /// Run as normal
+    Proceed,
+    /// Succeed and produce nothing
+    Silent,
+    /// Plant a rival on the network, then run as normal
+    Rival(Option<Vec<u8>>),
 }
 
 static MOCK_FAULTS: LazyLock<Mutex<Vec<MockFault>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -142,12 +158,13 @@ fn take_fault(
     op: MockFaultOp,
     record_key: Option<&RecordKey>,
     subkey: Option<ValueSubkey>,
-) -> Option<MockFaultMode> {
+) -> Option<(MockFaultMode, Option<Vec<u8>>)> {
     let mut faults = MOCK_FAULTS.lock();
     let index = faults
         .iter()
         .position(|f| f.matches(op, record_key, subkey))?;
     let mode = faults[index].mode;
+    let data = faults[index].data.clone();
     faults[index].fired += 1;
     if let Some(remaining) = &mut faults[index].remaining {
         *remaining -= 1;
@@ -155,21 +172,21 @@ fn take_fault(
             faults.remove(index);
         }
     }
-    Some(mode)
+    Some((mode, data))
 }
 
-/// Fail an operation the way its armed fault says, or return `Ok(false)` when
-/// nothing is armed. `Ok(true)` means the caller should produce nothing.
+/// Fail an operation the way its armed fault says, or say how it runs instead.
 pub(crate) fn check_fault(
     op: MockFaultOp,
     record_key: Option<&RecordKey>,
     subkey: Option<ValueSubkey>,
-) -> VeilidAPIResult<bool> {
-    let Some(mode) = take_fault(op, record_key, subkey) else {
-        return Ok(false);
+) -> VeilidAPIResult<MockFaultAction> {
+    let Some((mode, data)) = take_fault(op, record_key, subkey) else {
+        return Ok(MockFaultAction::Proceed);
     };
     match mode {
-        MockFaultMode::Silent => Ok(true),
+        MockFaultMode::Silent => Ok(MockFaultAction::Silent),
+        MockFaultMode::Rival => Ok(MockFaultAction::Rival(data)),
         MockFaultMode::TryAgain => Err(VeilidAPIError::try_again(format!(
             "injected fault: {} could not reach consensus",
             op.name()
@@ -208,6 +225,15 @@ fn take_flag<'a>(args: &mut Vec<&'a str>, name: &str) -> VeilidAPIResult<Option<
         }
     }
     Ok(None)
+}
+
+/// Bytes from a debug argument: `#` and hex, or the text itself.
+fn parse_data(text: &str) -> VeilidAPIResult<Vec<u8>> {
+    match text.strip_prefix('#') {
+        Some(hex_text) => hex::decode(hex_text)
+            .map_err(|e| VeilidAPIError::invalid_argument(e.to_string(), "data", text)),
+        None => Ok(text.as_bytes().to_vec()),
+    }
 }
 
 /// The `fault` debug subcommands: `arm`, `list` and `clear`.
@@ -270,6 +296,9 @@ pub(crate) fn mock_debug_fault(words: &[&str]) -> VeilidAPIResult<String> {
                     mode.name()
                 );
             }
+            if mode == MockFaultMode::Rival && op != MockFaultOp::Get {
+                apibail_invalid_argument!("rival applies to get only", "mode", mode.name());
+            }
 
             let mut args: Vec<&str> = rest.to_vec();
             let remaining = match take_flag(&mut args, "count")? {
@@ -291,6 +320,11 @@ pub(crate) fn mock_debug_fault(words: &[&str]) -> VeilidAPIResult<String> {
                         .collect::<VeilidAPIResult<Vec<_>>>()?,
                 ),
             };
+            let data = match take_flag(&mut args, "data")? {
+                None => None,
+                Some(text) if mode == MockFaultMode::Rival => Some(parse_data(text)?),
+                Some(text) => apibail_invalid_argument!("data applies to rival only", "data", text),
+            };
             if let Some(unknown) = args.first() {
                 apibail_invalid_argument!("unknown fault argument", "args", unknown);
             }
@@ -302,6 +336,7 @@ pub(crate) fn mock_debug_fault(words: &[&str]) -> VeilidAPIResult<String> {
                 record,
                 subkeys,
                 fired: 0,
+                data,
             });
             Ok(format!("armed {} {}", op.name(), mode.name()))
         }
