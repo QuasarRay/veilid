@@ -7,8 +7,8 @@
 # Standalone: no dependency on veilidchat. Supersedes setup_windows.bat.
 # Note: after a winget install, a tool may not be on PATH until a new shell — re-run then.
 param([switch]$Install, [switch]$Upgrade, [switch]$Update, [switch]$Help,
-      [ValidateSet('x64','arm64')][string]$TargetArch, [switch]$BuildOnly, [switch]$Flutter,
-      [string]$Prefix)
+      [ValidateSet('x64','arm64')][string]$TargetArch, [switch]$BuildOnly, [switch]$NoRust,
+      [switch]$Flutter, [string]$Prefix)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest progress bar is 10-50x slower over SSH/qcow2
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,19 +22,23 @@ Usage: pwsh setup_windows.ps1 [-Install | -Upgrade] [-Help]
   -Install             install missing deps + bring below-minimum deps up to spec
                        (leaves deps that already meet the requirement untouched)
   -Upgrade, -Update    also upgrade already-satisfied deps to the newest versions
-  -TargetArch <x64|arm64>  arch to provision rust/JDK for (default: host). x64-on-arm64
-                       installs the cross rust toolchain + an x64 JDK and sets JAVA_HOME.
-  -BuildOnly           only build-critical deps (rust+target, cmake, MSVC, +JDK when
-                       cross); skips dev/test tools (cargo-nextest, llvm, node, nightly, ...)
+  -TargetArch <x64|arm64>  arch to provision rust and cmake for (default: host). x64-on-arm64
+                       installs the cross rust toolchain.
+  -BuildOnly           only build-critical deps (rust+target, cmake, MSVC, git+bash, pwsh);
+                       skips dev/test tools (java, cargo-nextest, llvm, node, nightly, ...)
+  -NoRust              with -BuildOnly: also skip rust, cargo and the rust target, for a build
+                       that bundles a prebuilt veilid-flutter library
   -Flutter             also install Flutter (for veilid-flutter work); only if missing or older than
                        veilid-flutter requires — never downgrades a newer one
-  -Prefix <dir>        contained toolchain root (CI cache / flutter-packer): rust, cmake, JDK and
-                       flutter install under it instead of LOCALAPPDATA/USERPROFILE. MSVC, git and
-                       pwsh are system installers and stay system-wide.
+  -Prefix <dir>        contained toolchain root (CI cache / flutter-packer): rust, cmake, PortableGit
+                       and flutter install under it instead of LOCALAPPDATA/USERPROFILE. An x64
+                       host's own cmake >= CMAKE_MIN_VERSION is used instead of a download. MSVC
+                       and pwsh are system installers and stay system-wide.
   -Help, /?            show this help
 "@
     exit 0
 }
+if ($NoRust -and -not $BuildOnly) { Write-Host "-NoRust applies to -BuildOnly"; exit 2 }
 $script:DoUpgrade = ($Upgrade -or $Update)
 $script:DoInstall = ($Install -or $script:DoUpgrade)
 
@@ -51,11 +55,16 @@ Get-Content (Join-Path $ScriptDir "..\.dagger\versions.env") | ForEach-Object {
     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)="?([^"#]*?)"?\s*(#.*)?$') { $V[$Matches[1]] = $Matches[2] }
 }
 
-# Prune docs/man/locales from a PortableGit tree — unused in builds, thousands of tiny files
+# Prune docs/man/locales from a PortableGit tree — unused in builds, thousands of tiny files. A -Prefix
+# toolchain only builds, so it also loses the editors and terminal, gitk/git-gui's tcl/tk and the tz
+# database git does not use.
 function SlimGitTree($root) {
-    foreach ($d in "mingw64\share\doc","mingw64\share\man","mingw64\share\locale","usr\share\doc","usr\share\man","usr\share\locale") {
-        Remove-Item (Join-Path $root $d) -Recurse -Force -ErrorAction SilentlyContinue
+    $dirs = @("mingw64\share\doc","mingw64\share\man","mingw64\share\locale","usr\share\doc","usr\share\man","usr\share\locale")
+    if ($Prefix) {
+        $dirs += @("usr\share\vim","usr\share\nano","usr\share\mintty","usr\share\gtk-doc",
+                   "mingw64\share\git-gui","mingw64\share\zoneinfo","mingw64\lib\tcl8.6","mingw64\lib\tk8.6")
     }
+    foreach ($d in $dirs) { Remove-Item (Join-Path $root $d) -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # -Prefix: contained toolchain root. CARGO_HOME/RUSTUP_HOME steer rustup-init; $ToolRoot
@@ -216,21 +225,7 @@ $iPwsh = {
     Invoke-WebRequest -Uri "https://aka.ms/install-powershell.ps1" -OutFile $dl
     & $dl -UseMSI -Quiet
 }
-$iJava   = { WinPkg "Microsoft.OpenJDK.$($V.JAVA_VERSION)" }   # host-arch JDK (non-cross)
-# Cross JDK: download the *target-arch* Microsoft OpenJDK 17 zip to a known dir and point
-# JAVA_HOME at it. jni links the JDK's jvm.lib by arch, so a host arm64 jvm.lib fails the x64
-# link (LNK4272). winget would give the host arch, hence the explicit arch-specific download.
-$JdkRoot = Join-Path $ToolRoot "veilid-jdk-$TargetArch"
-$iJavaCross = {
-    $jdkArch = if ($TargetArch -eq 'arm64') { 'aarch64' } else { 'x64' }
-    $zip = Join-Path $env:TEMP "msjdk$($V.JAVA_VERSION)-$jdkArch.zip"
-    Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-$($V.JAVA_VERSION)-windows-$jdkArch.zip" -OutFile $zip
-    New-Item -ItemType Directory -Path $JdkRoot -Force | Out-Null
-    Expand-Archive -Path $zip -DestinationPath $JdkRoot -Force; Remove-Item $zip -Force
-    $jdk = Get-ChildItem $JdkRoot -Directory -Filter "jdk-$($V.JAVA_VERSION)*" | Select-Object -First 1
-    if ($jdk) { [Environment]::SetEnvironmentVariable('JAVA_HOME', $jdk.FullName, 'Machine'); $env:JAVA_HOME = $jdk.FullName; Write-Host "    JAVA_HOME=$($jdk.FullName)" }
-    else { throw "extracted JDK but found no jdk-$($V.JAVA_VERSION)* dir under $JdkRoot" }
-}
+$iJava   = { WinPkg "Microsoft.OpenJDK.$($V.JAVA_VERSION)" }   # host JDK, for Android work
 $iLlvm   = { WinPkg "LLVM.LLVM" }
 $iJq     = { WinPkg "jqlang.jq" }
 $iPython = { WinPkg "Python.Python.$($V.PYTHON_VERSION)" }
@@ -265,14 +260,18 @@ if ($script:DoInstall) { EnsureGitBash }
 # build runs under pwsh; 5.1 mis-handles flutter's native stderr).
 DepHave "pwsh (PowerShell 7)" ($(if (Has "pwsh") { "y" } else { "" })) "install-powershell.ps1 -UseMSI (build runtime; not 5.1)" $iPwsh
 
-# Rust toolchain + cargo. Always build-critical.
-DepMin   "rust"   (CmdVer "rustc" "--version") $V.RUST_MSRV $iRust
-DepHave  "cargo"  ($(if (Has "cargo") { "y" } else { "" })) "installed with rustup" $iRust
+# Rust toolchain + cargo. Build-critical unless the build bundles a prebuilt library.
+if ($NoRust) {
+    Say "[skip]" "rust" "skipped (-NoRust)"
+} else {
+    DepMin   "rust"   (CmdVer "rustc" "--version") $V.RUST_MSRV $iRust
+    DepHave  "cargo"  ($(if (Has "cargo") { "y" } else { "" })) "installed with rustup" $iRust
+}
 
 # Cross toolchain: an x64-on-arm64 (Prism) build needs the target-arch toolchain installed
 # AND default — host rust being present doesn't provide it, so this is its own step (not the
 # rust DepMin above). --force-non-host on both: the host CPU can't run the cross rustc.
-if ($script:Cross -and (Has "rustup")) {
+if ($script:Cross -and (-not $NoRust) -and (Has "rustup")) {
     $tc = "$($V.RUST_VERSION)-$msvcTriple"
     if (rustup toolchain list 2>$null | Select-String ([regex]::Escape($tc))) {
         $script:ok++; Say "[ok]" "rust ($TargetArch)" "$tc present"; if ($script:DoUpgrade) { try { rustup update $tc } catch {} }
@@ -296,30 +295,20 @@ if (-not $BuildOnly) {
     DepHave  "cargo-sync-readme" (CrateVer "cargo-sync-readme") "cargo binstall cargo-sync-readme || cargo install --locked cargo-sync-readme" { cargo binstall --no-confirm cargo-sync-readme --version $V.CARGO_SYNC_README_VERSION 2>$null; if ($LASTEXITCODE -ne 0) { cargo install --locked cargo-sync-readme --version $V.CARGO_SYNC_README_VERSION } }
 }
 
-# JDK for the jni/jvm link. Provisioned (download + JAVA_HOME, keyed off -TargetArch) whenever we
-# build — cross OR -BuildOnly — its own block because the jni link needs the *target-arch* jvm.lib
-# and a host-arch `java` passing the version check must not suppress it. Covers native-x64 CI
-# (windows-latest): -BuildOnly there installs the x64 JDK rather than skipping it. Full dev mode
-# (no -BuildOnly, same arch) uses the normal host JDK via the version check.
-if ($script:Cross -or $BuildOnly) {
-    $jdk = if (Test-Path $JdkRoot) { Get-ChildItem $JdkRoot -Directory -Filter "jdk-$($V.JAVA_VERSION)*" -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
-    if ($jdk) {
-        if ($env:JAVA_HOME -ne $jdk.FullName) { [Environment]::SetEnvironmentVariable('JAVA_HOME', $jdk.FullName, 'Machine'); $env:JAVA_HOME = $jdk.FullName }
-        $script:ok++; Say "[ok]" "JDK ($TargetArch)" "JAVA_HOME=$($jdk.FullName)"
-    } elseif ($script:DoInstall) {
-        Say "[add]" "JDK ($TargetArch)" "downloading Microsoft OpenJDK 17 ($TargetArch)"
-        try { & $iJavaCross; $script:ok++ } catch { $script:conflict++; Say "[!!]" "JDK ($TargetArch)" ("install failed: " + $_.Exception.Message) }
-    } else { $script:old++; Say "[old]" "JDK ($TargetArch)" "need $TargetArch JDK + JAVA_HOME (re-run with -Install)" }
-} else {
-    DepMin "java" (CmdVer "java" "-version") $V.JAVA_MIN_VERSION $iJava
-}
+# java: Android work only. A build needs no JDK: the jni crate is cfg(target_os = "android"), and
+# the Dart jni plugin builds its optional dartjni.dll only when CMake finds one.
+if (-not $BuildOnly) { DepMin "java" (CmdVer "java" "-version") $V.JAVA_MIN_VERSION $iJava }
 # capnp: veilid-core dev tool (regenerates checked-in capnp Rust), not a veilidchat build dep — skip
 # under -BuildOnly. (cmake stays: Windows Flutter desktop genuinely builds with CMake + MSVC.)
 if (-not $BuildOnly) { DepMin "capnp" (CmdVer "capnp" "--version") $V.CAPNP_MIN_VERSION $iCapnp }
-# cmake: the build needs a TargetArch-matched cmake (see $iCmake) — check the managed install, not a
-# host-PATH cmake (which may be the wrong arch from VS). Pinned to CMAKE_VERSION_PATCH (single source).
+# cmake: a TargetArch-matched cmake (see $iCmake). Under -Prefix an x64 host's own cmake at
+# CMAKE_MIN_VERSION or newer serves; otherwise the managed install pinned to CMAKE_VERSION_PATCH.
 $cmExe = CmakeExe
-DepHave "cmake ($TargetArch $($V.CMAKE_VERSION_PATCH))" ($(if ($cmExe -and (Test-Path $cmExe)) { "y" } else { "" })) "download cmake $($V.CMAKE_VERSION_PATCH) ($TargetArch) from cmake.org" $iCmake
+if ($Prefix -and ($hostArch -eq 'x64') -and (-not $script:Cross) -and (-not $cmExe) -and (Has "cmake")) {
+    DepMin "cmake (host)" (((CmdVer "cmake" "--version") -split "\r?\n")[0]) $V.CMAKE_MIN_VERSION $iCmake
+} else {
+    DepHave "cmake ($TargetArch $($V.CMAKE_VERSION_PATCH))" ($(if ($cmExe -and (Test-Path $cmExe)) { "y" } else { "" })) "download cmake $($V.CMAKE_VERSION_PATCH) ($TargetArch) from cmake.org" $iCmake
+}
 if (-not $BuildOnly) {
     DepMin  "wasm-opt"    (CmdVer "wasm-opt" "--version") $V.BINARYEN_VERSION $iWopt
     DepHave "llvm/clang"  ($(if (Has "clang") { "y" } else { "" })) "winget install --id LLVM.LLVM"        $iLlvm
@@ -332,7 +321,9 @@ if (-not $BuildOnly) {
 # Rust target(s). -BuildOnly: just the target-arch MSVC target (cross is covered by the
 # cross-toolchain step; the same-arch host toolchain already has it). Full dev mode: the
 # shared set from versions.env (add only the missing — no per-target "is up to date" spam).
-if (-not (Has "rustup")) {
+if ($NoRust) {
+    # no toolchain, so no targets
+} elseif (-not (Has "rustup")) {
     $script:miss++; Say "[MISS]" "rust targets" "rustup not found"
 } elseif ($BuildOnly) {
     if (-not $script:Cross) {
