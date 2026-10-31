@@ -53,10 +53,6 @@ class DefaultVeilidFixture implements VeilidFixture {
         ? <String>[]
         : logDirectivesStr.split(',').map((e) => e.trim()).toList();
 
-    final logLevel = VeilidConfigLogLevel.fromJson(
-      const String.fromEnvironment('LOG_LEVEL', defaultValue: 'info'),
-    );
-
     final terminalLogLevel = VeilidConfigLogLevel.fromJson(
       const String.fromEnvironment('TERMINAL_LOG_LEVEL', defaultValue: 'off'),
     );
@@ -90,7 +86,7 @@ class DefaultVeilidFixture implements VeilidFixture {
         logging: VeilidWASMConfigLogging(
           performance: VeilidWASMConfigLoggingPerformance(
             enabled: true,
-            level: logLevel,
+            level: testLogLevel,
             directives: logDirectives,
             // pass through for backwards compatibility
             // ignore: deprecated_member_use
@@ -98,7 +94,7 @@ class DefaultVeilidFixture implements VeilidFixture {
           ),
           api: VeilidWASMConfigLoggingApi(
             enabled: true,
-            level: logLevel,
+            level: testLogLevel,
             directives: logDirectives,
             // pass through for backwards compatibility
             // ignore: deprecated_member_use
@@ -124,7 +120,7 @@ class DefaultVeilidFixture implements VeilidFixture {
           ),
           api: VeilidFFIConfigLoggingApi(
             enabled: true,
-            level: logLevel,
+            level: testLogLevel,
             directives: logDirectives,
             // pass through for backwards compatibility
             // ignore: deprecated_member_use

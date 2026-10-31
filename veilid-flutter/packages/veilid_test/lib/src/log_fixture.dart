@@ -1,8 +1,15 @@
 import 'package:veilid/veilid.dart';
 
 /// Test logging fixture. Formats and prints whatever veilid-core forwards;
-/// filtering is done internally by veilid-core via LOG_DIRECTIVES.
+/// veilid-core filters that by LOG_LEVEL and LOG_DIRECTIVES. The fixture's own
+/// messages stop at LOG_LEVEL.
 LogFixture get log => LogFixture.instance;
+
+/// The LOG_LEVEL define: the level veilid-core logs at, and the cutoff for the
+/// fixture's own messages.
+final VeilidConfigLogLevel testLogLevel = VeilidConfigLogLevel.fromJson(
+  const String.fromEnvironment('LOG_LEVEL', defaultValue: 'info'),
+);
 
 class LogFixture {
   static final LogFixture instance = LogFixture._();
@@ -65,9 +72,16 @@ class LogFixture {
     }
   }
 
-  void error(String message) => _log(VeilidConfigLogLevel.error, message);
-  void warn(String message) => _log(VeilidConfigLogLevel.warn, message);
-  void info(String message) => _log(VeilidConfigLogLevel.info, message);
-  void debug(String message) => _log(VeilidConfigLogLevel.debug, message);
-  void trace(String message) => _log(VeilidConfigLogLevel.trace, message);
+  // Forwarded lines skip this: veilid-core applied LOG_LEVEL and LOG_DIRECTIVES
+  void _own(VeilidConfigLogLevel level, String message) {
+    if (level.index <= testLogLevel.index) {
+      _log(level, message);
+    }
+  }
+
+  void error(String message) => _own(VeilidConfigLogLevel.error, message);
+  void warn(String message) => _own(VeilidConfigLogLevel.warn, message);
+  void info(String message) => _own(VeilidConfigLogLevel.info, message);
+  void debug(String message) => _own(VeilidConfigLogLevel.debug, message);
+  void trace(String message) => _own(VeilidConfigLogLevel.trace, message);
 }
