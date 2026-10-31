@@ -192,6 +192,8 @@
   - The `time` dependency drops `local-offset`, whose `num_threads` dependency does not build for iOS on libc 0.2.190.
   - **Breaking** The `VeilidProcessorRetry.retry` extension is gone: its wait for network readiness had no bound, so apps bring their own retry strategy.
   - New `Veilid.changeConfig()` replaces a detached node's configuration for its next attach.
+  - A Windows release build can bundle a prebuilt library instead of compiling one: `CCACHE_VEILID_FLUTTER_PREBUILT` gives its URL and `CCACHE_VEILID_FLUTTER_PREBUILT_SHA256` its SHA-256 (also spelled `CARGO_`), and a library that does not match fails the build. A feature selection or a debug build always compiles.
+  - Every `main` commit and release tag publishes its Windows x64 library to the veilid project's package registry, as `veilid-flutter-x86_64-pc-windows-msvc` version `<crate version>-<first 12 hex digits of the commit>`, with a `.sha256` and a `manifest.json`.
 
 - veilid-cli:
   - The interactive console no longer exits or floods `thingbuf receiver has closed` when a log burst overruns the line editor.

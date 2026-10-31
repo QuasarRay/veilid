@@ -222,6 +222,7 @@ build_images:
     BUILD_DEPS_LINUX: $BUILD_DEPS_LINUX
     BUILD_DEPS_FLUTTER: $BUILD_DEPS_FLUTTER
     BUILD_DEPS_FLUTTER_RUST: $BUILD_DEPS_FLUTTER_RUST
+    BUILD_DEPS_XWIN: $BUILD_DEPS_XWIN
     BUILD_CRATE_CACHE: $BUILD_CRATE_CACHE
   rules:
     - *branch_test_rules
@@ -251,7 +252,7 @@ registry_cleanup:
     - |
       api="$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories"
       curl -sSf --header "PRIVATE-TOKEN: $REGISTRY_CLEANUP_TOKEN" "$api?per_page=100" \
-        | jq -r '.[] | select((.name | startswith("tool-")) or .name == "crate-cache" or .name == "deps-linux" or .name == "deps-flutter" or .name == "deps-flutter-rust" or .name == "earthly-buildkitd") | "\(.id) \(.name)"' > /tmp/cache_repos.txt
+        | jq -r '.[] | select((.name | startswith("tool-")) or .name == "crate-cache" or .name == "deps-linux" or .name == "deps-flutter" or .name == "deps-flutter-rust" or .name == "deps-xwin" or .name == "earthly-buildkitd") | "\(.id) \(.name)"' > /tmp/cache_repos.txt
       if [ ! -s /tmp/cache_repos.txt ]; then
         echo "no tool-*, deps-linux or crate-cache repositories in the registry; nothing to clean."
         exit 0
@@ -263,6 +264,7 @@ registry_cleanup:
           deps-linux)  keep=$(sh scripts/tool_tags.sh deps-linux) ;;
           deps-flutter) keep=$(sh scripts/tool_tags.sh deps-flutter) ;;
           deps-flutter-rust) keep=$(sh scripts/tool_tags.sh deps-flutter-rust) ;;
+          deps-xwin)   keep=$(sh scripts/tool_tags.sh deps-xwin) ;;
           earthly-buildkitd) keep="v$(. .dagger/versions.env && echo $EARTHLY_VERSION)-.*" ;;
           *)           keep=$(sh scripts/tool_tags.sh "${name#tool-}") ;;
         esac
@@ -415,6 +417,28 @@ semgrep:
   artifacts:
     reports:
       sast: gl-sast-report.json
+
+# The prebuilt veilid-flutter library for Windows x64, which a Windows app build bundles through the
+# hook's prebuilt tier instead of compiling it (veilid-flutter/hook/prebuilt.dart). Cross-built
+# with clang-cl and lld-link (+deps-xwin) against the MSVC CRT and Windows SDK, which xwin fetches
+# under Microsoft's license (https://go.microsoft.com/fwlink/?LinkId=2086102), accepted by the
+# Veilid Foundation.
+# Published per commit with the job token, keeping the newest seven untagged versions
+# (scripts/ci/publish_prebuilt.sh); the prune needs the token's ADMIN_PACKAGES permission.
+prebuilt_flutter_windows_x64:
+  extends: .base_large
+  stage: build_packages
+  needs:
+    - job: build_images
+      optional: true
+  script:
+    - !reference [.earthly_setup, script]
+    - earthly --use-inline-cache +prebuilt-flutter-windows-x64 --TOOLS=container --TOOLS_IMAGE=$CI_REGISTRY_IMAGE $project_args --COMMIT=$CI_COMMIT_SHA --BUILD_HOST="$CI_RUNNER_DESCRIPTION"
+    - apk add curl jq
+    - sh scripts/ci/publish_prebuilt.sh target/prebuilt/flutter-windows-x64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: '$CI_COMMIT_TAG =~ /v\d.+/'
 
 # Actual release -- triggered by pushing a new version tag
 

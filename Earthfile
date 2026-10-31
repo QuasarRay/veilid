@@ -46,6 +46,9 @@ ARG --global RUST_STABLE_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_STAB
 ARG --global RUST_NIGHTLY_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_NIGHTLY_TARGETS)
 ARG --global FLUTTER_BUILD_IMAGE=$(. /etc/veilid-versions.env && echo $FLUTTER_BUILD_IMAGE)
 ARG --global NODE_MAJOR=$(. /etc/veilid-versions.env && echo $NODE_MAJOR)
+ARG --global XWIN_VERSION=$(. /etc/veilid-versions.env && echo $XWIN_VERSION)
+ARG --global XWIN_CRT_VERSION=$(. /etc/veilid-versions.env && echo $XWIN_CRT_VERSION)
+ARG --global XWIN_SDK_VERSION=$(. /etc/veilid-versions.env && echo $XWIN_SDK_VERSION)
 # Where +tool-* comes from: `local` builds it here, `container` pulls the per-version image
 # the build_tools CI job pushed. Tags come from the same script .gitlab-ci.yml asks, so a
 # version bump in versions.env moves one tool's tag and leaves the rest of the cache alone.
@@ -61,6 +64,7 @@ ARG --global DEPS_BASE_TAG=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veili
 ARG --global DEPS_LINUX_TAG=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veilid-tool-tags.sh deps-linux)
 ARG --global DEPS_FLUTTER_TAG=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veilid-tool-tags.sh deps-flutter)
 ARG --global DEPS_FLUTTER_RUST_TAG=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veilid-tool-tags.sh deps-flutter-rust)
+ARG --global DEPS_XWIN_TAG=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veilid-tool-tags.sh deps-xwin)
 ARG --global TOOL_TAG_FLUTTER=$(VERSIONS_ENV=/etc/veilid-versions.env sh /etc/veilid-tool-tags.sh flutter)
 ENV BINSTALL_DISABLE_TELEMETRY=true
 ENV BINSTALL_NO_CONFIRM=true
@@ -433,6 +437,44 @@ deps-flutter-rust:
         FROM $TOOLS_IMAGE/deps-flutter-rust:$DEPS_FLUTTER_RUST_TAG
     ELSE
         FROM +deps-flutter-rust-build
+    END
+    # Re-assert after the FROM: a published image carries the ENV it was BUILT with (see deps-linux).
+    ENV CARGO_BUILD_JOBS=$CARGO_JOBS
+
+# The cross toolchain for the prebuilt veilid-flutter Windows library: clang-cl, llvm-lib and
+# lld-link, the rust msvc target, and the MSVC CRT and Windows SDK that xwin splats into /xwin.
+# --accept-license is the Veilid Foundation's acceptance of Microsoft's license for the CRT and SDK
+# (https://go.microsoft.com/fwlink/?LinkId=2086102).
+deps-xwin-build:
+    FROM +deps-base
+    RUN apt-get update && apt-get install -y clang lld llvm
+    # The distribution ships the MSVC-style driver names only inside the llvm tree
+    RUN llvm=$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n 1) \
+        && ln -s $llvm/clang /usr/local/bin/clang-cl \
+        && ln -s $llvm/llvm-ar /usr/local/bin/llvm-lib \
+        && ln -s $llvm/lld /usr/local/bin/lld-link
+    COPY +tool-rust/rustup $RUSTUP_HOME
+    COPY +tool-rust/cargo $CARGO_HOME
+    RUN rustup target add x86_64-pc-windows-msvc
+    RUN retry curl -fsSL -o /tmp/xwin.tar.gz https://github.com/Jake-Shadle/xwin/releases/download/$XWIN_VERSION/xwin-$XWIN_VERSION-x86_64-unknown-linux-musl.tar.gz \
+        && tar -xzf /tmp/xwin.tar.gz -C /tmp --strip-components=1 xwin-$XWIN_VERSION-x86_64-unknown-linux-musl/xwin \
+        && retry /tmp/xwin --accept-license --cache-dir /tmp/xwin-cache --crt-version $XWIN_CRT_VERSION --sdk-version $XWIN_SDK_VERSION splat --output /xwin \
+        && rm -rf /tmp/xwin /tmp/xwin.tar.gz /tmp/xwin-cache
+    ENV CC_x86_64_pc_windows_msvc=clang-cl
+    ENV CXX_x86_64_pc_windows_msvc=clang-cl
+    ENV AR_x86_64_pc_windows_msvc=llvm-lib
+    ENV CFLAGS_x86_64_pc_windows_msvc="-Wno-unused-command-line-argument /vctoolsdir /xwin/crt /winsdkdir /xwin/sdk"
+    ENV CXXFLAGS_x86_64_pc_windows_msvc="-Wno-unused-command-line-argument /vctoolsdir /xwin/crt /winsdkdir /xwin/sdk"
+    ENV CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=lld-link
+    # Through LIB rather than target rustflags, which would replace .cargo/config.toml's
+    ENV LIB="/xwin/crt/lib/x86_64;/xwin/sdk/lib/um/x86_64;/xwin/sdk/lib/ucrt/x86_64"
+    SAVE IMAGE --push $TOOLS_IMAGE/deps-xwin:$DEPS_XWIN_TAG
+
+deps-xwin:
+    IF [ "$TOOLS" = "container" ]
+        FROM $TOOLS_IMAGE/deps-xwin:$DEPS_XWIN_TAG
+    ELSE
+        FROM +deps-xwin-build
     END
     # Re-assert after the FROM: a published image carries the ENV it was BUILT with (see deps-linux).
     ENV CARGO_BUILD_JOBS=$CARGO_JOBS
@@ -815,3 +857,28 @@ package-linux:
     WAIT
         BUILD +package-linux-arm64
     END
+
+# The prebuilt veilid-flutter library a Windows x64 app build bundles in place of compiling it
+# (veilid-flutter/hook/prebuilt.dart): release, default features, with its SHA-256 and a manifest
+# for the prebuilt_flutter_windows_x64 job to publish.
+prebuilt-flutter-windows-x64:
+    FROM +deps-xwin
+    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-core-optimized veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    WORKDIR /veilid
+    ARG --required COMMIT
+    ARG BUILD_HOST=local
+    RUN cargo build --release --locked -p veilid-flutter --target x86_64-pc-windows-msvc
+    RUN mkdir -p /out \
+        && cp target/x86_64-pc-windows-msvc/release/veilid_flutter.dll /out/ \
+        && sha256sum /out/veilid_flutter.dll | cut -d' ' -f1 > /out/veilid_flutter.dll.sha256 \
+        && jq -n \
+            --arg commit "$COMMIT" \
+            --arg version "$(sed -n 's/^version = "\(.*\)"$/\1/p' veilid-flutter/rust/Cargo.toml | head -n 1)-$(printf %.12s "$COMMIT")" \
+            --arg rustc "$(rustc --version)" \
+            --arg xwin "$XWIN_VERSION" \
+            --arg msvc_crt "$XWIN_CRT_VERSION" \
+            --arg windows_sdk "$XWIN_SDK_VERSION" \
+            --arg build_host "$BUILD_HOST" \
+            '{commit: $commit, version: $version, target: "x86_64-pc-windows-msvc", features: "default", rustc: $rustc, xwin: $xwin, msvc_crt: $msvc_crt, windows_sdk: $windows_sdk, build_host: $build_host}' \
+            > /out/manifest.json
+    SAVE ARTIFACT /out/* AS LOCAL target/prebuilt/flutter-windows-x64/

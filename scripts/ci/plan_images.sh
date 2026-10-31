@@ -49,6 +49,7 @@ emit BUILD_TOOL_ZIGBUILD   tool-zigbuild   "$(t zigbuild)"
 emit BUILD_DEPS_LINUX      deps-linux      "$(t deps-linux)"
 emit BUILD_DEPS_FLUTTER    deps-flutter    "$(t deps-flutter)"
 emit BUILD_DEPS_FLUTTER_RUST deps-flutter-rust "$(t deps-flutter-rust)"
+emit BUILD_DEPS_XWIN       deps-xwin       "$(t deps-xwin)"
 emit BUILD_CRATE_CACHE     crate-cache     "$(sh scripts/cache_tags.sh crate)"
 
 echo "--- $OUT ---"

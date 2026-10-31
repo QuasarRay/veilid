@@ -50,7 +50,9 @@ tag_for() {
         deps-flutter) echo "$(key "$FLUTTER_BUILD_IMAGE|$DEPS_FLUTTER_REVISION|$(tag_for flutter)")" ;;
         # ...plus the rust toolchain, for the integration gate that builds the native library.
         deps-flutter-rust) echo "$(key "$(tag_for deps-flutter)|$(tag_for rust)")" ;;
-        *)          echo "tool_tags: unknown tool '$1' (have: $TOOLS deps-base deps-linux deps-flutter deps-flutter-rust)" >&2; return 1 ;;
+        # The cross toolchain the prebuilt veilid-flutter Windows library is built with.
+        deps-xwin) echo "$(key "$(tag_for deps-base)|$(tag_for rust)|$XWIN_VERSION|$XWIN_CRT_VERSION|$XWIN_SDK_VERSION")" ;;
+        *)          echo "tool_tags: unknown tool '$1' (have: $TOOLS deps-base deps-linux deps-flutter deps-flutter-rust deps-xwin)" >&2; return 1 ;;
     esac
 }
 

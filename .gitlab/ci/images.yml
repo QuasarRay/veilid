@@ -128,6 +128,17 @@ deps_flutter_rust:
   rules:
     - if: $BUILD_DEPS_FLUTTER_RUST == "true"
 
+# --- wave 3: the prebuilt veilid-flutter Windows library's cross toolchain -----------------
+deps_xwin:
+  extends: .image_build
+  needs:
+    - {job: deps_base, optional: true}
+    - {job: tool_rust, optional: true}
+  variables:
+    EARTHLY_TARGET: deps-xwin-build
+  rules:
+    - if: $BUILD_DEPS_XWIN == "true"
+
 # --- wave 4: the crates, keyed on Cargo.lock -------------------------------------------------
 crate_cache:
   extends: .image_build

@@ -26,8 +26,9 @@ workspace:
 #         - debug-locks
 
 dependencies:
-  # hook/build.dart compiles veilid-flutter/rust and delivers it as a code asset
+  # hook/build.dart delivers veilid-flutter/rust as a code asset, compiled or prebuilt
   code_assets: ^1.2.1
+  crypto: ^3.0.7
   hooks: ^2.2.0
   native_toolchain_rust: ^1.0.6
   change_case: ^2.2.0

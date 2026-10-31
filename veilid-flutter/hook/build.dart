@@ -1,11 +1,16 @@
-// Builds veilid-flutter/rust as the code asset lib/veilid_ffi.dart resolves against.
-// `assetName` below and that file's @DefaultAsset must move together.
+// Builds veilid-flutter/rust as the code asset lib/veilid_ffi.dart resolves against,
+// or bundles a prebuilt one the environment names (prebuilt.dart).
+// `_assetName` below and that file's @DefaultAsset must move together.
 
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_rust/native_toolchain_rust.dart';
+
+import 'prebuilt.dart';
+
+const _assetName = 'veilid_ffi.dart';
 
 /// Cargo features a consuming app selects for this build, read from the
 /// environment so a selection lives only as long as the process that made it.
@@ -31,14 +36,49 @@ void main(List<String> args) async {
     }
     final selection = _featureSelection(input);
     _rejectMockApi(input, selection);
+    final code = input.config.code;
+    final prebuilt = prebuiltForBuild(
+      Platform.environment,
+      featuresSelected: selection != null,
+      release: input.config.linkingEnabled,
+      targetOS: code.targetOS,
+    );
+    if (prebuilt != null) {
+      final file = await fetchPrebuilt(
+        prebuilt,
+        cacheDir: input.outputDirectoryShared,
+      );
+      checkPrebuiltMachine(file, code.targetArchitecture);
+      output.assets.code.add(
+        CodeAsset(
+          package: input.packageName,
+          name: _assetName,
+          linkMode: DynamicLoadingBundled(),
+          file: file.uri,
+        ),
+      );
+      output.dependencies.add(file.uri);
+      stderr.writeln('veilid-flutter: bundling the prebuilt ${prebuilt.url}');
+      return;
+    }
+    stderr.writeln(
+      'veilid-flutter: building from source, ${_sourceReason(input, selection)}',
+    );
     await RustBuilder(
-      assetName: 'veilid_ffi.dart',
+      assetName: _assetName,
       cratePath: 'rust',
       buildMode: _buildMode(input),
-      features: selection.features,
-      enableDefaultFeatures: selection.defaultFeatures,
+      features: selection?.features ?? const [],
+      enableDefaultFeatures: selection?.defaultFeatures ?? true,
     ).run(input: input, output: output);
   });
+}
+
+String _sourceReason(BuildInput input, _FeatureSelection? selection) {
+  if (selection != null) {
+    return 'features selected by ${selection.source}';
+  }
+  return input.config.linkingEnabled ? 'no prebuilt configured' : 'debug build';
 }
 
 // linkingEnabled is false only for debug builds, and it sits in the hashed config
@@ -57,8 +97,8 @@ typedef _FeatureSelection = ({
 ///
 /// linkingEnabled stands in for the Flutter build mode, which hooks are not
 /// told: false only for debug, so the mock stays available to the test suites.
-void _rejectMockApi(BuildInput input, _FeatureSelection selection) {
-  if (!input.config.linkingEnabled) {
+void _rejectMockApi(BuildInput input, _FeatureSelection? selection) {
+  if (!input.config.linkingEnabled || selection == null) {
     return;
   }
   final mock = selection.features.where((f) => f.startsWith('mock-api'));
@@ -73,14 +113,23 @@ void _rejectMockApi(BuildInput input, _FeatureSelection selection) {
 }
 
 /// The environment wins over pubspec user-defines, which stay supported for an
-/// app that wants one fixed feature set for every build.
-_FeatureSelection _featureSelection(BuildInput input) =>
-    _environmentSelection() ??
-    (
-      features: _userDefineFeatures(input),
-      defaultFeatures: true,
-      source: 'the pubspec user-defines',
-    );
+/// app that wants one fixed feature set for every build. Null when neither
+/// selects anything, which builds the default features.
+_FeatureSelection? _featureSelection(BuildInput input) {
+  final environment = _environmentSelection();
+  if (environment != null) {
+    return environment;
+  }
+  final features = _userDefineFeatures(input);
+  if (features.isEmpty) {
+    return null;
+  }
+  return (
+    features: features,
+    defaultFeatures: true,
+    source: 'the pubspec user-defines',
+  );
+}
 
 /// Null when the environment names no selection, so the caller falls back
 /// rather than building something the app did not ask for.
