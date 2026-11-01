@@ -114,6 +114,20 @@ function CrateVer($crate) {
 # Run an install/upgrade scriptblock tolerantly — a failure (e.g. a tool not yet on
 # PATH after a winget install) is reported, not fatal, so the run always completes.
 function RunStep($step) { if ($step) { try { & $step } catch { Write-Warning ("  install step failed: " + $_.Exception.Message) } } }
+# Downloads retry: a cold CI VM fetches every tool each run, so a CDN blip is retried with the
+# same loop as veilidchat's dev-setup (four attempts, 10/20/30 s apart); the last failure throws
+# so the install step reports it.
+$DownloadTries = 4
+function Download($url, $file) {
+    for ($try = 1; ; $try++) {
+        try { Invoke-WebRequest -Uri $url -OutFile $file; return }
+        catch {
+            if ($try -ge $DownloadTries) { throw ("download failed after {0} attempts: {1}: {2}" -f $DownloadTries, $url, $_.Exception.Message) }
+            Write-Warning ("  download failed (attempt {0} of {1}), retrying: {2}: {3}" -f $try, $DownloadTries, $url, $_.Exception.Message)
+            Start-Sleep -Seconds (10 * $try)
+        }
+    }
+}
 
 # ---- install helpers (winget for packaged tools; downloads for the rest) -----
 # Upgrade-safe: winget upgrades if present; downloads no-op when already satisfied.
@@ -132,7 +146,7 @@ function DlExtract($url, $pattern) {
     $tmp = Join-Path $env:TEMP ("veilid-dl-" + [System.Guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     $file = Join-Path $tmp (Split-Path $url -Leaf)
-    Invoke-WebRequest -Uri $url -OutFile $file
+    Download $url $file
     if ($file -match '\.zip$') { Expand-Archive -Path $file -DestinationPath $tmp -Force } else { tar -xf $file -C $tmp }
     New-Item -ItemType Directory -Path $CargoBin -Force | Out-Null
     Get-ChildItem -Path $tmp -Recurse -Filter $pattern | ForEach-Object { Copy-Item $_.FullName $CargoBin -Force }
@@ -150,7 +164,7 @@ $iRust   = {
     if (Has "rustup") { rustup update; return }
     $rsArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
     $ri = Join-Path $env:TEMP "rustup-init.exe"
-    Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/$rsArch-pc-windows-msvc/rustup-init.exe" -OutFile $ri
+    Download "https://static.rust-lang.org/rustup/dist/$rsArch-pc-windows-msvc/rustup-init.exe" $ri
     & $ri -y --default-toolchain $V.RUST_VERSION --profile minimal
     $cb = $CargoBin
     if ((Test-Path $cb) -and ($env:PATH -notmatch [regex]::Escape($cb))) { $env:PATH = "$cb;$env:PATH" }
@@ -163,7 +177,7 @@ $CmakeRoot = Join-Path $ToolRoot "veilid-cmake-$TargetArch"
 $iCmake  = {
     $a = if ($TargetArch -eq 'arm64') { 'arm64' } else { 'x86_64' }
     $zip = Join-Path $env:TEMP "cmake-$($V.CMAKE_VERSION_PATCH)-windows-$a.zip"
-    Invoke-WebRequest -Uri "https://cmake.org/files/v$($V.CMAKE_VERSION_MINOR)/cmake-$($V.CMAKE_VERSION_PATCH)-windows-$a.zip" -OutFile $zip
+    Download "https://cmake.org/files/v$($V.CMAKE_VERSION_MINOR)/cmake-$($V.CMAKE_VERSION_PATCH)-windows-$a.zip" $zip
     if (Test-Path $CmakeRoot) { Remove-Item $CmakeRoot -Recurse -Force }
     New-Item -ItemType Directory -Force $CmakeRoot | Out-Null
     tar -xf $zip -C $CmakeRoot
@@ -182,7 +196,7 @@ function CmakeExe { if (Test-Path $CmakeRoot) { $d = Get-ChildItem $CmakeRoot -D
 # Machine-wide -> needs an elevated shell.
 $iMsvc = {
     $exe = Join-Path $env:TEMP "vs_buildtools.exe"
-    Invoke-WebRequest -Uri "https://aka.ms/vs/$($V.VS_VERSION)/release/vs_BuildTools.exe" -OutFile $exe
+    Download "https://aka.ms/vs/$($V.VS_VERSION)/release/vs_BuildTools.exe" $exe
     & $exe --quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.$($V.WINDOWS_SDK_VERSION) | Out-Null
 }
 # The build needs git AND bash: CI runner images often ship MinGit (git.exe, no bash.exe),
@@ -192,7 +206,7 @@ $PortableGitRoot = Join-Path $ToolRoot "veilid-git"
 $iGit  = {
     if ($Prefix -or -not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
         $exe = Join-Path $env:TEMP $V.GIT_WINDOWS_FILE
-        Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/$($V.GIT_WINDOWS_TAG)/$($V.GIT_WINDOWS_FILE)" -OutFile $exe
+        Download "https://github.com/git-for-windows/git/releases/download/$($V.GIT_WINDOWS_TAG)/$($V.GIT_WINDOWS_FILE)" $exe
         # PortableGit is a 7-Zip SFX; -y -o extracts silently
         Start-Process -Wait -FilePath $exe -ArgumentList "-y", "-o`"$PortableGitRoot`""
         Remove-Item $exe -Force
@@ -222,7 +236,7 @@ function EnsureGitBash {
 # from MS (not winget). The dev-setup scripts themselves stay 5.1-runnable so a bare box can bootstrap.
 $iPwsh = {
     $dl = Join-Path $env:TEMP "install-powershell.ps1"
-    Invoke-WebRequest -Uri "https://aka.ms/install-powershell.ps1" -OutFile $dl
+    Download "https://aka.ms/install-powershell.ps1" $dl
     & $dl -UseMSI -Quiet
 }
 $iJava   = { WinPkg "Microsoft.OpenJDK.$($V.JAVA_VERSION)" }   # host JDK, for Android work
@@ -359,7 +373,7 @@ if ($Flutter) {
         $fv2 = $V.FLUTTER_VERSION
         $zip = Join-Path $env:TEMP "flutter_windows_$fv2-stable.zip"
         Write-Host "    installing Flutter $fv2 -> $fdir\flutter"
-        Invoke-WebRequest -Uri "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$fv2-stable.zip" -OutFile $zip
+        Download "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$fv2-stable.zip" $zip
         if (Test-Path $fdir) { Remove-Item $fdir -Recurse -Force }
         New-Item -ItemType Directory -Force $fdir | Out-Null
         tar -xf $zip -C $fdir
