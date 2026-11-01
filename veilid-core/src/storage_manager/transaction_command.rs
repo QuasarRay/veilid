@@ -190,6 +190,7 @@ impl StorageManager {
                 .with_record(&params.opaque_record_key, |record| record.descriptor())?
                 .ok_or_else(|| VeilidAPIError::internal("record does not exist in transaction"))?
         };
+        let schema = descriptor.schema()?;
 
         #[cfg(feature = "verbose-tracing")]
         let total_nodes = params.nodes.len();
@@ -260,6 +261,7 @@ impl StorageManager {
             let rnxid = n.rnxid.clone();
             let node_ref = n.node_ref.clone();
             let descriptor = descriptor.clone();
+            let schema = schema.clone();
             let params = params.clone();
             #[cfg(feature = "instrument")]
             let command = params.command;
@@ -275,7 +277,7 @@ impl StorageManager {
                             Some(params.safety_selection.clone()),
                         ),
                         params.opaque_record_key.clone(),
-                        descriptor,
+                        descriptor.clone(),
                         rnxid.xid(),
                         params.command,
                         params.opt_seqs.clone(),
@@ -329,6 +331,25 @@ impl StorageManager {
                         Ok(None)
                     }
                     NetworkResult::Value(tva) => {
+                        // A value outside the schema fails this node, not the transaction
+                        if let (Some(subkey), Some(value)) =
+                            (tva.answer.opt_subkey, &tva.answer.opt_value)
+                        {
+                            if registry
+                                .storage_manager()
+                                .check_subkey_value_data(
+                                    &schema,
+                                    descriptor.ref_owner(),
+                                    subkey,
+                                    value.value_data(),
+                                )
+                                .is_err()
+                            {
+                                veilid_log!(registry debug "TransactCmd node answered a value outside the schema: cmd={} key={} #{} node={}",
+                                    params.command, params.opaque_record_key, subkey, node_ref);
+                                return Ok(None);
+                            }
+                        }
                         let disposition = if tva.answer.transaction_valid {
                             #[cfg(feature = "verbose-tracing")]
                             veilid_log!(registry debug "TransactCmd node result: cmd={} key={}{} node={} result=VALID elapsed={}",
@@ -651,6 +672,39 @@ impl StorageManager {
                     let Some(value) = opt_value else {
                         return Ok(NetworkResult::invalid_message("missing value"));
                     };
+
+                    // Checked as a plain set value is, against the descriptor the begin fixed
+                    let Some(descriptor) = remote_record_store
+                        .inbound_transaction_descriptor(opaque_record_key, transaction_id)
+                    else {
+                        return Ok(NetworkResult::value(
+                            InboundTransactCommandResult::InvalidTransaction,
+                        ));
+                    };
+                    network_result_try!(
+                        self.verify_inbound_signed_value(
+                            opaque_record_key,
+                            &descriptor,
+                            &value,
+                            subkey
+                        )
+                        .await
+                    );
+                    let Ok(schema) = descriptor.schema() else {
+                        return Ok(NetworkResult::invalid_message("invalid schema"));
+                    };
+                    if self
+                        .check_subkey_value_data(
+                            &schema,
+                            descriptor.ref_owner(),
+                            subkey,
+                            value.value_data(),
+                        )
+                        .is_err()
+                    {
+                        return Ok(NetworkResult::invalid_message("failed schema validation"));
+                    }
+
                     remote_record_store
                         .inbound_transaction_set(opaque_record_key, transaction_id, subkey, value)
                         .await?

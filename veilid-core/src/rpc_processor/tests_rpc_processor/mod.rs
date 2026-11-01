@@ -4,6 +4,7 @@ mod test_dial_info;
 mod test_fanout_call;
 mod test_fanout_config;
 mod test_fanout_queue;
+mod test_invalid_answer;
 mod test_signed_value_data;
 mod test_transport_mtus;
 
@@ -29,6 +30,7 @@ pub async fn test_all() {
     test_fanout_call::test_demoted_closest_node_still_counts().await;
     test_fanout_call::test_demoted_straggler_is_cut_at_the_grace().await;
     test_fanout_queue::test_next_straggler_cut_matches_the_cut().await;
+    test_invalid_answer::test_invalid_answer_fails_its_question_at_once().await;
     test_signed_value_data::test_encode_and_decode_signed_value_data();
     test_destination::test_same_target_ignores_how_it_is_reached();
     test_dial_info::test_encode_and_decode_dial_info_udp();

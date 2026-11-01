@@ -98,10 +98,8 @@ impl RPCProcessor {
             .into_network_result());
 
         // Wait for reply
-        let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {
-            TimeoutOr::Timeout => return Ok(NetworkResult::Timeout),
-            TimeoutOr::Value(v) => v,
-        };
+        let (msg, answer_context) =
+            network_result_try!(self.wait_for_reply(waitable_reply, debug_string).await?);
 
         // Get the right answer type
         let (_, _, kind) = msg.operation.destructure();

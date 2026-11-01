@@ -630,6 +630,16 @@ where
         self.inner.lock().lookup_inbound_transaction_id(raw_id)
     }
 
+    pub fn inbound_transaction_descriptor(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        transaction_id: InboundTransactionId,
+    ) -> Option<Arc<SignedValueDescriptor>> {
+        self.inner
+            .lock()
+            .inbound_transaction_descriptor(opaque_record_key, transaction_id)
+    }
+
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "debug", target = "stor", skip_all, err)

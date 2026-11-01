@@ -182,7 +182,7 @@ pub(crate) struct RPCProcessor {
     /// The number of RPC workers to spin up
     concurrency: u32,
     /// The RPCs that are waiting for a reply
-    waiting_rpc_table: OperationWaiter<Message, WaitingQuestion>,
+    waiting_rpc_table: OperationWaiter<Result<Message, RPCError>, WaitingQuestion>,
     /// The app calls that are waiting for a reply
     waiting_app_call_table: OperationWaiter<Bytes, ()>,
     /// Pool that decouples reply waits from caller cancellation
@@ -638,7 +638,7 @@ impl RPCProcessor {
         &self,
         waitable_reply: WaitableReply,
         debug_string: String,
-    ) -> Result<TimeoutOr<(Message, AnswerContext)>, RPCError> {
+    ) -> RPCNetworkResult<(Message, AnswerContext)> {
         let id = waitable_reply.handle.id();
 
         #[cfg(feature = "instrument")]
@@ -726,9 +726,22 @@ impl RPCProcessor {
                         #[cfg(feature = "instrument")]
                         tracing::Span::current().record("ret_outcome", "timeout");
 
-                        Ok(TimeoutOr::Timeout)
+                        Ok(NetworkResult::Timeout)
                     }
-                    Ok(TimeoutOr::Value((rpcreader, latency))) => {
+                    Ok(TimeoutOr::Value((Err(e), _latency))) => {
+                        // The node answered, so the round trip counts, but the answer failed validation
+                        let recv_ts = Timestamp::now_non_decreasing();
+                        veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "RPC Invalid (id={:#} {} {})", id, debug_string, e);
+                        if !waitable_reply.context.mtu_probe {
+                            this.record_answer_received(recv_ts, 0u64.into(), &waitable_reply.context);
+                        }
+
+                        #[cfg(feature = "instrument")]
+                        tracing::Span::current().record("ret_outcome", "invalid");
+
+                        Ok(NetworkResult::invalid_message(e))
+                    }
+                    Ok(TimeoutOr::Value((Ok(rpcreader), latency))) => {
                         // Reply received
                         let recv_ts = Timestamp::now_non_decreasing();
                         veilid_stats!(if caller_weak.upgrade().is_none() {
@@ -765,7 +778,7 @@ impl RPCProcessor {
                         {
                             match &rpcreader.header.detail {
                                 RPCMessageHeaderDetail::Direct(_) => {
-                                    return Err(RPCError::protocol(
+                                    return Ok(NetworkResult::invalid_message(
                                         "should have received reply over private route or stub",
                                     ));
                                 }
@@ -774,14 +787,14 @@ impl RPCProcessor {
                                         .routing_table()
                                         .public_key(sr.direct.envelope.get_crypto_kind());
                                     if public_key != reply_private_route {
-                                        return Err(RPCError::protocol(
+                                        return Ok(NetworkResult::invalid_message(
                                             "should have received reply from safety route to a stub",
                                         ));
                                     }
                                 }
                                 RPCMessageHeaderDetail::PrivateRouted(pr) => {
                                     if pr.private_route != reply_private_route {
-                                        return Err(RPCError::protocol(
+                                        return Ok(NetworkResult::invalid_message(
                                             "received reply over the wrong private route",
                                         ));
                                     }
@@ -789,7 +802,7 @@ impl RPCProcessor {
                             };
                         }
 
-                        Ok(TimeoutOr::Value((
+                        Ok(NetworkResult::Value((
                             rpcreader,
                             AnswerContext {
                                 latency,
@@ -2531,6 +2544,19 @@ impl RPCProcessor {
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     async fn validate_rpc_operation(&self, operation: &RPCOperation) -> Result<(), RPCError> {
+        let res = self.validate_rpc_operation_inner(operation).await;
+
+        // An invalid answer still answers its question: its waiter fails now, not at its timeout
+        if let (Err(e), RPCOperationKind::Answer(_)) = (&res, operation.kind()) {
+            // No waiter means a late answer, already counted as lost
+            let _ = self
+                .waiting_rpc_table
+                .complete_op_waiter(operation.op_id(), Err(e.clone()));
+        }
+        res
+    }
+
+    async fn validate_rpc_operation_inner(&self, operation: &RPCOperation) -> Result<(), RPCError> {
         // An answer must be to a question we asked, and of the kind that question expects
         let question_context = if let RPCOperationKind::Answer(answer) = operation.kind() {
             let op_id = operation.op_id();
@@ -2818,7 +2844,7 @@ impl RPCProcessor {
             },
             RPCOperationKind::Answer(_) => {
                 let op_id = msg.operation.op_id();
-                if let Err(e) = self.waiting_rpc_table.complete_op_waiter(op_id, msg) {
+                if let Err(e) = self.waiting_rpc_table.complete_op_waiter(op_id, Ok(msg)) {
                     match e {
                         RPCError::Unimplemented(_) | RPCError::Internal(_) => {
                             veilid_log!(self error "Error in RPC operation: id = {}: {}", op_id, e);

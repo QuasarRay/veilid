@@ -39,6 +39,21 @@ where
         self.inbound_transactions.lookup_id(raw_id)
     }
 
+    /// The descriptor an open inbound transaction was begun with
+    pub fn inbound_transaction_descriptor(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        transaction_id: InboundTransactionId,
+    ) -> Option<Arc<SignedValueDescriptor>> {
+        let rtk = RecordTableKey {
+            record_key: opaque_record_key.clone(),
+        };
+        self.inbound_transactions
+            .get(&rtk)?
+            .get(transaction_id)
+            .map(|t| t.descriptor())
+    }
+
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err)

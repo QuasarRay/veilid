@@ -8,6 +8,7 @@ mod test_freeze_recovery;
 mod test_gated_operation;
 mod test_get_value_store;
 mod test_inbound_set_value_signature;
+mod test_inbound_transaction_set_validation;
 mod test_inspect_fanout_done;
 mod test_metadata_round_trip;
 mod test_metadata_save_schedule;
@@ -33,6 +34,7 @@ pub async fn test_all() {
     #[cfg(feature = "aimd-dht")]
     test_gated_operation::test_all();
     test_inbound_set_value_signature::test_all().await;
+    test_inbound_transaction_set_validation::test_all().await;
     test_inspect_fanout_done::test_all();
     test_metadata_round_trip::test_metadata_round_trip().await;
     test_metadata_save_schedule::test_all().await;

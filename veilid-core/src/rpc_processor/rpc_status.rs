@@ -116,8 +116,8 @@ impl RPCProcessor {
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {
-            TimeoutOr::Timeout => return Ok(StatusResult::Failed(send_data_result)),
-            TimeoutOr::Value(v) => v,
+            NetworkResult::Value(v) => v,
+            _ => return Ok(StatusResult::Failed(send_data_result)),
         };
         let opt_answer_datagram_len = match &msg.header.detail {
             RPCMessageHeaderDetail::Direct(detail) => detail.opt_datagram_len,

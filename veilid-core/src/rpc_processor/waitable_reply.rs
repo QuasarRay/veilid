@@ -90,14 +90,14 @@ pub(super) struct WaitingQuestion {
 #[derive(Debug)]
 #[must_use]
 pub(super) struct WaitableReply {
-    pub handle: OperationWaitHandle<Message, WaitingQuestion>,
+    pub handle: OperationWaitHandle<Result<Message, RPCError>, WaitingQuestion>,
     _opt_connection_ref_scope: Option<ConnectionRefScope>,
     pub context: WaitableReplyContext,
 }
 
 impl WaitableReply {
     pub fn new(
-        handle: OperationWaitHandle<Message, WaitingQuestion>,
+        handle: OperationWaitHandle<Result<Message, RPCError>, WaitingQuestion>,
         opt_connection_ref_scope: Option<ConnectionRefScope>,
         context: WaitableReplyContext,
     ) -> Self {
