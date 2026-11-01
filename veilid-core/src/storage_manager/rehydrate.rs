@@ -139,7 +139,7 @@ impl StorageManager {
 
         let peek_lock = self
             .record_lock_table
-            .peek_lock(opaque_record_key.clone())
+            .peek_lock(opaque_record_key.clone(), RecordLockPriority::Background)
             .await;
 
         let safety_selection = {
@@ -195,8 +195,8 @@ impl StorageManager {
 
         // Get the inspect record report from the network with only the subkeys for which we have
         // sequence numbers we have locally
-        let outbound_inspect_result = self
-            .outbound_inspect_value(
+        let Some(outbound_inspect_result) = peek_lock
+            .until_preempted(self.outbound_inspect_value(
                 &opaque_record_key,
                 local_inspect_result.subkeys().clone(),
                 safety_selection.clone(),
@@ -204,8 +204,12 @@ impl StorageManager {
                 true,
                 InspectFanoutStop::SubkeyConsensus,
                 FanoutConfig::default(),
-            )
-            .await?;
+            ))
+            .await
+        else {
+            apibail_try_again!("rehydration pre-empted by foreground work");
+        };
+        let outbound_inspect_result = outbound_inspect_result?;
 
         // Keep the list of nodes that returned a value for later reference
         let results_iter = outbound_inspect_result

@@ -65,9 +65,11 @@ impl StorageManager {
         // Admit through the operation gate like a foreground set; its backpressure
         // paces retries when the network is congested
         let value_bytes = value.value_data().data().len() as u64;
-        let Ok(_gate_permit) = self
-            .acquire_gated_set(value_bytes)
-            .timeout_at(stop_token.clone())
+        let Some(Ok(_gate_permit)) = subkey_lock
+            .until_preempted(
+                self.acquire_gated_set(value_bytes)
+                    .timeout_at(stop_token.clone()),
+            )
             .await
         else {
             return Ok(OfflineSubkeyWriteResult::Cancelled);
@@ -79,16 +81,22 @@ impl StorageManager {
         }
 
         veilid_log!(self debug "Offline subkey write: {}:{} len={}", opaque_record_key, subkey, value.value_data().data().len());
-        let osvres = self
-            .outbound_set_value(
-                &opaque_record_key,
-                subkey,
-                safety_selection,
-                value.clone(),
-                descriptor,
+        let Some(osvres) = subkey_lock
+            .until_preempted(
+                self.outbound_set_value(
+                    &opaque_record_key,
+                    subkey,
+                    safety_selection,
+                    value.clone(),
+                    descriptor,
+                )
+                .timeout_at(stop_token.clone()),
             )
-            .timeout_at(stop_token.clone())
-            .await;
+            .await
+        else {
+            veilid_log!(self debug "Offline subkey write pre-empted: {}:{}", opaque_record_key, subkey);
+            return Ok(OfflineSubkeyWriteResult::Cancelled);
+        };
         match osvres {
             Ok(Ok(result)) => {
                 self.record_gated_fanout_outcome(GatedOperationKind::Set, &result.fanout_result);
@@ -146,7 +154,7 @@ impl StorageManager {
                 .lock_subkey(
                     work_item.opaque_record_key.clone(),
                     subkey,
-                    StorageManagerSubkeyLockPurpose::Set,
+                    StorageManagerSubkeyLockPurpose::BackgroundSet,
                 )
                 .await;
 

@@ -8,6 +8,7 @@ use std::backtrace::Backtrace;
 pub struct PeekLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     record_lock: Arc<RecordLock<R, S>>,
     _lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
+    opt_background: Option<BackgroundHold>,
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
@@ -18,6 +19,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
     pub(super) fn new(
         record_lock: Arc<RecordLock<R, S>>,
         lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
+        opt_background: Option<BackgroundHold>,
     ) -> Self {
         #[cfg(feature = "debug-locks")]
         let (id, active_guards) = {
@@ -30,6 +32,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
         Self {
             record_lock,
             _lifetime_lock_guard: lifetime_lock_guard,
+            opt_background,
             #[cfg(feature = "debug-locks")]
             id,
             #[cfg(feature = "debug-locks")]
@@ -39,6 +42,11 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
     pub fn record(&self) -> OpaqueRecordKey {
         self.record_lock.record()
     }
+
+    /// `fut`'s output, or None when a foreground acquisition pre-empts this background hold first
+    pub fn until_preempted<F: Future>(&self, fut: F) -> impl Future<Output = Option<F::Output>> {
+        until_preempted(self.opt_background.as_ref(), fut)
+    }
 }
 
 impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for PeekLockGuard<R, S> {
@@ -46,6 +54,9 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for PeekLockGuard<R, S> {
         #[cfg(feature = "debug-locks")]
         self.active_guards.lock().remove(&self.id);
 
+        if let Some(background) = &self.opt_background {
+            self.record_lock.drop_background_hold(background);
+        }
         self.record_lock.drop_peek_lock_guard();
     }
 }

@@ -24,6 +24,7 @@ pub(super) enum RecordLockGuards {
 pub struct RecordLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     record_lock: Arc<RecordLock<R, S>>,
     _guards: RecordLockGuards,
+    opt_background: Option<BackgroundHold>,
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
@@ -31,7 +32,11 @@ pub struct RecordLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
 }
 
 impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockGuard<R, S> {
-    pub(super) fn new(record_lock: Arc<RecordLock<R, S>>, guards: RecordLockGuards) -> Self {
+    pub(super) fn new(
+        record_lock: Arc<RecordLock<R, S>>,
+        guards: RecordLockGuards,
+        opt_background: Option<BackgroundHold>,
+    ) -> Self {
         #[cfg(feature = "debug-locks")]
         let (id, active_guards) = {
             let id = GUARD_ID.fetch_add(1, Ordering::AcqRel);
@@ -43,6 +48,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockGuard<R, S> {
         Self {
             record_lock,
             _guards: guards,
+            opt_background,
             #[cfg(feature = "debug-locks")]
             id,
             #[cfg(feature = "debug-locks")]
@@ -53,6 +59,11 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockGuard<R, S> {
     pub fn record(&self) -> OpaqueRecordKey {
         self.record_lock.record()
     }
+
+    /// `fut`'s output, or None when a foreground acquisition pre-empts this background hold first
+    pub fn until_preempted<F: Future>(&self, fut: F) -> impl Future<Output = Option<F::Output>> {
+        until_preempted(self.opt_background.as_ref(), fut)
+    }
 }
 
 impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for RecordLockGuard<R, S> {
@@ -60,6 +71,9 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for RecordLockGuard<R, S> 
         #[cfg(feature = "debug-locks")]
         self.active_guards.lock().remove(&self.id);
 
+        if let Some(background) = &self.opt_background {
+            self.record_lock.drop_background_hold(background);
+        }
         self.record_lock.drop_record_lock_guard();
     }
 }

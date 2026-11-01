@@ -153,18 +153,26 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
-        self.inspect_record_with_fanout(record_key, subkeys, scope, FanoutConfig::default())
-            .await
+        self.inspect_record_with_fanout(
+            record_key,
+            subkeys,
+            scope,
+            FanoutConfig::default(),
+            RecordLockPriority::Foreground,
+        )
+        .await
     }
 
     /// `inspect_record` with a say in the fanout: a watch at consensus asks the nodes it already
     /// knows and wants no peers back. The API path above has no such nodes, so it is the default.
+    /// A background inspection gives way to foreground work on the record with TryAgain.
     pub(super) async fn inspect_record_with_fanout(
         &self,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
         scope: DHTReportScope,
         fanout_config: FanoutConfig,
+        priority: RecordLockPriority,
     ) -> VeilidAPIResult<DHTRecordReport> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
@@ -187,12 +195,12 @@ impl StorageManager {
             | DHTReportScope::UpdateSet => false,
         };
 
-        let _opt_peek_lock = if is_local_scope {
+        let opt_peek_lock = if is_local_scope {
             None
         } else {
             Some(
                 self.record_lock_table
-                    .peek_lock(opaque_record_key.clone())
+                    .peek_lock(opaque_record_key.clone(), priority)
                     .measure_debug(
                         TimestampDuration::new_ms(200),
                         veilid_log_dbg!(self, "StorageManager::inspect_record lock"),
@@ -237,7 +245,9 @@ impl StorageManager {
                     | StorageManagerRecordLockPurpose::Open
                     | StorageManagerRecordLockPurpose::Close
                     | StorageManagerRecordLockPurpose::Delete
-                    | StorageManagerRecordLockPurpose::Watch => {}
+                    | StorageManagerRecordLockPurpose::Watch
+                    | StorageManagerRecordLockPurpose::WatchUpdate
+                    | StorageManagerRecordLockPurpose::BackgroundWatch => {}
                 }
             }
 
@@ -261,10 +271,12 @@ impl StorageManager {
                                     opaque_record_key, subkey);
                             }
                         }
-                        StorageManagerSubkeyLockPurpose::Set => {
+                        StorageManagerSubkeyLockPurpose::Set
+                        | StorageManagerSubkeyLockPurpose::BackgroundSet => {
                             active_subkey_writes.insert(subkey);
                         }
-                        StorageManagerSubkeyLockPurpose::Get => {}
+                        StorageManagerSubkeyLockPurpose::Get
+                        | StorageManagerSubkeyLockPurpose::BackgroundGet => {}
                     }
                 }
             }
@@ -309,21 +321,27 @@ impl StorageManager {
         }
 
         // Get the inspect record report from the network
-        let outbound_inspect_result = self
-            .outbound_inspect_value(
-                &opaque_record_key,
-                subkeys,
-                safety_selection,
-                if matches!(scope, DHTReportScope::SyncGet | DHTReportScope::SyncSet) {
-                    InspectResult::default()
-                } else {
-                    local_inspect_result.clone()
-                },
-                matches!(scope, DHTReportScope::UpdateSet | DHTReportScope::SyncSet),
-                InspectFanoutStop::SubkeyConsensus,
-                fanout_config,
-            )
-            .await?;
+        let outbound_inspect = self.outbound_inspect_value(
+            &opaque_record_key,
+            subkeys,
+            safety_selection,
+            if matches!(scope, DHTReportScope::SyncGet | DHTReportScope::SyncSet) {
+                InspectResult::default()
+            } else {
+                local_inspect_result.clone()
+            },
+            matches!(scope, DHTReportScope::UpdateSet | DHTReportScope::SyncSet),
+            InspectFanoutStop::SubkeyConsensus,
+            fanout_config,
+        );
+        let opt_outbound_inspect_result = match &opt_peek_lock {
+            Some(peek_lock) => peek_lock.until_preempted(outbound_inspect).await,
+            None => Some(outbound_inspect.await),
+        };
+        let Some(outbound_inspect_result) = opt_outbound_inspect_result else {
+            apibail_try_again!("inspect pre-empted by foreground work");
+        };
+        let outbound_inspect_result = outbound_inspect_result?;
 
         // Every node answers an inspect, holding the record or not, so silence is our network
         if outbound_inspect_result.answered == 0 {

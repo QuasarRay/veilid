@@ -6,7 +6,7 @@ impl_veilid_log_facility!("stor");
 
 /// The context of the outbound_watch_value operation
 #[derive(Debug, Default)]
-struct OutboundWatchValueContext {
+pub(super) struct OutboundWatchValueContext {
     /// A successful watch
     pub watch_value_result: OutboundWatchValueResult,
 }
@@ -490,6 +490,8 @@ impl StorageManager {
 
     /// Perform a 'watch value' query on the network using fanout
     ///
+    /// Accepted watches land in `context` as they arrive, so a caller that stops the fanout early
+    /// still knows which nodes hold one
     #[cfg_attr(
         feature = "instrument",
         instrument(target = "watch", level = "debug", skip_all, err)
@@ -499,6 +501,7 @@ impl StorageManager {
         record_key: RecordKey,
         params: OutboundWatchParameters,
         per_node_state: HashMap<PerNodeKey, OutboundWatchPerNodeState>,
+        context: Arc<Mutex<OutboundWatchValueContext>>,
     ) -> VeilidAPIResult<OutboundWatchValueResult> {
         let opaque_record_key = record_key.opaque();
         let routing_domain = RoutingDomain::PublicInternet;
@@ -531,9 +534,6 @@ impl StorageManager {
                     .unwrap_or_default()
             })
             .collect();
-
-        // Make operation context
-        let context = Arc::new(Mutex::new(OutboundWatchValueContext::default()));
 
         // Routine to call to generate fanout
         let call_routine = {
@@ -852,7 +852,15 @@ impl StorageManager {
         }
 
         let mut cancelled = vec![];
-        while let Some((pnk, res)) = unord.next().await {
+        let mut preempted = false;
+        loop {
+            let Some(next) = record_lock.until_preempted(unord.next()).await else {
+                preempted = true;
+                break;
+            };
+            let Some((pnk, res)) = next else {
+                break;
+            };
             match res {
                 Ok(_) => {
                     // Remove from 'per node states' because we got some response
@@ -873,8 +881,8 @@ impl StorageManager {
             let owm = &mut *self.outbound_watch_manager_mut();
 
             // Remove per node watches we cancelled
-            for pnk in cancelled {
-                if owm.per_node_states.remove(&pnk).is_none() {
+            for pnk in &cancelled {
+                if owm.per_node_states.remove(pnk).is_none() {
                     veilid_log!(self warn "per-node watch being cancelled should have still been in the table");
                 };
             }
@@ -884,6 +892,17 @@ impl StorageManager {
                 veilid_log!(self warn "watch being cancelled should have still been in the table");
                 return;
             };
+
+            // The next cancel operation takes the nodes this one did not reach
+            if preempted {
+                veilid_log!(self debug target: "watch", "OutboundWatch({}): cancel pre-empted after {} nodes", opaque_record_key, cancelled.len());
+                if let Some(state) = outbound_watch.state_mut() {
+                    state.edit(&owm.per_node_states, |editor| {
+                        editor.retain_nodes(|x| !cancelled.contains(x));
+                    });
+                }
+                return;
+            }
 
             // Mark as dead now that we cancelled
             outbound_watch.clear_state();
@@ -984,9 +1003,17 @@ impl StorageManager {
             });
         }
 
-        // Process and merge all results since we're not fanning out
+        // Process and merge all results since we're not fanning out; a pre-empted renewal keeps
+        // the answers it has
         let mut opt_owvresult: Option<OutboundWatchValueResult> = None;
-        while let Some(res) = unord.next().await {
+        loop {
+            let Some(next) = record_lock.until_preempted(unord.next()).await else {
+                veilid_log!(self debug target: "watch", "OutboundWatch({}): renew pre-empted", opaque_record_key);
+                break;
+            };
+            let Some(res) = next else {
+                break;
+            };
             match res {
                 Ok(r) => {
                     opt_owvresult = match opt_owvresult {
@@ -1076,9 +1103,26 @@ impl StorageManager {
 
         // Now fan out with parameters and get new per node watches
         let cur_ts = Timestamp::now_non_decreasing();
-        let res = self
-            .outbound_watch_value(record_key.clone(), per_node_params, per_node_state)
-            .await;
+        let context = Arc::new(Mutex::new(OutboundWatchValueContext::default()));
+        let Some(res) = record_lock
+            .until_preempted(self.outbound_watch_value(
+                record_key.clone(),
+                per_node_params,
+                per_node_state,
+                context.clone(),
+            ))
+            .await
+        else {
+            // Keep the watches already accepted so a cancel can reach them; leave the
+            // reconcile due, since being pre-empted is not a failed attempt
+            let partial = context.lock().watch_value_result.clone();
+            veilid_log!(self debug target: "watch", "OutboundWatch({}): reconcile pre-empted after {} accepted", record_key, partial.accepted.len());
+            if !partial.accepted.is_empty() {
+                let owm = &mut *self.outbound_watch_manager_mut();
+                self.process_outbound_watch_value_result_inner(owm, record_key, partial);
+            }
+            return;
+        };
 
         {
             let owm = &mut *self.outbound_watch_manager_mut();
@@ -1405,6 +1449,7 @@ impl StorageManager {
                             subkeys.clone(),
                             DHTReportScope::SyncGet,
                             fanout_config,
+                            RecordLockPriority::Background,
                         )
                         .await?;
                     let newer_online_subkeys = report.newer_online_subkeys();
@@ -1488,7 +1533,7 @@ impl StorageManager {
             .record_lock_table
             .lock_record(
                 opaque_record_key.clone(),
-                StorageManagerRecordLockPurpose::Watch,
+                StorageManagerRecordLockPurpose::WatchUpdate,
             )
             .await;
 
@@ -1593,6 +1638,7 @@ impl StorageManager {
                             subkeys.clone(),
                             DHTReportScope::SyncGet,
                             fanout_config,
+                            RecordLockPriority::Background,
                         )
                         .await?;
                     if report.newer_online_subkeys().is_empty() {
@@ -2048,7 +2094,10 @@ impl StorageManager {
         // Operate on the watch for this record
         let record_lock = self
             .record_lock_table
-            .lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
+            .lock_record(
+                record_key.opaque(),
+                StorageManagerRecordLockPurpose::WatchUpdate,
+            )
             .await;
 
         // A record currently in a transaction set is reported as a non-committing hint
@@ -2255,7 +2304,10 @@ impl StorageManager {
             // Record lock before inner, as everywhere
             let record_lock = self
                 .record_lock_table
-                .lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
+                .lock_record(
+                    record_key.opaque(),
+                    StorageManagerRecordLockPurpose::WatchUpdate,
+                )
                 .await;
             if let Err(e) = self
                 .report_value_change_hint(record_lock, record_key, subkeys, None)

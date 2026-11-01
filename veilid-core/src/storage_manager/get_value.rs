@@ -7,7 +7,8 @@ impl_veilid_log_facility!("stor");
 pub(crate) enum GetValueRefresh {
     /// Answer from the local copy when there is one
     Local,
-    /// Ask the network, and store only a value newer than the local copy
+    /// Ask the network in the background, giving way to foreground work on the subkey, and store
+    /// only a value newer than the local copy
     Newer,
     /// Ask the network, and let its settled value replace the local copy at the same sequence number
     Force,
@@ -133,11 +134,7 @@ impl StorageManager {
 
         // Try the GetValue shortcut first to see if we can skip the lock
         let subkey_lock = match self
-            .get_value_lock_shortcut(
-                record_key.clone(),
-                subkey,
-                refresh != GetValueRefresh::Local,
-            )
+            .get_value_lock_shortcut(record_key.clone(), subkey, refresh)
             .await?
         {
             GetValueLockShortcutResult::Shortcut(opt_value_data) => return Ok(opt_value_data),
@@ -178,15 +175,24 @@ impl StorageManager {
         self.clear_record_transaction_set(&opaque_record_key)?;
 
         // Gate on concurrency + the download budget (a get pulls a full value down)
-        let _gate_permit = self.acquire_gated_get().await;
-        let result = self
-            .outbound_get_value(
-                opaque_record_key.clone(),
-                subkey,
-                safety_selection,
-                last_get_result,
-            )
-            .await?;
+        let Some((_gate_permit, result)) = subkey_lock
+            .until_preempted(async {
+                let gate_permit = self.acquire_gated_get().await;
+                let result = self
+                    .outbound_get_value(
+                        opaque_record_key.clone(),
+                        subkey,
+                        safety_selection,
+                        last_get_result,
+                    )
+                    .await;
+                (gate_permit, result)
+            })
+            .await
+        else {
+            apibail_try_again!("get pre-empted by foreground work");
+        };
+        let result = result?;
 
         self.record_gated_fanout_outcome(GatedOperationKind::Get, &result.fanout_result);
 
@@ -238,11 +244,11 @@ impl StorageManager {
         &self,
         record_key: RecordKey,
         subkey: ValueSubkey,
-        force_refresh: bool,
+        refresh: GetValueRefresh,
     ) -> VeilidAPIResult<GetValueLockShortcutResult> {
         let opaque_record_key = record_key.opaque();
 
-        let subkey_lock = if !force_refresh {
+        let subkey_lock = if refresh == GetValueRefresh::Local {
             match self.record_lock_table.try_lock_subkey(
                 opaque_record_key.clone(),
                 subkey,
@@ -288,14 +294,13 @@ impl StorageManager {
                 }
             }
         } else {
-            // If we couldn't get a local value then wait to obtain the lock and proceed with
-            // the non-shortcut route
+            let purpose = if refresh == GetValueRefresh::Newer {
+                StorageManagerSubkeyLockPurpose::BackgroundGet
+            } else {
+                StorageManagerSubkeyLockPurpose::Get
+            };
             self.record_lock_table
-                .lock_subkey(
-                    opaque_record_key.clone(),
-                    subkey,
-                    StorageManagerSubkeyLockPurpose::Get,
-                )
+                .lock_subkey(opaque_record_key.clone(), subkey, purpose)
                 .await
         };
 

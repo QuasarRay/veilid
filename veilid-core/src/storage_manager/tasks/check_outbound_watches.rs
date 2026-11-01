@@ -121,10 +121,10 @@ impl StorageManager {
             .map(|ow| ow.record_key())
             .collect();
         for record_key in over_consensus {
-            if let Some(_record_lock) = self
-                .record_lock_table
-                .try_lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
-            {
+            if let Some(_record_lock) = self.record_lock_table.try_lock_record(
+                record_key.opaque(),
+                StorageManagerRecordLockPurpose::WatchUpdate,
+            ) {
                 let dropped = owm.trim_watch_nodes(&record_key, consensus_count, cur_ts);
                 veilid_log!(self debug target: "watch",
                     "OutboundWatch({}): cancelling {} beyond the {} closest watch nodes",
@@ -153,7 +153,7 @@ impl StorageManager {
             // Watch mode (lifetime.read + watch_lock) is concurrent with reads/sets/transactions.
             if let Some(record_lock) = self.record_lock_table.try_lock_record(
                 outbound_watch.record_key().opaque(),
-                StorageManagerRecordLockPurpose::Watch,
+                StorageManagerRecordLockPurpose::BackgroundWatch,
             ) {
                 // Get next work on watch and queue it if we have something to do
                 if let Some(op_fut) = Self::get_next_outbound_watch_operation_inner(

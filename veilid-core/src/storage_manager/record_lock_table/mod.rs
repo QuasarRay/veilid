@@ -14,6 +14,7 @@ pub use subkey_lock_guard::*;
 use super::*;
 use record_lock::*;
 use record_lock_guard::RecordLockGuards;
+use stop_token::future::FutureExt as _;
 use weak_table::WeakValueHashMap;
 
 impl_veilid_log_facility!("stor");
@@ -36,10 +37,80 @@ pub enum RecordLockMode {
     Transaction,
 }
 
+/// What a guard holds, named as in `RecordLockMode`'s compatibility table
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RecordLockHold {
+    Lifetime,
+    Watch,
+    Transaction,
+    Subkey(ValueSubkey),
+    Peek,
+}
+
+impl RecordLockHold {
+    /// Whether one of the two holds blocks the other, per the compatibility table
+    pub fn conflicts_with(&self, other: &RecordLockHold) -> bool {
+        match (self, other) {
+            (Self::Lifetime, _) | (_, Self::Lifetime) => true,
+            (Self::Peek, _) | (_, Self::Peek) => false,
+            (Self::Watch, Self::Watch) => true,
+            (Self::Watch, _) | (_, Self::Watch) => false,
+            (Self::Transaction, _) | (_, Self::Transaction) => true,
+            (Self::Subkey(a), Self::Subkey(b)) => a == b,
+        }
+    }
+}
+
+impl From<RecordLockMode> for RecordLockHold {
+    fn from(mode: RecordLockMode) -> Self {
+        match mode {
+            RecordLockMode::Lifetime => Self::Lifetime,
+            RecordLockMode::Watch => Self::Watch,
+            RecordLockMode::Transaction => Self::Transaction,
+        }
+    }
+}
+
+/// How an acquisition treats background work on the record: API operations pre-empt the
+/// background operations they conflict with, judged by `RecordLockMode`'s compatibility table
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RecordLockPriority {
+    /// Stops the conflicting background holds before waiting for its locks
+    Foreground,
+    /// Neither stops background holds nor yields
+    Normal,
+    /// Yields: its guard's `until_preempted` ends early when a conflicting foreground acquisition
+    /// arrives, and starts stopped if one is already waiting
+    Background,
+}
+
 pub trait RecordLockPurpose:
     fmt::Debug + Clone + Eq + PartialEq + Ord + PartialOrd + core::hash::Hash
 {
     fn record_lock_mode(&self) -> RecordLockMode;
+    fn record_lock_priority(&self) -> RecordLockPriority;
+
+    /// Whether a foreground acquisition for this purpose stops a conflicting background holder for
+    /// `background`; one it does not stop, it waits out like any other holder
+    fn preempts(&self, _background: &Self) -> bool {
+        true
+    }
+}
+
+/// Run `fut` to completion, or for a background hold, until a foreground acquisition pre-empts
+/// it: then None, and the holder should drop its guard without finishing. A background holder
+/// runs every await that can outlast a local operation (a fanout, an admission gate) through this.
+fn until_preempted<F: Future>(
+    opt_background: Option<&BackgroundHold>,
+    fut: F,
+) -> impl Future<Output = Option<F::Output>> {
+    let opt_stop_token = opt_background.map(|background| background.stop_token());
+    async move {
+        match opt_stop_token {
+            Some(stop_token) => fut.timeout_at(stop_token).await.ok(),
+            None => Some(fut.await),
+        }
+    }
 }
 
 /// Snapshot of the purpose for which a record or its subkeys are locked
@@ -116,9 +187,12 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                 async {
                     let record_lock = self.get_or_create_record_lock(&record);
                     let mode = purpose.record_lock_mode();
+                    let request = RecordLockRequest::Record(purpose.clone());
+                    let _opt_foreground_wait = record_lock.preempt_background(&request);
                     let guards = acquire_record_lock_guards(&record_lock, mode).await;
                     record_lock.set_record_purpose(purpose);
-                    RecordLockGuard::new(record_lock, guards)
+                    let opt_background = record_lock.register_background(request);
+                    RecordLockGuard::new(record_lock, guards, opt_background)
                 },
                 |_name, _start, _dur, ret| {
                     #[cfg(feature = "debug-locks")]
@@ -137,8 +211,13 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         let record_lock = self.get_or_create_record_lock(&record);
         let mode = purpose.record_lock_mode();
         let guards = try_acquire_record_lock_guards(&record_lock, mode)?;
+        let opt_background =
+            record_lock.register_background(RecordLockRequest::Record(purpose.clone()));
+        if opt_background.as_ref().is_some_and(BackgroundHold::refused) {
+            return None;
+        }
         record_lock.set_record_purpose(purpose);
-        Some(RecordLockGuard::new(record_lock, guards))
+        Some(RecordLockGuard::new(record_lock, guards, opt_background))
     }
 
     pub async fn lock_records(
@@ -176,11 +255,22 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                             .collect::<Vec<_>>()
                     };
 
+                    let request = RecordLockRequest::Record(purpose.clone());
+                    let _foreground_waits = record_locks
+                        .iter()
+                        .filter_map(|record_lock| record_lock.preempt_background(&request))
+                        .collect::<Vec<_>>();
+
                     let mut record_lock_guards = vec![];
                     for record_lock in record_locks {
                         let guards = acquire_record_lock_guards(&record_lock, mode).await;
                         record_lock.set_record_purpose(purpose.clone());
-                        record_lock_guards.push(RecordLockGuard::new(record_lock, guards));
+                        let opt_background = record_lock.register_background(request.clone());
+                        record_lock_guards.push(RecordLockGuard::new(
+                            record_lock,
+                            guards,
+                            opt_background,
+                        ));
                     }
 
                     RecordsLockGuard::new(record_lock_guards)
@@ -223,8 +313,13 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         let mut record_lock_guards = vec![];
         for record_lock in record_locks {
             let guards = try_acquire_record_lock_guards(&record_lock, mode)?;
+            let opt_background =
+                record_lock.register_background(RecordLockRequest::Record(purpose.clone()));
+            if opt_background.as_ref().is_some_and(BackgroundHold::refused) {
+                return None;
+            }
             record_lock.set_record_purpose(purpose.clone());
-            record_lock_guards.push(RecordLockGuard::new(record_lock, guards));
+            record_lock_guards.push(RecordLockGuard::new(record_lock, guards, opt_background));
         }
 
         Some(RecordsLockGuard::new(record_lock_guards))
@@ -242,7 +337,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
             let record_lock = self.get_or_create_record_lock(&record);
             let lifetime_guard = record_lock.get_lifetime_lock().try_read_arc()?;
             record_lock.add_peek();
-            guards.push(PeekLockGuard::new(record_lock, lifetime_guard));
+            guards.push(PeekLockGuard::new(record_lock, lifetime_guard, None));
         }
         Some(PeeksLockGuard::new(guards))
     }
@@ -261,6 +356,8 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
             .record_fut(
                 async {
                     let record_lock = self.get_or_create_record_lock(&record);
+                    let request = RecordLockRequest::Subkey(subkey, purpose.clone());
+                    let _opt_foreground_wait = record_lock.preempt_background(&request);
 
                     let lifetime_guard = acquire_lifetime_read(&record_lock, "lock_subkey").await;
                     let transaction_guard =
@@ -274,13 +371,16 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                         })
                         .await;
                     record_lock.set_subkey_purpose(subkey, purpose);
+                    let opt_background = record_lock.register_background(request);
 
                     SubkeyLockGuard::new(
                         record_lock,
                         lifetime_guard,
                         transaction_guard,
                         subkey_lock_guard,
+                        subkey_lock,
                         subkey,
+                        opt_background,
                     )
                 },
                 |_name, _start, _dur, ret| {
@@ -305,6 +405,11 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
 
         let subkey_lock = record_lock.get_subkey_lock(subkey);
         let subkey_lock_guard = subkey_lock.try_lock_arc()?;
+        let opt_background =
+            record_lock.register_background(RecordLockRequest::Subkey(subkey, purpose.clone()));
+        if opt_background.as_ref().is_some_and(BackgroundHold::refused) {
+            return None;
+        }
         record_lock.set_subkey_purpose(subkey, purpose);
 
         Some(SubkeyLockGuard::new(
@@ -312,22 +417,32 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
             lifetime_guard,
             transaction_guard,
             subkey_lock_guard,
+            subkey_lock,
             subkey,
+            opt_background,
         ))
     }
 
-    pub async fn peek_lock(&self, record: OpaqueRecordKey) -> PeekLockGuard<R, S> {
+    /// Peeks carry no purpose, so the caller gives the priority
+    pub async fn peek_lock(
+        &self,
+        record: OpaqueRecordKey,
+        priority: RecordLockPriority,
+    ) -> PeekLockGuard<R, S> {
         let recorder = DurationRecorder::new("RecordLockTable::peek_lock", |_name, _start| {
             #[cfg(feature = "debug-locks")]
-            veilid_log!(self debug "{}[start={:#}](record: {:?})", _name, _start, record);
+            veilid_log!(self debug "{}[start={:#}](record: {:?}, priority: {:?})", _name, _start, record, priority);
         });
         recorder
             .record_fut(
                 async {
                     let record_lock = self.get_or_create_record_lock(&record);
+                    let request = RecordLockRequest::Peek(priority);
+                    let _opt_foreground_wait = record_lock.preempt_background(&request);
                     let lifetime_guard = acquire_lifetime_read(&record_lock, "peek_lock").await;
                     record_lock.add_peek();
-                    PeekLockGuard::new(record_lock, lifetime_guard)
+                    let opt_background = record_lock.register_background(request);
+                    PeekLockGuard::new(record_lock, lifetime_guard, opt_background)
                 },
                 |_name, _start, _dur, ret| {
                     #[cfg(feature = "debug-locks")]
@@ -343,7 +458,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         let record_lock = self.get_or_create_record_lock(&record);
         let lifetime_guard = record_lock.get_lifetime_lock().try_read_arc()?;
         record_lock.add_peek();
-        Some(PeekLockGuard::new(record_lock, lifetime_guard))
+        Some(PeekLockGuard::new(record_lock, lifetime_guard, None))
     }
 
     pub fn get_record_lock_purpose_state(

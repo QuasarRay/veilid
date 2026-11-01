@@ -137,12 +137,6 @@ impl Default for OutboundWatchManager {
     }
 }
 
-impl VeilidComponentRegistryAccessor for OutboundWatchManager {
-    fn registry(&self) -> VeilidComponentRegistry {
-        self.opt_registry.clone().unwrap_or_log()
-    }
-}
-
 impl OutboundWatchManager {
     pub fn new() -> Self {
         Self {
@@ -409,7 +403,10 @@ impl OutboundWatchManager {
         not_before: Timestamp,
         trigger: ChangeInspectTrigger,
     ) {
-        veilid_log!(self debug "change inspect: record_key={} subkeys={} not_before={} trigger={:?}", record_key, subkeys, not_before, trigger);
+        // No registry until `prepare`, nor after shutdown resets the manager
+        if let Some(registry) = &self.opt_registry {
+            veilid_log!(registry debug "change inspect: record_key={} subkeys={} not_before={} trigger={:?}", record_key, subkeys, not_before, trigger);
+        }
 
         let opaque_record_key = record_key.opaque();
 

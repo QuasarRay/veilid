@@ -19,6 +19,10 @@ impl RecordLockPurpose for RecordStoreRecordLockPurpose {
     fn record_lock_mode(&self) -> RecordLockMode {
         RecordLockMode::Lifetime
     }
+
+    fn record_lock_priority(&self) -> RecordLockPriority {
+        RecordLockPriority::Normal
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -31,6 +35,10 @@ pub enum RecordStoreSubkeyLockPurpose {
 impl RecordLockPurpose for RecordStoreSubkeyLockPurpose {
     fn record_lock_mode(&self) -> RecordLockMode {
         RecordLockMode::Lifetime
+    }
+
+    fn record_lock_priority(&self) -> RecordLockPriority {
+        RecordLockPriority::Normal
     }
 }
 

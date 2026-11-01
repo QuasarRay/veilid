@@ -512,7 +512,7 @@ where
     ) -> VeilidAPIResult<Option<InspectResult>> {
         let _peek_lock = self
             .record_store_lock_table
-            .peek_lock(opaque_record_key.clone())
+            .peek_lock(opaque_record_key.clone(), RecordLockPriority::Normal)
             .measure_debug(
                 TimestampDuration::new_ms(200),
                 veilid_log_dbg!(
