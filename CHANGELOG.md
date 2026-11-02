@@ -1,4 +1,4 @@
-**UNRELEASED**
+**Changed in Veilid 0.5.8**
 
 - veilid-core-optimized:
   - New crate holding monomorphic exports, for crates that want full speed optimization in every build profile.
