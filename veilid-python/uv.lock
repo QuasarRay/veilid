@@ -656,7 +656,7 @@ wheels = [
 
 [[package]]
 name = "veilid"
-version = "0.5.7"
+version = "0.5.8"
 source = { editable = "." }
 dependencies = [
     { name = "appdirs" },

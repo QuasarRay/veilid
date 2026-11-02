@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-tools"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "android_logger",
  "async-io",

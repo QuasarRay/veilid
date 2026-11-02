@@ -6,7 +6,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-veilid-tools = { version = "0.5.7", path = "..", default-features = false }
+veilid-tools = { version = "0.5.8", path = "..", default-features = false }
 tokio = { version = "1.49.0", features = [
     "rt-multi-thread",
     "time",

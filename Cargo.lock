@@ -5507,7 +5507,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "veilid-cli"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "arboard",
  "async-std",
@@ -5541,7 +5541,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-core"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "arc-swap",
  "async-std",
@@ -5632,7 +5632,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-core-optimized"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "argon2",
  "blake2",
@@ -5651,7 +5651,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-flutter"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "allo-isolate",
  "async-std",
@@ -5701,7 +5701,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-remote-api"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "parking_lot",
  "schemars",
@@ -5713,7 +5713,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-server"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "ansi_term",
  "async-std",
@@ -5764,7 +5764,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-tools"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "android_logger",
  "async-io",
@@ -5841,7 +5841,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-wasm"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "cfg-if",
  "console_error_panic_hook",
