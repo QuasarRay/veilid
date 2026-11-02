@@ -29,7 +29,8 @@ fi
 mkdir -p /dpkg/veilid-cli/usr/bin
 cp -f /veilid/target/$CARGO_ARCH/release/veilid-cli /dpkg/veilid-cli/usr/bin
 # pack it up
-dpkg-deb -b /dpkg/veilid-cli/
+# xz: bullseye dpkg cannot read the ubuntu default, zstd
+dpkg-deb -Zxz -b /dpkg/veilid-cli/
 # Appropriatly name the package for STABLE or NIGHTLY release
 if [ "$3" = "true" ]
 then

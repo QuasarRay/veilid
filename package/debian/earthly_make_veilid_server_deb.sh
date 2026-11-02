@@ -38,7 +38,8 @@ cp -f /veilid/package/selinux/veilid_server.pp.bz2 /dpkg/veilid-server/usr/share
 mkdir -p /dpkg/veilid-server/usr/bin
 cp -f /veilid/target/$CARGO_ARCH/release/veilid-server /dpkg/veilid-server/usr/bin
 # pack it up
-dpkg-deb -b /dpkg/veilid-server/
+# xz: bullseye dpkg cannot read the ubuntu default, zstd
+dpkg-deb -Zxz -b /dpkg/veilid-server/
 # Appropriatly name the package for STABLE or NIGHTLY release
 if [ "$3" = "true" ]
 then
