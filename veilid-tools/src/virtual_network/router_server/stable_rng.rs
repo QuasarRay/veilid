@@ -1,6 +1,6 @@
 use super::*;
 
-use rand::{seq::SliceRandom, Rng, SeedableRng};
+use rand::{seq::SliceRandom, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 #[derive(Clone)]
@@ -115,16 +115,16 @@ impl StableRng {
 
     pub fn next_u32(&mut self, min: u32, max: u32) -> u32 {
         self.state.count += 1;
-        self.state.srng.gen_range(min..=max)
+        self.state.srng.random_range(min..=max)
     }
 
     pub fn next_u128(&mut self, min: u128, max: u128) -> u128 {
         self.state.count += 1;
-        self.state.srng.gen_range(min..=max)
+        self.state.srng.random_range(min..=max)
     }
 
     pub fn next_f32(&mut self, min: f32, max: f32) -> f32 {
         self.state.count += 1;
-        self.state.srng.gen_range(min..=max)
+        self.state.srng.random_range(min..=max)
     }
 }

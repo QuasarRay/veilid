@@ -881,12 +881,6 @@ impl veilid_tools::ProcessWatchdog
 pub fn veilid_tools::ProcessWatchdog::start(u64, u64, impl core::ops::function::Fn(u64, u64) + core::marker::Send + 'static) -> Self
 pub mod veilid_tools::random
 pub struct veilid_tools::random::VeilidRng
-impl rand_core::CryptoRng for veilid_tools::VeilidRng
-impl rand_core::RngCore for veilid_tools::VeilidRng
-pub fn veilid_tools::VeilidRng::fill_bytes(&mut self, &mut [u8])
-pub fn veilid_tools::VeilidRng::next_u32(&mut self) -> u32
-pub fn veilid_tools::VeilidRng::next_u64(&mut self) -> u64
-pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), rand_core::error::Error>
 impl rand_core::TryCryptoRng for veilid_tools::VeilidRng
 impl rand_core::TryRng for veilid_tools::VeilidRng
 pub type veilid_tools::VeilidRng::Error = never
@@ -2063,12 +2057,6 @@ pub fn veilid_tools::UdpTtlSender::new() -> Self
 impl veilid_tools::UdpTtlSender
 pub fn veilid_tools::UdpTtlSender::send_to<S: std::os::fd::owned::AsFd>(&self, &S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub struct veilid_tools::VeilidRng
-impl rand_core::CryptoRng for veilid_tools::VeilidRng
-impl rand_core::RngCore for veilid_tools::VeilidRng
-pub fn veilid_tools::VeilidRng::fill_bytes(&mut self, &mut [u8])
-pub fn veilid_tools::VeilidRng::next_u32(&mut self) -> u32
-pub fn veilid_tools::VeilidRng::next_u64(&mut self) -> u64
-pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), rand_core::error::Error>
 impl rand_core::TryCryptoRng for veilid_tools::VeilidRng
 impl rand_core::TryRng for veilid_tools::VeilidRng
 pub type veilid_tools::VeilidRng::Error = never

@@ -70,9 +70,13 @@ pub fn test_hpke_kat_open() {
     info!("test_hpke_kat_open");
     let v = a2_test_vector();
 
-    // skRm derives from ikmR per RFC 9180 DeriveKeyPair
+    // skRm derives from ikmR per RFC 9180 DeriveKeyPair; hpke serializes secrets clamped
     let (sk, _) = veilid_core_optimized::hpke_x25519_derive_keypair(&hex(&v.ikm_r));
-    assert_eq!(sk.to_vec(), hex(&v.sk_rm));
+    let mut sk_rm = hex(&v.sk_rm);
+    sk_rm[0] &= 248;
+    sk_rm[31] &= 127;
+    sk_rm[31] |= 64;
+    assert_eq!(sk.to_vec(), sk_rm);
 
     let pt = veilid_core_optimized::hpke_x25519_open(
         &hex(&v.sk_rm),

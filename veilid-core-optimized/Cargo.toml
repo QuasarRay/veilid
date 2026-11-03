@@ -60,7 +60,7 @@ curve25519-dalek = { version = "5.0.0", optional = true, default-features = fals
     "precomputed-tables",
 ] }
 blake3 = { version = "1.8.3", optional = true }
-blake2 = { version = "0.11.0-rc.5", optional = true, default-features = false, features = [
+blake2 = { version = "0.11.0", optional = true, default-features = false, features = [
     "size_opt",
 ] } # Size optimization for c crate (via feature unification)
 chacha20poly1305 = { version = "0.11.0", optional = true, features = [
@@ -68,13 +68,13 @@ chacha20poly1305 = { version = "0.11.0", optional = true, features = [
     "rand_core",
 ] }
 chacha20 = { version = "0.10", optional = true, features = ["xchacha"] }
-argon2 = { version = "0.6.0-rc.8", optional = true, default-features = false, features = [
+argon2 = { version = "0.6.0", optional = true, default-features = false, features = [
     "alloc",
     "password-hash",
     "getrandom",
     "rand_core",
 ] }
-hpke = { version = "0.14.0", optional = true, default-features = false, features = [
+hpke = { version = "0.15.1", optional = true, default-features = false, features = [
     "alloc",
     "x25519",
     "chacha",

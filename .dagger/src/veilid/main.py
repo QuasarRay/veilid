@@ -1091,6 +1091,18 @@ class Veilid:
         return f"README sync check completed:\n{result}"
 
     @function
+    async def test_yanked_crates(
+        self,
+        source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)],
+        ci_registry_image: str = VEILID_REPO,
+        crate_cache_tag: str = "",
+    ) -> str:
+        """Check that no Cargo.lock in the tree pins a yanked crate"""
+        container = self.code_linux(source, ci_registry_image, crate_cache_tag)
+        result = await container.with_exec(["./scripts/_check_yanked_crates.sh"]).combined_output()
+        return f"Yanked crate check completed:\n{result}"
+
+    @function
     async def test_smoketest_all(
         self,
         source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)],
@@ -1266,6 +1278,7 @@ class Veilid:
         results.append(await self.test_msrv_all(source, ci_registry_image, crate_cache_tag))
         results.append(await self.test_public_api(source, ci_registry_image, crate_cache_tag))
         results.append(await self.test_readme_sync(source, ci_registry_image, crate_cache_tag))
+        results.append(await self.test_yanked_crates(source, ci_registry_image, crate_cache_tag))
         results.append(await self.test_smoketest_all(source, ci_registry_image, crate_cache_tag))
         results.append(
             await self.test_check_wasm_builds_dart(source, ci_registry_image, crate_cache_tag)

@@ -398,7 +398,7 @@ pub async fn test_many_frags_reordered() {
 
     // Sending
     let mut total_sent_size = 0usize;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     info!("sending");
     for _ in 0..1000 {
         let to_send = loop {

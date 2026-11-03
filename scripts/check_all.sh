@@ -97,6 +97,10 @@ step ./scripts/check_format.sh
 echo "Performing README sync check..."
 step ./scripts/check_readme_sync.sh
 
+# cargo only reports a yanked pin at `cargo publish`; same script CI's test_yanked_crates job runs.
+echo "Checking for yanked crates..."
+step ./scripts/_check_yanked_crates.sh
+
 # CI assembles its container from an explicit Earthfile allowlist, so a root-level config
 # that is not listed there is absent in CI while every local run still finds it.
 echo "Checking Earthfile source coverage..."

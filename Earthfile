@@ -707,6 +707,9 @@ test-dart-format:
 test-readme-sync:
     FROM +code-linux
     RUN ./scripts/check_readme_sync.sh
+test-yanked-crates:
+    FROM +code-linux
+    RUN ./scripts/_check_yanked_crates.sh
 test-flutter-integration:
     FROM +code-flutter-rust
     RUN ./scripts/_flutter_integration_tests.sh
@@ -714,6 +717,7 @@ test-all:
     BUILD +test-census
     BUILD +test-dart-format
     BUILD +test-readme-sync
+    BUILD +test-yanked-crates
     BUILD +test-msrv-all
     BUILD +test-smoketest-all
     BUILD +test-public-api

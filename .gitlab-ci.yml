@@ -91,7 +91,8 @@ stages:
 # Common unit test base
 .unit_test:
   # Large by default: most users of this template are compile-bound. The three that are not
-  # (census, readme-sync, dart-format do no rust compilation) drop back to medium individually.
+  # (census, readme-sync, yanked-crates, dart-format do no rust compilation) drop back to medium
+  # individually.
   extends: .base_large
   variables:
     earthly_target: test-all
@@ -320,6 +321,13 @@ test_readme_sync:
   tags: [saas-linux-medium-amd64]
   variables:
     earthly_target: test-readme-sync
+
+test_yanked_crates:
+  extends: .unit_test
+  # No rust compilation here, so the extra cores would go unused.
+  tags: [saas-linux-medium-amd64]
+  variables:
+    earthly_target: test-yanked-crates
 
 # eslint over the wasm test harness and example; type-aware, so it builds the wasm package first.
 test_lint_typescript:

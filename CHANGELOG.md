@@ -5,15 +5,22 @@
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - Published node info carries an expiration, the earliest of its dial infos', and peer info past its expiration is treated as dead.
   - `TimestampDuration::new_hours()` and `new_days()`.
+  - TLS dependency updates: rustls 0.23.46 (RUSTSEC-2026-0346 through 0349), rustls-webpki 0.103.16 (RUSTSEC-2026-0382) and webpki-roots 1.0.11 (RUSTSEC-2026-0381).
+- veilid-core-optimized:
+  - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
+  - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
 - veilid-flutter:
   - `VeilidConfigWebTransport` under the protocol config.
 - veilid-server:
   - WebTransport settings under `core.network.protocol.webtransport`.
 - veilid-tools:
   - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
+  - **Breaking** `VeilidRng` implements the `rand` 0.10 traits `TryRng` and `TryCryptoRng`; the `rand` 0.8 `RngCore` and `CryptoRng` impls are gone.
+  - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
 - veilid-wasm:
   - Browser WebTransport client, outbound only.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
+- `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 
 **Changed in Veilid 0.5.8**
 
