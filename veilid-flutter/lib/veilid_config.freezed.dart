@@ -4698,9 +4698,585 @@ as String?,
 
 
 /// @nodoc
+mixin _$VeilidConfigWSS implements DiagnosticableTreeMixin {
+
+ bool get connect; bool get listen; String get listenAddress; String get path; String? get url;
+/// Create a copy of VeilidConfigWSS
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigWSSCopyWith<VeilidConfigWSS> get copyWith => _$VeilidConfigWSSCopyWithImpl<VeilidConfigWSS>(this as VeilidConfigWSS, _$identity);
+
+  /// Serializes this VeilidConfigWSS to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigWSS'))
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigWSS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigWSS(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigWSSCopyWith<$Res>  {
+  factory $VeilidConfigWSSCopyWith(VeilidConfigWSS value, $Res Function(VeilidConfigWSS) _then) = _$VeilidConfigWSSCopyWithImpl;
+@useResult
+$Res call({
+ bool connect, bool listen, String listenAddress, String path, String? url
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidConfigWSSCopyWithImpl<$Res>
+    implements $VeilidConfigWSSCopyWith<$Res> {
+  _$VeilidConfigWSSCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigWSS _self;
+  final $Res Function(VeilidConfigWSS) _then;
+
+/// Create a copy of VeilidConfigWSS
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+  return _then(_self.copyWith(
+connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
+as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigWSS].
+extension VeilidConfigWSSPatterns on VeilidConfigWSS {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigWSS value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWSS() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigWSS value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWSS():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigWSS value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWSS() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigWSS() when $default != null:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigWSS():
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigWSS() when $default != null:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigWSS with DiagnosticableTreeMixin implements VeilidConfigWSS {
+  const _VeilidConfigWSS({required this.connect, required this.listen, required this.listenAddress, required this.path, this.url});
+  factory _VeilidConfigWSS.fromJson(Map<String, dynamic> json) => _$VeilidConfigWSSFromJson(json);
+
+@override final  bool connect;
+@override final  bool listen;
+@override final  String listenAddress;
+@override final  String path;
+@override final  String? url;
+
+/// Create a copy of VeilidConfigWSS
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigWSSCopyWith<_VeilidConfigWSS> get copyWith => __$VeilidConfigWSSCopyWithImpl<_VeilidConfigWSS>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigWSSToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigWSS'))
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigWSS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigWSS(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigWSSCopyWith<$Res> implements $VeilidConfigWSSCopyWith<$Res> {
+  factory _$VeilidConfigWSSCopyWith(_VeilidConfigWSS value, $Res Function(_VeilidConfigWSS) _then) = __$VeilidConfigWSSCopyWithImpl;
+@override @useResult
+$Res call({
+ bool connect, bool listen, String listenAddress, String path, String? url
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidConfigWSSCopyWithImpl<$Res>
+    implements _$VeilidConfigWSSCopyWith<$Res> {
+  __$VeilidConfigWSSCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigWSS _self;
+  final $Res Function(_VeilidConfigWSS) _then;
+
+/// Create a copy of VeilidConfigWSS
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+  return _then(_VeilidConfigWSS(
+connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
+as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigWebTransport implements DiagnosticableTreeMixin {
+
+/// Allow outbound WebTransport connections.
+ bool get connect;/// Accept inbound WebTransport connections.
+ bool get listen;/// Local address to bind, as `ip:port`, which shares the node's UDP socket
+/// when it resolves to the same bind target as udp.listenAddress.
+ String get listenAddress;/// URL path segment served by the WebTransport listener.
+ String get path;/// Externally-reachable `https://host:port/` URL to advertise, which
+/// selects CA-signed mode.
+ String? get url;
+/// Create a copy of VeilidConfigWebTransport
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigWebTransportCopyWith<VeilidConfigWebTransport> get copyWith => _$VeilidConfigWebTransportCopyWithImpl<VeilidConfigWebTransport>(this as VeilidConfigWebTransport, _$identity);
+
+  /// Serializes this VeilidConfigWebTransport to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigWebTransport'))
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigWebTransport&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigWebTransport(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigWebTransportCopyWith<$Res>  {
+  factory $VeilidConfigWebTransportCopyWith(VeilidConfigWebTransport value, $Res Function(VeilidConfigWebTransport) _then) = _$VeilidConfigWebTransportCopyWithImpl;
+@useResult
+$Res call({
+ bool connect, bool listen, String listenAddress, String path, String? url
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidConfigWebTransportCopyWithImpl<$Res>
+    implements $VeilidConfigWebTransportCopyWith<$Res> {
+  _$VeilidConfigWebTransportCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigWebTransport _self;
+  final $Res Function(VeilidConfigWebTransport) _then;
+
+/// Create a copy of VeilidConfigWebTransport
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+  return _then(_self.copyWith(
+connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
+as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigWebTransport].
+extension VeilidConfigWebTransportPatterns on VeilidConfigWebTransport {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigWebTransport value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigWebTransport value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigWebTransport value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport() when $default != null:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport():
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigWebTransport() when $default != null:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigWebTransport with DiagnosticableTreeMixin implements VeilidConfigWebTransport {
+  const _VeilidConfigWebTransport({required this.connect, required this.listen, required this.listenAddress, required this.path, this.url});
+  factory _VeilidConfigWebTransport.fromJson(Map<String, dynamic> json) => _$VeilidConfigWebTransportFromJson(json);
+
+/// Allow outbound WebTransport connections.
+@override final  bool connect;
+/// Accept inbound WebTransport connections.
+@override final  bool listen;
+/// Local address to bind, as `ip:port`, which shares the node's UDP socket
+/// when it resolves to the same bind target as udp.listenAddress.
+@override final  String listenAddress;
+/// URL path segment served by the WebTransport listener.
+@override final  String path;
+/// Externally-reachable `https://host:port/` URL to advertise, which
+/// selects CA-signed mode.
+@override final  String? url;
+
+/// Create a copy of VeilidConfigWebTransport
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigWebTransportCopyWith<_VeilidConfigWebTransport> get copyWith => __$VeilidConfigWebTransportCopyWithImpl<_VeilidConfigWebTransport>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigWebTransportToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigWebTransport'))
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigWebTransport&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigWebTransport(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigWebTransportCopyWith<$Res> implements $VeilidConfigWebTransportCopyWith<$Res> {
+  factory _$VeilidConfigWebTransportCopyWith(_VeilidConfigWebTransport value, $Res Function(_VeilidConfigWebTransport) _then) = __$VeilidConfigWebTransportCopyWithImpl;
+@override @useResult
+$Res call({
+ bool connect, bool listen, String listenAddress, String path, String? url
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidConfigWebTransportCopyWithImpl<$Res>
+    implements _$VeilidConfigWebTransportCopyWith<$Res> {
+  __$VeilidConfigWebTransportCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigWebTransport _self;
+  final $Res Function(_VeilidConfigWebTransport) _then;
+
+/// Create a copy of VeilidConfigWebTransport
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+  return _then(_VeilidConfigWebTransport(
+connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
+as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$VeilidConfigProtocol implements DiagnosticableTreeMixin {
 
- VeilidConfigUDP get udp; VeilidConfigTCP get tcp; VeilidConfigWS get ws;
+ VeilidConfigUDP get udp; VeilidConfigTCP get tcp; VeilidConfigWS get ws;@JsonKey(includeIfNull: false) VeilidConfigWSS? get wss;@JsonKey(includeIfNull: false) VeilidConfigWebTransport? get webtransport;
 /// Create a copy of VeilidConfigProtocol
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -4714,21 +5290,21 @@ $VeilidConfigProtocolCopyWith<VeilidConfigProtocol> get copyWith => _$VeilidConf
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigProtocol'))
-    ..add(DiagnosticsProperty('udp', udp))..add(DiagnosticsProperty('tcp', tcp))..add(DiagnosticsProperty('ws', ws));
+    ..add(DiagnosticsProperty('udp', udp))..add(DiagnosticsProperty('tcp', tcp))..add(DiagnosticsProperty('ws', ws))..add(DiagnosticsProperty('wss', wss))..add(DiagnosticsProperty('webtransport', webtransport));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigProtocol&&(identical(other.udp, udp) || other.udp == udp)&&(identical(other.tcp, tcp) || other.tcp == tcp)&&(identical(other.ws, ws) || other.ws == ws));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigProtocol&&(identical(other.udp, udp) || other.udp == udp)&&(identical(other.tcp, tcp) || other.tcp == tcp)&&(identical(other.ws, ws) || other.ws == ws)&&(identical(other.wss, wss) || other.wss == wss)&&(identical(other.webtransport, webtransport) || other.webtransport == webtransport));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,udp,tcp,ws);
+int get hashCode => Object.hash(runtimeType,udp,tcp,ws,wss,webtransport);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigProtocol(udp: $udp, tcp: $tcp, ws: $ws)';
+  return 'VeilidConfigProtocol(udp: $udp, tcp: $tcp, ws: $ws, wss: $wss, webtransport: $webtransport)';
 }
 
 
@@ -4739,11 +5315,11 @@ abstract mixin class $VeilidConfigProtocolCopyWith<$Res>  {
   factory $VeilidConfigProtocolCopyWith(VeilidConfigProtocol value, $Res Function(VeilidConfigProtocol) _then) = _$VeilidConfigProtocolCopyWithImpl;
 @useResult
 $Res call({
- VeilidConfigUDP udp, VeilidConfigTCP tcp, VeilidConfigWS ws
+ VeilidConfigUDP udp, VeilidConfigTCP tcp, VeilidConfigWS ws,@JsonKey(includeIfNull: false) VeilidConfigWSS? wss,@JsonKey(includeIfNull: false) VeilidConfigWebTransport? webtransport
 });
 
 
-$VeilidConfigUDPCopyWith<$Res> get udp;$VeilidConfigTCPCopyWith<$Res> get tcp;$VeilidConfigWSCopyWith<$Res> get ws;
+$VeilidConfigUDPCopyWith<$Res> get udp;$VeilidConfigTCPCopyWith<$Res> get tcp;$VeilidConfigWSCopyWith<$Res> get ws;$VeilidConfigWSSCopyWith<$Res>? get wss;$VeilidConfigWebTransportCopyWith<$Res>? get webtransport;
 
 }
 /// @nodoc
@@ -4756,12 +5332,14 @@ class _$VeilidConfigProtocolCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigProtocol
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? udp = null,Object? tcp = null,Object? ws = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? udp = null,Object? tcp = null,Object? ws = null,Object? wss = freezed,Object? webtransport = freezed,}) {
   return _then(_self.copyWith(
 udp: null == udp ? _self.udp : udp // ignore: cast_nullable_to_non_nullable
 as VeilidConfigUDP,tcp: null == tcp ? _self.tcp : tcp // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTCP,ws: null == ws ? _self.ws : ws // ignore: cast_nullable_to_non_nullable
-as VeilidConfigWS,
+as VeilidConfigWS,wss: freezed == wss ? _self.wss : wss // ignore: cast_nullable_to_non_nullable
+as VeilidConfigWSS?,webtransport: freezed == webtransport ? _self.webtransport : webtransport // ignore: cast_nullable_to_non_nullable
+as VeilidConfigWebTransport?,
   ));
 }
 /// Create a copy of VeilidConfigProtocol
@@ -4790,6 +5368,30 @@ $VeilidConfigWSCopyWith<$Res> get ws {
   
   return $VeilidConfigWSCopyWith<$Res>(_self.ws, (value) {
     return _then(_self.copyWith(ws: value));
+  });
+}/// Create a copy of VeilidConfigProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigWSSCopyWith<$Res>? get wss {
+    if (_self.wss == null) {
+    return null;
+  }
+
+  return $VeilidConfigWSSCopyWith<$Res>(_self.wss!, (value) {
+    return _then(_self.copyWith(wss: value));
+  });
+}/// Create a copy of VeilidConfigProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigWebTransportCopyWith<$Res>? get webtransport {
+    if (_self.webtransport == null) {
+    return null;
+  }
+
+  return $VeilidConfigWebTransportCopyWith<$Res>(_self.webtransport!, (value) {
+    return _then(_self.copyWith(webtransport: value));
   });
 }
 }
@@ -4870,10 +5472,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws, @JsonKey(includeIfNull: false)  VeilidConfigWSS? wss, @JsonKey(includeIfNull: false)  VeilidConfigWebTransport? webtransport)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtocol() when $default != null:
-return $default(_that.udp,_that.tcp,_that.ws);case _:
+return $default(_that.udp,_that.tcp,_that.ws,_that.wss,_that.webtransport);case _:
   return orElse();
 
 }
@@ -4891,10 +5493,10 @@ return $default(_that.udp,_that.tcp,_that.ws);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws, @JsonKey(includeIfNull: false)  VeilidConfigWSS? wss, @JsonKey(includeIfNull: false)  VeilidConfigWebTransport? webtransport)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtocol():
-return $default(_that.udp,_that.tcp,_that.ws);}
+return $default(_that.udp,_that.tcp,_that.ws,_that.wss,_that.webtransport);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -4908,10 +5510,10 @@ return $default(_that.udp,_that.tcp,_that.ws);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidConfigUDP udp,  VeilidConfigTCP tcp,  VeilidConfigWS ws, @JsonKey(includeIfNull: false)  VeilidConfigWSS? wss, @JsonKey(includeIfNull: false)  VeilidConfigWebTransport? webtransport)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtocol() when $default != null:
-return $default(_that.udp,_that.tcp,_that.ws);case _:
+return $default(_that.udp,_that.tcp,_that.ws,_that.wss,_that.webtransport);case _:
   return null;
 
 }
@@ -4923,12 +5525,14 @@ return $default(_that.udp,_that.tcp,_that.ws);case _:
 @JsonSerializable()
 
 class _VeilidConfigProtocol with DiagnosticableTreeMixin implements VeilidConfigProtocol {
-  const _VeilidConfigProtocol({required this.udp, required this.tcp, required this.ws});
+  const _VeilidConfigProtocol({required this.udp, required this.tcp, required this.ws, @JsonKey(includeIfNull: false) this.wss, @JsonKey(includeIfNull: false) this.webtransport});
   factory _VeilidConfigProtocol.fromJson(Map<String, dynamic> json) => _$VeilidConfigProtocolFromJson(json);
 
 @override final  VeilidConfigUDP udp;
 @override final  VeilidConfigTCP tcp;
 @override final  VeilidConfigWS ws;
+@override@JsonKey(includeIfNull: false) final  VeilidConfigWSS? wss;
+@override@JsonKey(includeIfNull: false) final  VeilidConfigWebTransport? webtransport;
 
 /// Create a copy of VeilidConfigProtocol
 /// with the given fields replaced by the non-null parameter values.
@@ -4944,21 +5548,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigProtocol'))
-    ..add(DiagnosticsProperty('udp', udp))..add(DiagnosticsProperty('tcp', tcp))..add(DiagnosticsProperty('ws', ws));
+    ..add(DiagnosticsProperty('udp', udp))..add(DiagnosticsProperty('tcp', tcp))..add(DiagnosticsProperty('ws', ws))..add(DiagnosticsProperty('wss', wss))..add(DiagnosticsProperty('webtransport', webtransport));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigProtocol&&(identical(other.udp, udp) || other.udp == udp)&&(identical(other.tcp, tcp) || other.tcp == tcp)&&(identical(other.ws, ws) || other.ws == ws));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigProtocol&&(identical(other.udp, udp) || other.udp == udp)&&(identical(other.tcp, tcp) || other.tcp == tcp)&&(identical(other.ws, ws) || other.ws == ws)&&(identical(other.wss, wss) || other.wss == wss)&&(identical(other.webtransport, webtransport) || other.webtransport == webtransport));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,udp,tcp,ws);
+int get hashCode => Object.hash(runtimeType,udp,tcp,ws,wss,webtransport);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigProtocol(udp: $udp, tcp: $tcp, ws: $ws)';
+  return 'VeilidConfigProtocol(udp: $udp, tcp: $tcp, ws: $ws, wss: $wss, webtransport: $webtransport)';
 }
 
 
@@ -4969,11 +5573,11 @@ abstract mixin class _$VeilidConfigProtocolCopyWith<$Res> implements $VeilidConf
   factory _$VeilidConfigProtocolCopyWith(_VeilidConfigProtocol value, $Res Function(_VeilidConfigProtocol) _then) = __$VeilidConfigProtocolCopyWithImpl;
 @override @useResult
 $Res call({
- VeilidConfigUDP udp, VeilidConfigTCP tcp, VeilidConfigWS ws
+ VeilidConfigUDP udp, VeilidConfigTCP tcp, VeilidConfigWS ws,@JsonKey(includeIfNull: false) VeilidConfigWSS? wss,@JsonKey(includeIfNull: false) VeilidConfigWebTransport? webtransport
 });
 
 
-@override $VeilidConfigUDPCopyWith<$Res> get udp;@override $VeilidConfigTCPCopyWith<$Res> get tcp;@override $VeilidConfigWSCopyWith<$Res> get ws;
+@override $VeilidConfigUDPCopyWith<$Res> get udp;@override $VeilidConfigTCPCopyWith<$Res> get tcp;@override $VeilidConfigWSCopyWith<$Res> get ws;@override $VeilidConfigWSSCopyWith<$Res>? get wss;@override $VeilidConfigWebTransportCopyWith<$Res>? get webtransport;
 
 }
 /// @nodoc
@@ -4986,12 +5590,14 @@ class __$VeilidConfigProtocolCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigProtocol
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? udp = null,Object? tcp = null,Object? ws = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? udp = null,Object? tcp = null,Object? ws = null,Object? wss = freezed,Object? webtransport = freezed,}) {
   return _then(_VeilidConfigProtocol(
 udp: null == udp ? _self.udp : udp // ignore: cast_nullable_to_non_nullable
 as VeilidConfigUDP,tcp: null == tcp ? _self.tcp : tcp // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTCP,ws: null == ws ? _self.ws : ws // ignore: cast_nullable_to_non_nullable
-as VeilidConfigWS,
+as VeilidConfigWS,wss: freezed == wss ? _self.wss : wss // ignore: cast_nullable_to_non_nullable
+as VeilidConfigWSS?,webtransport: freezed == webtransport ? _self.webtransport : webtransport // ignore: cast_nullable_to_non_nullable
+as VeilidConfigWebTransport?,
   ));
 }
 
@@ -5021,6 +5627,30 @@ $VeilidConfigWSCopyWith<$Res> get ws {
   
   return $VeilidConfigWSCopyWith<$Res>(_self.ws, (value) {
     return _then(_self.copyWith(ws: value));
+  });
+}/// Create a copy of VeilidConfigProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigWSSCopyWith<$Res>? get wss {
+    if (_self.wss == null) {
+    return null;
+  }
+
+  return $VeilidConfigWSSCopyWith<$Res>(_self.wss!, (value) {
+    return _then(_self.copyWith(wss: value));
+  });
+}/// Create a copy of VeilidConfigProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigWebTransportCopyWith<$Res>? get webtransport {
+    if (_self.webtransport == null) {
+    return null;
+  }
+
+  return $VeilidConfigWebTransportCopyWith<$Res>(_self.webtransport!, (value) {
+    return _then(_self.copyWith(webtransport: value));
   });
 }
 }

@@ -155,17 +155,15 @@ pub trait HasDialInfoDetailList: fmt::Debug {
         let mut protocol_to_port = BTreeMap::<TransportType, (LowLevelProtocolType, u16)>::new();
 
         for did in self.dial_info_detail_list() {
+            let llpt = did.dial_info.protocol_type().low_level_protocol_type();
             low_level_protocol_ports.insert((
-                did.dial_info.protocol_type().low_level_protocol_type(),
+                llpt,
                 did.dial_info.address_type(),
                 did.dial_info.socket_address().port(),
             ));
             protocol_to_port.insert(
                 TransportType::new(did.dial_info.protocol_type(), did.dial_info.address_type()),
-                (
-                    did.dial_info.protocol_type().low_level_protocol_type(),
-                    did.dial_info.socket_address().port(),
-                ),
+                (llpt, did.dial_info.socket_address().port()),
             );
         }
         LowLevelPortInfo {
@@ -186,6 +184,10 @@ pub trait HasDialInfoDetailList: fmt::Debug {
                 DialInfo::WS(di) => di.socket_address.ip_addr(),
                 #[cfg(feature = "enable-protocol-wss")]
                 DialInfo::WSS(di) => di.socket_address.ip_addr(),
+                #[cfg(feature = "enable-protocol-webtransport")]
+                DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => {
+                    di.socket_address.ip_addr()
+                }
             })
             .map(geolocation::query_country_code)
             .collect::<Vec<_>>();

@@ -31,6 +31,22 @@ pub async fn run_all_tests() {
         test_attachment_manager::test_all().await;
     }
 
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        feature = "enable-protocol-webtransport",
+        not(feature = "mock-api")
+    ))]
+    {
+        info!("TEST: test_webtransport_e2e");
+        test_webtransport_e2e::test_all().await;
+    }
+
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        info!("TEST: test_veilid_config");
+        test_veilid_config::test_all();
+    }
+
     #[cfg(not(feature = "mock-api"))]
     {
         info!("TEST: attachment_manager");

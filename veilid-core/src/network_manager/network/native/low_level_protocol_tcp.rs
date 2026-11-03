@@ -353,84 +353,59 @@ impl NativeNetwork {
         protocol_type: ProtocolType,
         new_protocol_accept_handler: Box<NewProtocolAcceptHandler>,
     ) -> EyreResult<bool> {
-        for ip_addr in bind_set.addrs {
-            let mut port = bind_set.port;
-            loop {
-                let addr = SocketAddr::new(ip_addr, port);
-
-                // see if we've already bound to this already
-                // if not, spawn a listener
-                let mut got_listener = false;
-                if !self.inner.lock().listener_states.contains_key(&addr) {
-                    if self.clone().spawn_socket_listener(addr)? {
-                        got_listener = true;
-                    }
-                } else {
-                    got_listener = true;
-                }
-
-                if got_listener {
-                    let ls = if let Some(ls) = self.inner.lock().listener_states.get_mut(&addr) {
-                        ls.clone()
-                    } else {
-                        bail!("listener state missing for {} after binding", addr);
-                    };
-
-                    if is_tls {
-                        if ls.read().tls_acceptor.is_none() {
-                            ls.write().tls_acceptor =
-                                Some(self.clone().get_or_create_tls_acceptor()?);
-                        }
-                        ls.write()
-                            .tls_protocol_handlers
-                            .push(new_protocol_accept_handler(self.registry(), true));
-                    } else {
-                        ls.write()
-                            .protocol_accept_handlers
-                            .push(new_protocol_accept_handler(self.registry(), false));
-                    }
-
-                    // Return interface dial infos we listen on
-                    let mut inner = self.inner.lock();
-                    let bapp = inner
-                        .bound_address_per_protocol
-                        .entry(protocol_type)
-                        .or_default();
-                    bapp.push(addr);
-
-                    veilid_log!(self
-                        debug
-                        "set_preferred_local_address: {:?} {:?} -> {:?}",
-                        protocol_type,
-                        addr,
-                        PeerAddress::new(SocketAddress::from_socket_addr(addr), protocol_type)
-                    );
-
-                    Self::set_preferred_local_address(
-                        &mut inner,
-                        PeerAddress::new(SocketAddress::from_socket_addr(addr), protocol_type),
-                    );
-
-                    break;
-                }
-
-                if !bind_set.search {
-                    veilid_log!(self debug "unable to bind to tcp {}", addr);
-                    return Ok(false);
-                }
-
-                if port == 65535u16 {
-                    port = 1024;
-                } else {
-                    port += 1;
-                }
-
-                if port == bind_set.port {
-                    bail!("unable to find a free port for tcp {}", ip_addr);
-                }
+        self.search_and_bind(&bind_set, "tcp", |addr| {
+            // see if we've already bound to this already
+            // if not, spawn a listener
+            let got_listener = if !self.inner.lock().listener_states.contains_key(&addr) {
+                self.clone().spawn_socket_listener(addr)?
+            } else {
+                true
+            };
+            if !got_listener {
+                return Ok(TryBindOutcome::TryNextPort);
             }
-        }
 
-        Ok(true)
+            let ls = if let Some(ls) = self.inner.lock().listener_states.get_mut(&addr) {
+                ls.clone()
+            } else {
+                bail!("listener state missing for {} after binding", addr);
+            };
+
+            if is_tls {
+                if ls.read().tls_acceptor.is_none() {
+                    ls.write().tls_acceptor = Some(self.clone().get_or_create_tls_acceptor()?);
+                }
+                ls.write()
+                    .tls_protocol_handlers
+                    .push(new_protocol_accept_handler(self.registry(), true));
+            } else {
+                ls.write()
+                    .protocol_accept_handlers
+                    .push(new_protocol_accept_handler(self.registry(), false));
+            }
+
+            // Return interface dial infos we listen on
+            let mut inner = self.inner.lock();
+            let bapp = inner
+                .bound_address_per_protocol
+                .entry(protocol_type)
+                .or_default();
+            bapp.push(addr);
+
+            veilid_log!(self
+                debug
+                "set_preferred_local_address: {:?} {:?} -> {:?}",
+                protocol_type,
+                addr,
+                PeerAddress::new(SocketAddress::from_socket_addr(addr), protocol_type)
+            );
+
+            Self::set_preferred_local_address(
+                &mut inner,
+                PeerAddress::new(SocketAddress::from_socket_addr(addr), protocol_type),
+            );
+
+            Ok(TryBindOutcome::Bound)
+        })
     }
 }

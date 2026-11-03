@@ -94,6 +94,14 @@ pub fn fake_veilid_config() -> VeilidConfig {
                     path: "Curved".to_string(),
                     url: Some("https://veilid.com/wss".to_string()),
                 },
+                #[cfg(feature = "enable-protocol-webtransport")]
+                webtransport: VeilidConfigWebTransport {
+                    connect: true,
+                    listen: false,
+                    listen_address: "10.0.0.3".to_string(),
+                    path: "Dedicated".to_string(),
+                    url: None,
+                },
             },
             privacy: VeilidConfigPrivacy {
                 require_inbound_relay: false,

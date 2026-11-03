@@ -71,17 +71,33 @@ impl OnlineDetectorTimings {
 const CREDIT_INTERVALS_KEPT: usize = 64;
 
 /// Degraded breadth scales with the table: at least this fraction (1/divisor) of live
-/// entries must fail fresh in-window per framing type. A big table always carries a few
+/// entries must fail fresh in-window per low-level protocol. A big table always carries a few
 /// flapping peers (a flat count false-fires on healthy networks), while a lossy uplink
 /// fails a large slice of previously-clean peers at once.
 const DEGRADED_BREADTH_TABLE_DIVISOR: usize = 20;
 
-/// Failure count threshold for a socket class.
+/// Failure count threshold for a framing type.
 fn failure_threshold(framing_type: FramingType) -> usize {
     match framing_type {
         FramingType::Connection => OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION,
         FramingType::Message => OFFLINE_DETECTION_FAILURE_THRESHOLD_MESSAGE,
     }
+}
+
+/// The same for a low-level protocol: without WebTransport the two split the protocols
+/// identically (UDP is Message, TCP and WS and WSS are Connection), so the degraded path reads
+/// the same thresholds it always did.
+fn degraded_failure_threshold(low_level_protocol_type: LowLevelProtocolType) -> usize {
+    match low_level_protocol_type {
+        LowLevelProtocolType::TCP => OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION,
+        LowLevelProtocolType::UDP => OFFLINE_DETECTION_FAILURE_THRESHOLD_MESSAGE,
+    }
+}
+
+/// Every low-level protocol, which degraded detection requires until the network reports its
+/// protocol config
+fn all_low_level_protocol_types() -> BTreeSet<LowLevelProtocolType> {
+    BTreeSet::from([LowLevelProtocolType::UDP, LowLevelProtocolType::TCP])
 }
 
 /// The failing nodes per socket class, for the offline decision's log line
@@ -221,7 +237,7 @@ pub(crate) enum OnlineEvent {
         sent_ts: Option<Timestamp>,
         opt_direct: Option<(NodeId, TransportType)>,
     },
-    /// Failures for previously-live nodes on one framing type. `fresh_node_ids` is the
+    /// Failures for previously-live nodes on one transport. `fresh_node_ids` is the
     /// subset whose failure is news (see `record_failure`); only those arm the degraded
     /// window, while offline detection keeps the full live set.
     Failure {
@@ -235,6 +251,8 @@ pub(crate) enum OnlineEvent {
         sent_ts: Timestamp,
         /// Socket class the question went out on
         framing_type: FramingType,
+        /// Kernel socket protocol the question went out on
+        low_level_protocol_type: LowLevelProtocolType,
     },
     /// The local network address changed.
     NetworkChange,
@@ -248,8 +266,8 @@ pub(crate) struct OnlineDetectionPerDomain {
     /// Previously-live nodes that failed on each framing type since the last success
     pub(crate) pending_failures: BTreeMap<FramingType, BTreeSet<NodeId>>,
     /// The same breadth over a time window, which an interleaved success cannot erase
-    pub(crate) windowed_failures: BTreeMap<FramingType, BTreeMap<NodeId, Timestamp>>,
-    /// Last time the windowed breadth crossed threshold on every enabled framing type
+    pub(crate) windowed_failures: BTreeMap<LowLevelProtocolType, BTreeMap<NodeId, Timestamp>>,
+    /// Last time the windowed breadth crossed threshold on every enabled low-level protocol
     pub(crate) last_degraded_evidence_ts: Option<Timestamp>,
     /// Last completed round trip; exiting Degraded requires one after the evidence
     pub(crate) last_success_ts: Option<Timestamp>,
@@ -357,6 +375,8 @@ pub struct OnlineDetector {
     inner: Mutex<BTreeMap<RoutingDomain, OnlineDetectionPerDomain>>,
     /// Framing types the network uses; only these gate offline detection
     enabled_framing_types: Mutex<FramingTypeSet>,
+    /// Low-level protocols the network uses; only these gate degraded detection
+    enabled_low_level_protocol_types: Mutex<BTreeSet<LowLevelProtocolType>>,
     /// Last local pipeline stall long enough to void timeout evidence; process-wide
     last_local_stall: Mutex<Option<Timestamp>>,
     /// Read-mostly snapshot of the interval data, republished whenever that data changes
@@ -443,6 +463,10 @@ impl fmt::Debug for OnlineDetector {
         f.debug_struct("OnlineDetector")
             .field("inner", &*self.inner.lock())
             .field("enabled_framing_types", &*self.enabled_framing_types.lock())
+            .field(
+                "enabled_low_level_protocol_types",
+                &*self.enabled_low_level_protocol_types.lock(),
+            )
             .finish()
     }
 }
@@ -457,6 +481,7 @@ impl OnlineDetector {
             inner: Mutex::new(BTreeMap::new()),
             // Require both classes until the network reports its protocol config.
             enabled_framing_types: Mutex::new(FramingTypeSet::all()),
+            enabled_low_level_protocol_types: Mutex::new(all_low_level_protocol_types()),
             last_local_stall: Mutex::new(None),
             overlap_data: RwLock::new(BTreeMap::new()),
         }
@@ -484,13 +509,17 @@ impl OnlineDetector {
         self.overlap_data.write().insert(routing_domain, snap);
     }
 
-    /// Set which framing types offline detection requires, from the network protocol config.
+    /// Set which framing types and low-level protocols detection requires, from the network
+    /// protocol config.
     pub fn set_protocol_config(&self, outbound: ProtocolTypeSet, inbound: ProtocolTypeSet) {
         let mut framing_types = FramingTypeSet::new();
+        let mut low_level_protocol_types = BTreeSet::new();
         for pt in outbound | inbound {
             framing_types.insert(pt.framing_type());
+            low_level_protocol_types.insert(pt.low_level_protocol_type());
         }
         *self.enabled_framing_types.lock() = framing_types;
+        *self.enabled_low_level_protocol_types.lock() = low_level_protocol_types;
     }
 
     /// Record a successful round-trip, or unasked inbound traffic (`sent_ts` None). A direct
@@ -679,6 +708,7 @@ impl OnlineDetector {
                 responsive_count,
                 sent_ts,
                 framing_type: transport.framing_type(),
+                low_level_protocol_type: transport.protocol_type().low_level_protocol_type(),
             },
         );
     }
@@ -692,6 +722,7 @@ impl OnlineDetector {
     /// Re-arm for a new attach; online/offline history persists across detach.
     pub fn startup(&self) {
         *self.enabled_framing_types.lock() = FramingTypeSet::all();
+        *self.enabled_low_level_protocol_types.lock() = all_low_level_protocol_types();
     }
 
     /// Detached: mark every ping-detected domain offline so the detached period
@@ -1169,6 +1200,7 @@ impl OnlineDetector {
             return;
         }
         let enabled_framing_types = *self.enabled_framing_types.lock();
+        let enabled_low_level_protocol_types = self.enabled_low_level_protocol_types.lock().clone();
         let local_stall_ts = *self.last_local_stall.lock();
         let now = Timestamp::now();
 
@@ -1198,6 +1230,7 @@ impl OnlineDetector {
                     pd,
                     &event,
                     enabled_framing_types,
+                    &enabled_low_level_protocol_types,
                     local_stall_ts,
                     now,
                 ),
@@ -1360,6 +1393,7 @@ impl OnlineDetector {
         pd: &mut OnlineDetectionPerDomain,
         event: &OnlineEvent,
         enabled_framing_types: FramingTypeSet,
+        enabled_low_level_protocol_types: &BTreeSet<LowLevelProtocolType>,
         local_stall_ts: Option<Timestamp>,
         now: Timestamp,
     ) -> Option<OnlineState> {
@@ -1374,6 +1408,7 @@ impl OnlineDetector {
                 responsive_count,
                 sent_ts,
                 framing_type,
+                low_level_protocol_type,
             } => {
                 // Ignore RPCs sent before this online period began or the last stall ended
                 if *sent_ts < pd.last_transition_ts
@@ -1391,7 +1426,10 @@ impl OnlineDetector {
                 }
                 // Only fresh failures arm the degraded window; the offline breadth
                 // above keeps the full live set
-                let wbucket = pd.windowed_failures.entry(*framing_type).or_default();
+                let wbucket = pd
+                    .windowed_failures
+                    .entry(*low_level_protocol_type)
+                    .or_default();
                 for node_id in fresh_node_ids {
                     wbucket.insert(node_id.clone(), now);
                 }
@@ -1401,18 +1439,19 @@ impl OnlineDetector {
                 }
                 // Degraded needs a table-relative slice of previously-clean peers
                 // failing at once; the flat offline threshold below stays as-is
-                let degraded_threshold = |ft: FramingType| {
-                    failure_threshold(ft).max(responsive_count / DEGRADED_BREADTH_TABLE_DIVISOR)
+                let degraded_threshold = |llpt: LowLevelProtocolType| {
+                    degraded_failure_threshold(llpt)
+                        .max(responsive_count / DEGRADED_BREADTH_TABLE_DIVISOR)
                 };
-                let all_windowed = !enabled_framing_types.is_empty()
-                    && enabled_framing_types.iter().all(|ft| {
-                        pd.windowed_failures.get(&ft).map_or(0, BTreeMap::len)
-                            >= degraded_threshold(ft)
+                let all_windowed = !enabled_low_level_protocol_types.is_empty()
+                    && enabled_low_level_protocol_types.iter().all(|llpt| {
+                        pd.windowed_failures.get(llpt).map_or(0, BTreeMap::len)
+                            >= degraded_threshold(*llpt)
                     });
                 if all_windowed {
                     pd.last_degraded_evidence_ts = Some(now);
                 }
-                // Offline only when every enabled socket class has crossed its threshold, so
+                // Offline only when every enabled framing type has crossed its threshold, so
                 // localized trouble on one class doesn't drive offline while another works.
                 let all_failed = !enabled_framing_types.is_empty()
                     && enabled_framing_types.iter().all(|ft| {

@@ -5,6 +5,8 @@ import tseslint from 'typescript-eslint';
 export default defineConfig([
   // Build outputs: the prebuilt worker and extension bundles and the coverage report
   globalIgnores(['coverage/', 'extensionDist/', 'public/service-worker.js', 'public/swassets/']),
+  // The WebTransport bench is a standalone app with its own package.json and tsconfig
+  globalIgnores(['bench/']),
   eslint.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
   {

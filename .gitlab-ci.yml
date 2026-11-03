@@ -171,12 +171,24 @@ lint_python:
 format_typescript:
   extends: .runner_small
   stage: test
-  image: node:22.23.3-slim
+  image: node:26.13.0-slim
   script:
     - (cd veilid-wasm/tests && npm ci --no-audit --no-fund)
     - ./scripts/_check_format_typescript.sh
   rules:
     - *branch_typescript_rules
+
+verify_executors:
+  extends: .runner_small
+  stage: test
+  # cargo tree only, so the pinned image needs no components
+  image: rust:1.92.0-slim
+
+  script:
+    - bash scripts/verify_executors.sh
+
+  rules:
+    - *branch_format_rules
 
 # Which build images are missing, decided in a curl-only container: no docker, no docker-in-docker
 # service, no earthly. The registry v2 API answers 200/404 for a tag given only a JWT, so this is

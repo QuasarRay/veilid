@@ -209,13 +209,24 @@ fn node(n: u8) -> NodeId {
 
 fn broad_failure(ft: FramingType, first: u8, count: u8, sent_ts: Timestamp) -> OnlineEvent {
     let ids: Vec<NodeId> = (first..first + count).map(node).collect();
+    // The degraded window keys on the low-level protocol, which pairs with the framing type here
+    let low_level_protocol_type = match ft {
+        FramingType::Connection => LowLevelProtocolType::TCP,
+        FramingType::Message => LowLevelProtocolType::UDP,
+    };
     OnlineEvent::Failure {
         live_node_ids: ids.clone(),
         fresh_node_ids: ids,
         responsive_count: 0,
         sent_ts,
         framing_type: ft,
+        low_level_protocol_type,
     }
+}
+
+/// Every low-level protocol, as the detector requires before the network reports its config
+fn all_low_level() -> BTreeSet<LowLevelProtocolType> {
+    BTreeSet::from([LowLevelProtocolType::UDP, LowLevelProtocolType::TCP])
 }
 
 pub fn test_recovery_clears_evidence_window() {
@@ -229,8 +240,15 @@ pub fn test_recovery_clears_evidence_window() {
     for ft in framing {
         let ev = broad_failure(ft, 1, threshold, ts(10));
         // Offline needs the same breadth sustained; here only the degraded overlay matters
-        let _ =
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, None, ts(10));
+        let _ = OnlineDetector::process_online_event(
+            &timings(),
+            &mut pd,
+            &ev,
+            framing,
+            &all_low_level(),
+            None,
+            ts(10),
+        );
     }
     assert_eq!(pd.last_degraded_evidence_ts, Some(ts(10)));
     assert!(OnlineDetector::commit_effective(&timings(), &mut pd, None, ts(10)).is_some());
@@ -246,8 +264,15 @@ pub fn test_recovery_clears_evidence_window() {
     // One more failure per framing type is not breadth
     for ft in framing {
         let ev = broad_failure(ft, 100, 1, ts(17));
-        let _ =
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, None, ts(17));
+        let _ = OnlineDetector::process_online_event(
+            &timings(),
+            &mut pd,
+            &ev,
+            framing,
+            &all_low_level(),
+            None,
+            ts(17),
+        );
     }
     assert_eq!(pd.last_degraded_evidence_ts, None);
     assert!(OnlineDetector::commit_effective(&timings(), &mut pd, None, ts(17)).is_none());
@@ -272,8 +297,15 @@ pub fn test_exit_reports_a_stall_only_period() {
     let mut pd = OnlineDetectionPerDomain::default();
     for ft in framing {
         let ev = broad_failure(ft, 1, threshold, ts(10));
-        let _ =
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, None, ts(10));
+        let _ = OnlineDetector::process_online_event(
+            &timings(),
+            &mut pd,
+            &ev,
+            framing,
+            &all_low_level(),
+            None,
+            ts(10),
+        );
     }
     assert!(OnlineDetector::commit_effective(&timings(), &mut pd, stall, ts(10)).is_some());
     pd.last_success_ts = Some(ts(12));
@@ -307,7 +339,15 @@ pub fn test_failures_across_a_stall_are_void() {
     for ft in framing {
         let ev = broad_failure(ft, 1, threshold, ts(170));
         assert_eq!(
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, stall, ts(200)),
+            OnlineDetector::process_online_event(
+                &timings(),
+                &mut pd,
+                &ev,
+                framing,
+                &all_low_level(),
+                stall,
+                ts(200)
+            ),
             None
         );
     }
@@ -320,7 +360,15 @@ pub fn test_failures_across_a_stall_are_void() {
         .iter()
         .map(|ft| {
             let ev = broad_failure(ft, 1, threshold, ts(201));
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, stall, ts(206))
+            OnlineDetector::process_online_event(
+                &timings(),
+                &mut pd,
+                &ev,
+                framing,
+                &all_low_level(),
+                stall,
+                ts(206),
+            )
         })
         .collect();
     assert_eq!(states.last(), Some(&Some(OnlineState::Offline)));
@@ -337,7 +385,15 @@ pub fn test_losses_sent_before_an_answer_do_not_offline() {
     for ft in framing {
         let ev = broad_failure(ft, 1, threshold, ts(100));
         assert_eq!(
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, None, ts(110)),
+            OnlineDetector::process_online_event(
+                &timings(),
+                &mut pd,
+                &ev,
+                framing,
+                &all_low_level(),
+                None,
+                ts(110)
+            ),
             None
         );
     }
@@ -349,7 +405,15 @@ pub fn test_losses_sent_before_an_answer_do_not_offline() {
         .iter()
         .map(|ft| {
             let ev = broad_failure(ft, 1, threshold, ts(106));
-            OnlineDetector::process_online_event(&timings(), &mut pd, &ev, framing, None, ts(111))
+            OnlineDetector::process_online_event(
+                &timings(),
+                &mut pd,
+                &ev,
+                framing,
+                &all_low_level(),
+                None,
+                ts(111),
+            )
         })
         .collect();
     assert_eq!(states.last(), Some(&Some(OnlineState::Offline)));
@@ -467,6 +531,107 @@ pub fn test_credit_is_kept_by_count() {
     );
 }
 
+// Degradation evidence is keyed by low-level protocol, so a blocked socket cannot be completed
+// by a healthy one that merely shares its framing
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn failure(protocol_type: ProtocolType, first_node: u8, now: Timestamp) -> OnlineEvent {
+    let transport = TransportType::new(protocol_type, AddressType::IPV4);
+    let low_level_protocol_type = protocol_type.low_level_protocol_type();
+    // Exactly one degraded threshold of previously-clean peers, distinct across calls
+    let count = match low_level_protocol_type {
+        LowLevelProtocolType::TCP => OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION,
+        LowLevelProtocolType::UDP => OFFLINE_DETECTION_FAILURE_THRESHOLD_MESSAGE,
+    };
+    let node_ids: Vec<NodeId> = (0..count).map(|i| node(first_node + i as u8)).collect();
+    OnlineEvent::Failure {
+        live_node_ids: node_ids.clone(),
+        fresh_node_ids: node_ids,
+        responsive_count: 20,
+        sent_ts: now,
+        framing_type: transport.framing_type(),
+        low_level_protocol_type,
+    }
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn effective(pd: &OnlineDetectionPerDomain, now: Timestamp) -> OnlineState {
+    effective_online_state(
+        &timings(),
+        OnlineState::Online,
+        pd.last_degraded_evidence_ts,
+        None,
+        base_clean(),
+        now,
+    )
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub fn test_degraded_evidence_is_keyed_by_low_level_protocol() {
+    info!("--- test_degraded_evidence_is_keyed_by_low_level_protocol ---");
+
+    let now = ts(100);
+    let protocols = ProtocolType::UDP | ProtocolType::TCP | ProtocolType::WTS | ProtocolType::WTD;
+    let mut framing_types = FramingTypeSet::new();
+    let mut low_level_protocol_types = BTreeSet::new();
+    for pt in protocols {
+        framing_types.insert(pt.framing_type());
+        low_level_protocol_types.insert(pt.low_level_protocol_type());
+    }
+    let drive = |pd: &mut OnlineDetectionPerDomain, event: OnlineEvent| {
+        assert_eq!(
+            OnlineDetector::process_online_event(
+                &timings(),
+                pd,
+                &event,
+                framing_types,
+                &low_level_protocol_types,
+                None,
+                now
+            ),
+            None,
+            "interleaved successes keep the offline path clear"
+        );
+    };
+
+    // UDP is blocked, so raw UDP and both WebTransport protocols fail on the same socket
+    // while TCP keeps answering
+    let mut pd = OnlineDetectionPerDomain::default();
+    drive(&mut pd, failure(ProtocolType::UDP, 1, now));
+    drive(
+        &mut pd,
+        OnlineEvent::Success {
+            sent_ts: None,
+            opt_direct: None,
+        },
+    );
+    drive(&mut pd, failure(ProtocolType::WTD, 11, now));
+    drive(
+        &mut pd,
+        OnlineEvent::Success {
+            sent_ts: None,
+            opt_direct: None,
+        },
+    );
+    drive(&mut pd, failure(ProtocolType::WTS, 21, now));
+    drive(
+        &mut pd,
+        OnlineEvent::Success {
+            sent_ts: None,
+            opt_direct: None,
+        },
+    );
+    assert_eq!(
+        effective(&pd, now),
+        OnlineState::Online,
+        "a UDP-only outage must not degrade while TCP is clean"
+    );
+
+    // Control: the same run plus TCP breadth completes the evidence
+    drive(&mut pd, failure(ProtocolType::TCP, 31, now));
+    assert_eq!(effective(&pd, now), OnlineState::Degraded);
+}
+
 pub fn test_all() {
     test_timings_at_default_rpc_timeout();
     test_credit_is_kept_by_count();
@@ -483,4 +648,6 @@ pub fn test_all() {
     test_no_success_holds_until_decay();
     test_clean_window_escalates_and_caps();
     test_escalated_window_closes_the_gap();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_degraded_evidence_is_keyed_by_low_level_protocol();
 }

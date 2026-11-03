@@ -26,16 +26,16 @@ else
     CLEANUP=0
 fi
 
-# The optional observability features are off by default, so no other clippy pass compiles
-# them. Check them all together on top of the defaults so they stay buildable, alone and
-# in combination.
-echo "Running clippy for x86_64-unknown-linux-gnu with optional features (verbose-tracing, geolocation, aimd-dht, stats)..."
+# The optional observability and protocol features are off by default, so no other clippy pass
+# compiles them. Check them all together on top of the defaults so they stay buildable, alone
+# and in combination.
+echo "Running clippy for x86_64-unknown-linux-gnu with optional features (verbose-tracing, geolocation, aimd-dht, stats, enable-protocol-wss, enable-protocol-webtransport)..."
 cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-core \
-    --features=verbose-tracing,geolocation,aimd-dht,stats $@
+    --features=verbose-tracing,geolocation,aimd-dht,stats,enable-protocol-wss,enable-protocol-webtransport $@
 cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-server \
-    --features=veilid-core/verbose-tracing,geolocation,aimd-dht,stats $@
+    --features=veilid-core/verbose-tracing,geolocation,aimd-dht,stats,enable-protocol-wss,enable-protocol-webtransport $@
 
 if [ $CLEANUP -eq 1 ] ; then
     if [ "$TARGET" != "x86_64-unknown-linux-gnu" ] ; then

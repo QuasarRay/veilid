@@ -31,6 +31,35 @@ fn relay_at(relay_info_list: &[RelayInfo], remote: IpAddr) -> Option<HopPeer> {
 }
 
 impl NetworkManager {
+    /// Both ends punch and then wait for the other end's receipt, so the budget is twice the
+    /// configured one-way receipt time.
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    fn hole_punch_receipt_wait_ms(&self) -> u32 {
+        self.config().internal().network.hole_punch_receipt_time_ms * 2
+    }
+
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    fn hole_punch_receipt_wait(&self) -> TimestampDuration {
+        TimestampDuration::new_ms(self.hole_punch_receipt_wait_ms().into())
+    }
+
+    /// A QUIC handshake needs a floor of its own because the receipt wait can be configured
+    /// shorter than a handshake takes to complete.
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    fn webtransport_hole_punch_connect_timeout_ms(&self) -> u32 {
+        self.hole_punch_receipt_wait_ms()
+            .max(QUIC_HOLE_PUNCH_MIN_CONNECT_TIMEOUT_MS)
+    }
+
     /// Send raw data to a dial info
     ///
     /// Sending to a dialinfo does not require determining a NodeContactMethod
@@ -425,6 +454,35 @@ impl NetworkManager {
                 ))
                 .await?
             }
+            #[cfg(all(
+                feature = "enable-protocol-webtransport",
+                not(all(target_arch = "wasm32", target_os = "unknown"))
+            ))]
+            NodeContactMethodResult::Resolved(ContactMethod::SignalHolePunch {
+                relay_di,
+                hole_punch_di,
+                reverse_hole_punch_di,
+            }) if hole_punch_is_webtransport(hole_punch_di) => {
+                pin_future_closure!(self.send_data_cm_signal_hole_punch_webtransport(
+                    relay_di.clone(),
+                    hole_punch_di.clone(),
+                    reverse_hole_punch_di.clone(),
+                    destination_node_ref.clone(),
+                    data.clone()
+                ))
+                .await?
+            }
+            #[cfg(all(
+                feature = "enable-protocol-webtransport",
+                target_arch = "wasm32",
+                target_os = "unknown"
+            ))]
+            NodeContactMethodResult::Resolved(ContactMethod::SignalHolePunch {
+                hole_punch_di,
+                ..
+            }) if hole_punch_is_webtransport(hole_punch_di) => NetworkResult::service_unavailable(
+                "WebTransport hole punch is not available in the browser",
+            ),
             NodeContactMethodResult::Resolved(ContactMethod::SignalHolePunch {
                 relay_di,
                 hole_punch_di,
@@ -736,6 +794,136 @@ impl NetworkManager {
         );
 
         Ok(NetworkResult::value(unique_flow))
+    }
+
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    async fn send_data_cm_signal_hole_punch_webtransport(
+        &self,
+        relay_di: DialInfo,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
+        target_node_ref: FilteredNodeRef,
+        data: Bytes,
+    ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        let seq_target_node_ref = target_node_ref.sequencing_only();
+        let opt_last_flow = seq_target_node_ref.last_flow().filter(|flow| {
+            !self.transport_deprioritized(&seq_target_node_ref, flow.transport_type())
+        });
+        let data = if let Some(flow) = opt_last_flow {
+            let net = self.net();
+            let mtu = self.hop_mtu(
+                &target_node_ref.unfiltered(),
+                flow.transport_type(),
+                flow.remote_address().ip_addr(),
+            );
+            match pin_future!(net.send_data_to_existing_flow(flow, data.clone(), mtu)).await? {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    // Update timestamp for this last connection since we just sent to it
+                    self.set_last_flow_from_send(
+                        target_node_ref.unfiltered(),
+                        unique_flow.flow,
+                        Timestamp::now(),
+                    );
+
+                    return Ok(NetworkResult::value(unique_flow));
+                }
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    return Ok(NetworkResult::timeout());
+                }
+                _ => data,
+            }
+        } else {
+            data
+        };
+
+        let hole_punch_receipt_time = self.hole_punch_receipt_wait();
+
+        let unique_flow = network_result_try!(
+            pin_future!(self
+                .do_hole_punch_webtransport(
+                    relay_di,
+                    hole_punch_di,
+                    reverse_hole_punch_di,
+                    target_node_ref.unfiltered(),
+                    data
+                )
+                .measure_debug(
+                    hole_punch_receipt_time,
+                    veilid_log_dbg!(
+                        self,
+                        "NetworkManager::send_data_cm_signal_hole_punch_webtransport do_hole_punch_webtransport"
+                    )
+                ))
+            .await?
+        );
+
+        Ok(NetworkResult::value(unique_flow))
+    }
+
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    async fn do_hole_punch_webtransport(
+        &self,
+        relay_di: DialInfo,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
+        target_nr: NodeRef,
+        data: Bytes,
+    ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        network_result_try!(
+            self.punch_and_wait_receipt(
+                relay_di,
+                hole_punch_di.clone(),
+                target_nr.clone(),
+                |receipt, peer_info| SignalInfo::HolePunch {
+                    receipt,
+                    peer_info: Arc::new(UnverifiedPeerInfo::from_verified(&peer_info)),
+                    opt_dial_info: Some(reverse_hole_punch_di),
+                },
+            )
+            .await?
+        );
+
+        let connect_timeout_ms = self.webtransport_hole_punch_connect_timeout_ms();
+        let net = self.platform_net();
+        let prot_conn = network_result_try!(
+            pin_future!(net.connect_via_shared_webtransport_endpoint(
+                hole_punch_di.clone(),
+                connect_timeout_ms
+            ))
+            .await?
+        );
+        let handle = network_result_try!(
+            self.connection_manager()
+                .register_outbound_protocol_connection(prot_conn, hole_punch_di)
+                .await?
+        );
+        let unique_flow = handle.unique_flow();
+        let mtu = self.hop_mtu(
+            &target_nr,
+            unique_flow.flow.transport_type(),
+            unique_flow.flow.remote_address().ip_addr(),
+        );
+        match handle.send_async(data, mtu).await {
+            ConnectionHandleSendResult::Sent => Ok(NetworkResult::value(unique_flow)),
+            ConnectionHandleSendResult::NotSent => Ok(NetworkResult::no_connection_other(format!(
+                "unable to send data over QUIC hole punch to {}",
+                target_nr
+            ))),
+        }
     }
 
     /// Send data using ContactMethod::Direct
@@ -1158,21 +1346,15 @@ impl NetworkManager {
         }
     }
 
-    /// Send a hole punch signal and do a negotiating ping and wait for the return receipt
-    /// Then send the data across the new connection
-    /// Only usable for PublicInternet routing domain
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    async fn do_hole_punch(
+    /// Punch toward `hole_punch_di`, signal the target through `relay_di`, and wait for its
+    /// receipt over the hole, returning the flow the receipt arrived on
+    async fn punch_and_wait_receipt(
         &self,
         relay_di: DialInfo,
         hole_punch_di: DialInfo,
-        reverse_hole_punch_di: DialInfo,
         target_nr: NodeRef,
-        data: Bytes,
-    ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        make_signal_info: impl FnOnce(Bytes, Arc<PeerInfo>) -> SignalInfo,
+    ) -> EyreResult<NetworkResult<Flow>> {
         // Detect if network is stopping so we can break out of this
         let Some(stop_token) = self.startup_context.startup_lock.stop_token() else {
             return Ok(NetworkResult::service_unavailable("network is stopping"));
@@ -1219,11 +1401,7 @@ impl NetworkManager {
         let rpc = self.rpc_processor();
         network_result_try!(pin_future!(rpc.rpc_call_signal(
             Destination::dial_info(relay_di, target_nr.clone()),
-            SignalInfo::HolePunch {
-                receipt,
-                peer_info: Arc::new(UnverifiedPeerInfo::from_verified(&published_peer_info)),
-                opt_dial_info: Some(reverse_hole_punch_di),
-            },
+            make_signal_info(receipt, published_peer_info),
         ))
         .await
         .wrap_err("failed to send signal")?);
@@ -1288,6 +1466,38 @@ impl NetworkManager {
             );
             return Ok(NetworkResult::timeout());
         }
+
+        Ok(NetworkResult::value(inbound_flow))
+    }
+
+    /// Send a hole punch signal and do a negotiating ping and wait for the return receipt
+    /// Then send the data across the new connection
+    /// Only usable for PublicInternet routing domain
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    async fn do_hole_punch(
+        &self,
+        relay_di: DialInfo,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
+        target_nr: NodeRef,
+        data: Bytes,
+    ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        let inbound_flow = network_result_try!(
+            self.punch_and_wait_receipt(
+                relay_di,
+                hole_punch_di,
+                target_nr.clone(),
+                |receipt, peer_info| SignalInfo::HolePunch {
+                    receipt,
+                    peer_info: Arc::new(UnverifiedPeerInfo::from_verified(&peer_info)),
+                    opt_dial_info: Some(reverse_hole_punch_di),
+                },
+            )
+            .await?
+        );
 
         // And now send over the punched hole
         let mtu = self.hop_mtu(

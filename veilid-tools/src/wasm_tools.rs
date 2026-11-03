@@ -111,6 +111,26 @@ pub fn is_browser_https() -> bool {
     res
 }
 
+/// Whether the JS environment is a secure context
+/// (`WindowOrWorkerGlobalScope.isSecureContext`): `https://` origins, `http://localhost`,
+/// and `file://`. Works in both Window and Worker scopes.
+pub fn is_secure_context() -> bool {
+    static CACHE: AtomicI8 = AtomicI8::new(-1);
+    let cache = CACHE.load(Ordering::Acquire);
+    if cache != -1 {
+        return cache != 0;
+    }
+
+    let res = Reflect::get(global().as_ref(), &"isSecureContext".into())
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    CACHE.store(res as i8, Ordering::Release);
+
+    res
+}
+
 static IPV6_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
 /// Whether IPv6 is usable in this wasm environment. Cached after the first call.

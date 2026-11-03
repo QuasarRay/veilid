@@ -14,10 +14,10 @@ mod platform_protocol_network_connection;
 
 cfg_if! {
     if #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))] {
-        mod native;
+        pub(in crate::network_manager) mod native;
     }
     else if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-        mod wasm;
+        pub(in crate::network_manager) mod wasm;
     }
     else {
         compile_error!("No network implementation for this platform!");
@@ -201,3 +201,10 @@ pub(crate) fn configured_address_type_set(config: &VeilidConfig) -> AddressTypeS
     }
     set
 }
+
+#[cfg(all(
+    any(test, feature = "test-util"),
+    not(all(target_arch = "wasm32", target_os = "unknown")),
+    feature = "enable-protocol-webtransport"
+))]
+pub(crate) use native::webtransport::connect;

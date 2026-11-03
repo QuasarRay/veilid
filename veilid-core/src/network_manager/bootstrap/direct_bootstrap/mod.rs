@@ -57,7 +57,7 @@ impl NetworkManager {
         ) {
             Ok(Some(unverified)) => unverified,
             Ok(None) => {
-                veilid_log!(self debug "Dropping bootstrap peer {} with no usable signature or routing domain", peer_info.node_ids());
+                veilid_log!(self debug "Dropping bootstrap peer {} with ignored node info or no usable signature or routing domain", peer_info.node_ids());
                 return None;
             }
             Err(e) => {

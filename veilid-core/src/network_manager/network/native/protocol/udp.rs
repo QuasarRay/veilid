@@ -50,6 +50,19 @@ impl HeldMessages {
     }
 }
 
+#[cfg(any(test, feature = "test-util", feature = "enable-protocol-webtransport"))]
+pub(in crate::network_manager) type DemuxedDatagram = (SocketAddr, Vec<u8>);
+
+/// Where a handler's inbound datagrams arrive from
+#[derive(Clone)]
+enum ReceiveSource {
+    /// Read directly off this handler's own socket
+    Socket,
+    /// Delivered by the shared-port demux over a channel
+    #[cfg(any(test, feature = "test-util", feature = "enable-protocol-webtransport"))]
+    SharedPortDemux(flume::Receiver<DemuxedDatagram>),
+}
+
 #[derive(Clone)]
 pub struct RawUdpProtocolHandler {
     /// Component registry for logging and access to other subsystems
@@ -57,7 +70,9 @@ pub struct RawUdpProtocolHandler {
     /// Low-TTL sends for `socket`, declared before it so its twin closes first
     ttl_sender: Arc<UdpTtlSender>,
     /// Async UDP socket this handler reads from and writes to
-    socket: Arc<UdpSocket>,
+    socket: Arc<UdpSocketIo>,
+    /// Where inbound datagrams arrive from: `socket`, or the shared-socket demultiplexer
+    receive_source: ReceiveSource,
     /// Reassembly buffer for fragmented UDP messages
     assembly_buffer: AssemblyBuffer,
     /// Received messages debug chaos holds back, shared by every recv-loop on `socket`
@@ -77,7 +92,31 @@ impl_veilid_component_accessors!(RawUdpProtocolHandler);
 impl RawUdpProtocolHandler {
     pub fn new(
         registry: VeilidComponentRegistry,
-        socket: Arc<UdpSocket>,
+        socket: Arc<UdpSocketIo>,
+        timings: &NativeNetworkTimings,
+    ) -> Self {
+        Self::new_inner(registry, socket, ReceiveSource::Socket, timings)
+    }
+
+    #[cfg(any(test, feature = "test-util", feature = "enable-protocol-webtransport"))]
+    pub fn new_demuxed(
+        registry: VeilidComponentRegistry,
+        socket: Arc<UdpSocketIo>,
+        inbound_rx: flume::Receiver<DemuxedDatagram>,
+        timings: &NativeNetworkTimings,
+    ) -> Self {
+        Self::new_inner(
+            registry,
+            socket,
+            ReceiveSource::SharedPortDemux(inbound_rx),
+            timings,
+        )
+    }
+
+    fn new_inner(
+        registry: VeilidComponentRegistry,
+        socket: Arc<UdpSocketIo>,
+        receive_source: ReceiveSource,
         timings: &NativeNetworkTimings,
     ) -> Self {
         let stop_source = StopSource::new();
@@ -87,6 +126,7 @@ impl RawUdpProtocolHandler {
             registry,
             ttl_sender: Arc::new(UdpTtlSender::new()),
             socket,
+            receive_source,
             assembly_buffer: AssemblyBuffer::new(),
             held: Arc::new(HeldMessages::default()),
             send_timeout_ms: timings.send_timeout_ms,
@@ -129,31 +169,58 @@ impl RawUdpProtocolHandler {
             }
 
             // Get a packet, or wake when a held message is due
-            let nres = match self.held.wait_ms() {
-                None => self.socket.recv_from(data).await,
-                Some(wait_ms) => match timeout(wait_ms, self.socket.recv_from(data)).await {
-                    Ok(res) => res,
-                    Err(_) => continue,
-                },
-            }
-            .into_network_result()?;
-            let failure = (!matches!(nres, NetworkResult::Value(_))).then(|| nres.to_string());
-            let (size, remote_addr) = network_result_value_or_log!(self nres => {
-                consecutive_errors += 1;
-                if consecutive_errors >= UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS {
-                    return Err(io::Error::other(format!(
-                        "udp recv failed {} times consecutively: {}",
-                        consecutive_errors,
-                        failure.unwrap_or_default()
-                    )));
+            let (frame, remote_addr): (Cow<'_, [u8]>, SocketAddr) = match &self.receive_source {
+                #[cfg(any(test, feature = "test-util", feature = "enable-protocol-webtransport"))]
+                ReceiveSource::SharedPortDemux(rx) => {
+                    let res = match self.held.wait_ms() {
+                        None => rx.recv_async().await,
+                        Some(wait_ms) => match timeout(wait_ms, rx.recv_async()).await {
+                            Ok(res) => res,
+                            Err(_) => continue,
+                        },
+                    };
+                    match res {
+                        Ok((addr, bytes)) => (Cow::Owned(bytes), addr),
+                        Err(_) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "demux channel closed",
+                            ))
+                        }
+                    }
                 }
-                // Yield unconditionally: a socket failing instantly would otherwise spin inside a
-                // single poll, which pins a core and leaves the stop token unobserved, so the task
-                // cannot be cancelled either
-                sleep(if consecutive_errors > 1 { self.recv_error_backoff_ms } else { 0 }).await;
-                continue;
-            });
-            consecutive_errors = 0;
+                ReceiveSource::Socket => {
+                    let nres = match self.held.wait_ms() {
+                        None => self.socket.recv_from(data).await,
+                        Some(wait_ms) => {
+                            match timeout(wait_ms, self.socket.recv_from(data)).await {
+                                Ok(res) => res,
+                                Err(_) => continue,
+                            }
+                        }
+                    }
+                    .into_network_result()?;
+                    let failure =
+                        (!matches!(nres, NetworkResult::Value(_))).then(|| nres.to_string());
+                    let (size, addr) = network_result_value_or_log!(self nres => {
+                        consecutive_errors += 1;
+                        if consecutive_errors >= UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS {
+                            return Err(io::Error::other(format!(
+                                "udp recv failed {} times consecutively: {}",
+                                consecutive_errors,
+                                failure.unwrap_or_default()
+                            )));
+                        }
+                        // Yield unconditionally: a socket failing instantly would otherwise spin inside a
+                        // single poll, which pins a core and leaves the stop token unobserved, so the task
+                        // cannot be cancelled either
+                        sleep(if consecutive_errors > 1 { self.recv_error_backoff_ms } else { 0 }).await;
+                        continue;
+                    });
+                    consecutive_errors = 0;
+                    (Cow::Borrowed(&data[0..size]), addr)
+                }
+            };
 
             // Check to see if it is punished
             if self
@@ -168,22 +235,19 @@ impl RawUdpProtocolHandler {
             let hold_ms = match self
                 .network_manager()
                 .chaos()
-                .recv_verdict(remote_addr.ip(), size)
+                .recv_verdict(remote_addr.ip(), frame.len())
             {
                 ChaosVerdict::Pass => None,
                 ChaosVerdict::Hold(wait_ms) => Some(wait_ms),
                 ChaosVerdict::Drop | ChaosVerdict::Oversize => continue,
             };
 
-            let opt_datagram_len = AssemblyBuffer::is_whole_message_frame(&data[0..size])
-                .then(|| u16::try_from(size).ok())
+            let opt_datagram_len = AssemblyBuffer::is_whole_message_frame(&frame)
+                .then(|| u16::try_from(frame.len()).ok())
                 .flatten();
 
             // Insert into assembly buffer
-            let message = match self
-                .assembly_buffer
-                .insert_frame(&data[0..size], remote_addr)
-            {
+            let message = match self.assembly_buffer.insert_frame(&frame, remote_addr) {
                 NetworkResult::Value(Some(v)) => v,
                 NetworkResult::Value(None) => {
                     continue;
@@ -192,7 +256,7 @@ impl RawUdpProtocolHandler {
                     veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result",
                         "UDP::recv_message insert_frame failed: {:?} <= size={} remote_addr={}",
                         nres,
-                        size,
+                        frame.len(),
                         remote_addr
                     );
                     continue;
@@ -412,7 +476,7 @@ impl RawUdpProtocolHandler {
     ) -> io::Result<RawUdpProtocolHandler> {
         // get local wildcard address for bind
         let local_socket_addr = compatible_unspecified_socket_addr(socket_addr);
-        let socket = bind_async_udp_socket(local_socket_addr)?
+        let socket = bind_udp_socket_io(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
         Ok(RawUdpProtocolHandler::new(
             registry,
@@ -431,7 +495,7 @@ impl RawUdpProtocolHandler {
         local_socket_addr: SocketAddr,
         timings: &NativeNetworkTimings,
     ) -> io::Result<RawUdpProtocolHandler> {
-        let socket = bind_async_udp_socket(local_socket_addr)?
+        let socket = bind_udp_socket_io(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
         Ok(RawUdpProtocolHandler::new(
             registry,

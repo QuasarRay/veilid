@@ -124,6 +124,7 @@ impl NetworkManager {
                     bsrec.dial_info_details().to_vec(), // Dial info is as specified in the bootstrap list
                     vec![],                             // No relays for bootstrap nodes
                     TransportMtus::default(), // Their mtus arrive with their signed peer info
+                    NodeInfo::min_dial_info_expiration(bsrec.dial_info_details()),
                 );
 
                 match PeerInfo::try_new_from_unsigned(

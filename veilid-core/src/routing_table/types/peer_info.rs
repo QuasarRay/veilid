@@ -170,7 +170,9 @@ impl PeerInfo {
         node_info_message: Bytes,
         signatures: SignatureGroup,
     ) -> VeilidAPIResult<Self> {
-        let node_info = NodeInfo::try_new_from_wire(&node_info_message)?;
+        let Some(node_info) = NodeInfo::try_new_from_wire(&node_info_message)? else {
+            apibail_generic!("stored node info is ignored");
+        };
         Ok(Self {
             routing_domain,
             node_ids,
@@ -194,6 +196,10 @@ impl PeerInfo {
     }
     pub fn node_info_message(&self) -> &Bytes {
         &self.node_info_message
+    }
+
+    pub fn is_expired(&self, cur_ts: Timestamp) -> bool {
+        self.node_info.is_expired(cur_ts)
     }
 
     #[expect(dead_code)]
@@ -238,15 +244,17 @@ impl fmt::Display for UnverifiedPeerInfo {
 impl UnverifiedPeerInfo {
     /// Parse a peer info from the wire without verifying its signatures.
     ///
-    /// Returns `Ok(None)` when no signature matches a supported crypto kind or the node
-    /// info is not acceptable from `origin_routing_domain`.
+    /// Returns `Ok(None)` when the node info is one this node ignores, no signature matches a
+    /// supported crypto kind, or the node info is not acceptable from `origin_routing_domain`.
     pub fn try_new_from_wire(
         routing_table: &RoutingTable,
         origin_routing_domain: RoutingDomain,
         node_info_message: &[u8],
         signatures: SignatureGroup,
     ) -> VeilidAPIResult<Option<Self>> {
-        let node_info = NodeInfo::try_new_from_wire(node_info_message)?;
+        let Some(node_info) = NodeInfo::try_new_from_wire(node_info_message)? else {
+            return Ok(None);
+        };
 
         // Get signing public keys from node info
         let public_keys = node_info.public_keys();

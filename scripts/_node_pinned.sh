@@ -9,7 +9,10 @@ fi
 NODE_MAJOR="$(. "$versions_env" && echo "$NODE_MAJOR")"
 node_major() { node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/'; }
 if [ "$(node_major)" != "$NODE_MAJOR" ]; then
-    pinned_bin="$( (ls -d "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$NODE_MAJOR".*/bin /opt/homebrew/opt/node@"$NODE_MAJOR"/bin /usr/local/opt/node@"$NODE_MAJOR"/bin 2>/dev/null || true) | sort -V | tail -1)"
+    # The newest install of the major wins: the wdio packages set engine floors within a major.
+    pinned_bin="$(for bin in "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$NODE_MAJOR".*/bin /opt/homebrew/opt/node@"$NODE_MAJOR"/bin /usr/local/opt/node@"$NODE_MAJOR"/bin; do
+        if [ -x "$bin/node" ]; then echo "$("$bin/node" --version) $bin"; fi
+    done | sort -V | tail -1 | cut -d' ' -f2-)"
     if [ -n "$pinned_bin" ]; then
         export PATH="$pinned_bin:$PATH"
     fi

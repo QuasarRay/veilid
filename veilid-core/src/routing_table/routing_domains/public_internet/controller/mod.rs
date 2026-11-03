@@ -358,6 +358,11 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
                 return false;
             };
 
+            if let Some(reason) = opt_unpublishable_peer_info_reason(&new_peer_info) {
+                veilid_log!(self error "[PublicInternet] Not publishing peer info with invalid dial info: {}", reason);
+                return false;
+            }
+
             // Don't publish if the peer info hasnt changed from our previous publication
             let mut ppi_lock = self.published_peer_info.lock();
             let opt_old_peer_info = (*ppi_lock).clone();

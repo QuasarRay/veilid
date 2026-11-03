@@ -41,6 +41,23 @@ fn confirm_public_internet(routing_table: &RoutingTable) {
             DialInfo::try_wss(socket_address, "wss://example.com:5150/ws".to_string())
                 .expect("wss"),
         );
+        #[cfg(feature = "enable-protocol-webtransport")]
+        {
+            let url = format!("https://{socket_addr}/wt");
+            dial_infos.push(
+                DialInfo::try_webtransport_stream(
+                    socket_address,
+                    url.clone(),
+                    vec![[1u8; 32]],
+                    None,
+                )
+                .expect("wts"),
+            );
+            dial_infos.push(
+                DialInfo::try_webtransport_datagram(socket_address, url, vec![[1u8; 32]], None)
+                    .expect("wtd"),
+            );
+        }
         for dial_info in dial_infos.drain(..) {
             editor.add_dial_info_detail(DialInfoDetail {
                 class: DialInfoClass::Direct,

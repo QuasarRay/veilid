@@ -37,8 +37,8 @@ pub enum ConnectionRefKind {
     RemoveRef,
 }
 
-/// Connection-table remote index key: low-level protocol type + socket address
-pub(super) type LowLevelProtocolAddress = (LowLevelProtocolType, SocketAddress);
+pub(super) type ConnectionTableRemoteIndexKey =
+    (LowLevelProtocolType, SequenceOrdering, SocketAddress);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -47,7 +47,7 @@ struct ConnectionTableInner {
     // All connections in one LRU so eviction is global, not per-protocol
     conn_by_id: LruCache<NetworkConnectionId, NetworkConnection>,
     id_by_flow: BTreeMap<Flow, NetworkConnectionId>,
-    ids_by_remote: BTreeMap<LowLevelProtocolAddress, Vec<NetworkConnectionId>>,
+    ids_by_remote: BTreeMap<ConnectionTableRemoteIndexKey, Vec<NetworkConnectionId>>,
     // Priority flows, kept from LRU termination; capped at a percentage of max_connections
     priority_flows: LruCache<Flow, ()>,
     // Cumulative connection-table churn counters
@@ -188,6 +188,7 @@ impl ConnectionTable {
         let flow = network_connection.flow();
         let remote = (
             flow.protocol_type().low_level_protocol_type(),
+            flow.protocol_type().sequence_ordering(),
             *flow.remote_address(),
         );
 
@@ -342,7 +343,7 @@ impl ConnectionTable {
     pub fn get_best_connection_by_remote(
         &self,
         best_port: Option<u16>,
-        remote: LowLevelProtocolAddress,
+        remote: ConnectionTableRemoteIndexKey,
     ) -> Option<ConnectionHandle> {
         let inner = &mut *self.inner.lock();
 
@@ -386,7 +387,7 @@ impl ConnectionTable {
     #[expect(dead_code)]
     pub fn get_connection_ids_by_remote(
         &self,
-        remote: LowLevelProtocolAddress,
+        remote: ConnectionTableRemoteIndexKey,
     ) -> Vec<NetworkConnectionId> {
         let inner = self.inner.lock();
         inner
@@ -483,6 +484,7 @@ impl ConnectionTable {
         // ids_by_remote
         let remote = (
             flow.protocol_type().low_level_protocol_type(),
+            flow.protocol_type().sequence_ordering(),
             *flow.remote_address(),
         );
         let ids = inner.ids_by_remote.get_mut(&remote).unwrap_or_log();

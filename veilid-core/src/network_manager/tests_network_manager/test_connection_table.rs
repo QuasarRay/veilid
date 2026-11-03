@@ -140,6 +140,7 @@ pub async fn test_dead_connection_skip() {
     let f2 = Flow::new(remote_pa, local2);
     let remote = (
         ProtocolType::TCP.low_level_protocol_type(),
+        ProtocolType::TCP.sequence_ordering(),
         *remote_pa.socket_address(),
     );
 
@@ -276,6 +277,61 @@ pub async fn test_eviction() {
             "priority flow still present"
         );
     }
+
+    mock_registry::terminate(registry).await;
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub async fn test_webtransport_stream_and_datagram_coexist() {
+    let registry = mock_registry::init("conn_wt_coexist").await;
+
+    let table = ConnectionTable::new(registry.clone());
+
+    let remote = SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 2, 0, 1)), 5150);
+    let local = SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 2, 0, 2)), 5150);
+    let wts_flow = Flow::new(PeerAddress::new(remote, ProtocolType::WTS), local);
+    let wtd_flow = Flow::new(PeerAddress::new(remote, ProtocolType::WTD), local);
+
+    let wts = NetworkConnection::dummy(registry.clone(), 1.into(), wts_flow);
+    let wts_handle = wts.get_handle();
+    let wtd = NetworkConnection::dummy(registry.clone(), 2.into(), wtd_flow);
+    let wtd_handle = wtd.get_handle();
+
+    // Both share a low-level protocol and a remote address, so only the SequenceOrdering
+    // element of the table key keeps them apart.
+    table.add_connection(wts).unwrap();
+    table.add_connection(wtd).unwrap();
+    assert_eq!(table.connection_count(), 2);
+
+    let wts_remote = (
+        ProtocolType::WTS.low_level_protocol_type(),
+        ProtocolType::WTS.sequence_ordering(),
+        remote,
+    );
+    let wtd_remote = (
+        ProtocolType::WTD.low_level_protocol_type(),
+        ProtocolType::WTD.sequence_ordering(),
+        remote,
+    );
+    assert_ne!(wts_remote, wtd_remote);
+
+    assert_eq!(
+        table.get_best_connection_by_remote(None, wts_remote),
+        Some(wts_handle.clone())
+    );
+    assert_eq!(
+        table.get_best_connection_by_remote(None, wtd_remote),
+        Some(wtd_handle.clone())
+    );
+    assert_eq!(table.peek_connection_by_flow(wts_flow), Some(wts_handle));
+    assert_eq!(table.peek_connection_by_flow(wtd_flow), Some(wtd_handle));
+
+    // Removing one leaves the other reachable under its own key
+    table.remove_connection_by_id(1.into()).unwrap().close();
+    assert_eq!(table.get_best_connection_by_remote(None, wts_remote), None);
+    assert!(table
+        .get_best_connection_by_remote(None, wtd_remote)
+        .is_some());
 
     mock_registry::terminate(registry).await;
 }

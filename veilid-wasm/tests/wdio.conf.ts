@@ -1,5 +1,31 @@
-import type { Options } from '@wdio/types';
-export const config: Options.Testrunner = {
+import { readFileSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseTestEnvironment, TEST_ENVIRONMENT_VAR } from './src/utils/test-environment.js';
+
+function publishTestEnvironment() {
+  const named = process.env.TEST_ENVIRONMENT;
+  if (!named) {
+    return;
+  }
+  const testsDir = fileURLToPath(new URL('.', import.meta.url));
+  const path = isAbsolute(named) ? named : resolve(testsDir, named);
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (e) {
+    throw new Error(
+      `TEST_ENVIRONMENT names ${path}, which cannot be read: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+  process.env[TEST_ENVIRONMENT_VAR] = JSON.stringify(parseTestEnvironment(text, path));
+}
+
+publishTestEnvironment();
+
+export const config: WebdriverIO.Config = {
   //
   // ====================
   // Runner Configuration
@@ -19,14 +45,6 @@ export const config: Options.Testrunner = {
       },
     },
   ],
-  autoCompileOpts: {
-    autoCompile: true,
-    tsNodeOpts: {
-      project: './tsconfig.json',
-      typeCheck: true,
-    },
-  },
-
   //
   // ==================
   // Specify Test Files
@@ -79,7 +97,7 @@ export const config: Options.Testrunner = {
       ? [
           {
             browserName: 'safari',
-          } as WebdriverIO.Capabilities,
+          },
         ]
       : process.env.WDIO_BROWSER === 'firefox'
         ? [
@@ -92,7 +110,7 @@ export const config: Options.Testrunner = {
               ...(process.env.GECKODRIVER_PATH
                 ? { 'wdio:geckodriverOptions': { binary: process.env.GECKODRIVER_PATH } }
                 : {}),
-            } as WebdriverIO.Capabilities,
+            },
           ]
         : [
             {

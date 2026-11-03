@@ -492,6 +492,7 @@ impl RoutingDomainDetailCommon {
             self.dial_info_details.clone(),
             relay_info_list,
             self.receive_mtus.unwrap_or_default(),
+            NodeInfo::min_dial_info_expiration(&self.dial_info_details),
         );
 
         PeerInfo::try_new_from_node_info(

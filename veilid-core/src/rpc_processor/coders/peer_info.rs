@@ -30,7 +30,7 @@ pub fn decode_peer_info(
     .map_err(RPCError::map_protocol("can't create peerinfo from wire"))?;
     let Some(peer_info) = opt_peer_info else {
         return Err(RPCError::ignore(
-            "no valid crypto kinds and routing domains for peer info",
+            "ignored node info or no valid crypto kinds and routing domains for peer info",
         ));
     };
 

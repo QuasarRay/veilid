@@ -1,3 +1,20 @@
+**UNRELEASED**
+
+- veilid-core:
+  - WebTransport (HTTP/3 over QUIC) is a transport behind the `enable-protocol-webtransport` cargo feature, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching when it shares the node's UDP socket.
+  - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
+  - Published node info carries an expiration, the earliest of its dial infos', and peer info past its expiration is treated as dead.
+  - `TimestampDuration::new_hours()` and `new_days()`.
+- veilid-flutter:
+  - `VeilidConfigWebTransport` under the protocol config.
+- veilid-server:
+  - WebTransport settings under `core.network.protocol.webtransport`.
+- veilid-tools:
+  - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
+- veilid-wasm:
+  - Browser WebTransport client, outbound only.
+  - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
+
 **Changed in Veilid 0.5.8**
 
 - veilid-core-optimized:

@@ -120,6 +120,13 @@ impl BucketEntrySnapshot {
         self.routing_domain(routing_domain).peer_info.clone()
     }
 
+    pub fn has_expired_peer_info(&self, routing_domain: RoutingDomain, cur_ts: Timestamp) -> bool {
+        self.routing_domain(routing_domain)
+            .peer_info
+            .as_ref()
+            .is_some_and(|peer_info| peer_info.is_expired(cur_ts))
+    }
+
     pub fn node_status(&self, routing_domain: RoutingDomain) -> Option<NodeStatus> {
         let entry = self.routing_domain(routing_domain);
         entry.peer_info.as_ref()?;

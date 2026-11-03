@@ -13,9 +13,16 @@ pub(super) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
 pub(super) const MIN_EXTERNAL_INFO_VALIDATIONS: usize = 2;
 
 /// Entry filters a dial info validator must pass, independent of protocol and address type
-pub(super) fn make_validator_entry_filters(
+pub(in crate::network_manager) fn make_validator_entry_filters(
     routing_domain: RoutingDomain,
 ) -> Vec<RoutingTableEntryFilter<'static>> {
+    // Expired peer info names dial info the node may no longer answer on
+    let disallow_expired_filter = Box::new(
+        move |opt_snap: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
+            let snap = opt_snap.as_ref().unwrap_or_log();
+            !snap.has_expired_peer_info(routing_domain, cur_ts)
+        },
+    ) as RoutingTableEntryFilter;
     // Relayed nodes can't report an accurate external address
     let disallow_relays_filter = Box::new(
         move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
@@ -39,7 +46,11 @@ pub(super) fn make_validator_entry_filters(
                 .unwrap_or(false)
         },
     ) as RoutingTableEntryFilter;
-    vec![disallow_relays_filter, will_validate_dial_info_filter]
+    vec![
+        disallow_expired_filter,
+        disallow_relays_filter,
+        will_validate_dial_info_filter,
+    ]
 }
 
 // Detection result of dial info detection futures

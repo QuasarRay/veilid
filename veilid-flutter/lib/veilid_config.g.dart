@@ -340,12 +340,54 @@ Map<String, dynamic> _$VeilidConfigWSToJson(_VeilidConfigWS instance) =>
       'url': instance.url,
     };
 
+_VeilidConfigWSS _$VeilidConfigWSSFromJson(Map<String, dynamic> json) =>
+    _VeilidConfigWSS(
+      connect: json['connect'] as bool,
+      listen: json['listen'] as bool,
+      listenAddress: json['listenAddress'] as String,
+      path: json['path'] as String,
+      url: json['url'] as String?,
+    );
+
+Map<String, dynamic> _$VeilidConfigWSSToJson(_VeilidConfigWSS instance) =>
+    <String, dynamic>{
+      'connect': instance.connect,
+      'listen': instance.listen,
+      'listenAddress': instance.listenAddress,
+      'path': instance.path,
+      'url': instance.url,
+    };
+
+_VeilidConfigWebTransport _$VeilidConfigWebTransportFromJson(
+  Map<String, dynamic> json,
+) => _VeilidConfigWebTransport(
+  connect: json['connect'] as bool,
+  listen: json['listen'] as bool,
+  listenAddress: json['listenAddress'] as String,
+  path: json['path'] as String,
+  url: json['url'] as String?,
+);
+
+Map<String, dynamic> _$VeilidConfigWebTransportToJson(
+  _VeilidConfigWebTransport instance,
+) => <String, dynamic>{
+  'connect': instance.connect,
+  'listen': instance.listen,
+  'listenAddress': instance.listenAddress,
+  'path': instance.path,
+  'url': instance.url,
+};
+
 _VeilidConfigProtocol _$VeilidConfigProtocolFromJson(
   Map<String, dynamic> json,
 ) => _VeilidConfigProtocol(
   udp: VeilidConfigUDP.fromJson(json['udp']),
   tcp: VeilidConfigTCP.fromJson(json['tcp']),
   ws: VeilidConfigWS.fromJson(json['ws']),
+  wss: json['wss'] == null ? null : VeilidConfigWSS.fromJson(json['wss']),
+  webtransport: json['webtransport'] == null
+      ? null
+      : VeilidConfigWebTransport.fromJson(json['webtransport']),
 );
 
 Map<String, dynamic> _$VeilidConfigProtocolToJson(
@@ -354,6 +396,8 @@ Map<String, dynamic> _$VeilidConfigProtocolToJson(
   'udp': instance.udp.toJson(),
   'tcp': instance.tcp.toJson(),
   'ws': instance.ws.toJson(),
+  'wss': ?instance.wss?.toJson(),
+  'webtransport': ?instance.webtransport?.toJson(),
 };
 
 _VeilidConfigPrivacy _$VeilidConfigPrivacyFromJson(Map<String, dynamic> json) =>

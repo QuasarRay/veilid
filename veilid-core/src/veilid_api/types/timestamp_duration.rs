@@ -31,6 +31,14 @@ impl TimestampDuration {
     pub const fn new_ms(ms: u64) -> Self {
         TimestampDuration::new(ms * 1_000u64)
     }
+    /// Make a duration from a number of hours.
+    pub const fn new_hours(hours: u32) -> Self {
+        TimestampDuration::new(hours as u64 * 60u64 * 60u64 * 1_000_000u64)
+    }
+    /// Make a duration from a number of days.
+    pub const fn new_days(days: u32) -> Self {
+        TimestampDuration::new(days as u64 * 24u64 * 60u64 * 60u64 * 1_000_000u64)
+    }
 
     /// Returns true if the duration is zero.
     #[must_use]

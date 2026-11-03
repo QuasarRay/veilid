@@ -5,6 +5,7 @@
 #   ./run_integration_tests.sh                 # mock, in-window test UI
 #   ./run_integration_tests.sh --headless      # mock, console only (CI)
 #   ./run_integration_tests.sh --live          # against the real network
+#   ./run_integration_tests.sh --live --protocols=wss   # over WSS only
 #
 # Runs against veilid-core's in-process mock unless --live is given; see
 # ../scripts/_integration_test_common.sh. Switching between the two rebuilds the
@@ -39,6 +40,7 @@ esac
 parse_integration_test_flags "$@"
 set -- ${INTEGRATION_TEST_ARGS[@]+"${INTEGRATION_TEST_ARGS[@]}"}
 select_veilid_build "$LIVE"
+add_veilid_protocol_features "$LIVE"
 set_integration_test_device_args "$HEADLESS" "$@" || exit 1
 
 # Default to the #common=debug log tag group unless the caller overrides LOG_DIRECTIVES
@@ -51,6 +53,10 @@ esac
 if [ "$LIVE" != true ]; then
     set -- --dart-define=VEILID_MOCK=true "$@"
 fi
+
+# Narrows the node to the protocols --protocols named, when it named any
+set_integration_test_protocol_defines
+set -- ${INTEGRATION_TEST_PROTOCOL_DEFINES[@]+"${INTEGRATION_TEST_PROTOCOL_DEFINES[@]}"} "$@"
 
 pushd "$SCRIPTDIR/example" >/dev/null || exit 1
 flutter test -r github \

@@ -2,6 +2,23 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
+pub fn opt_unpublishable_peer_info_reason(peer_info: &PeerInfo) -> Option<String> {
+    peer_info
+        .node_info()
+        .dial_info_detail_list()
+        .iter()
+        .find_map(|did| {
+            did.dial_info.validate().err().map(|e| {
+                format!(
+                    "{} dial info at {}: {}",
+                    did.dial_info.protocol_type(),
+                    did.dial_info.socket_address(),
+                    e
+                )
+            })
+        })
+}
+
 pub trait RoutingDomainController:
     component::VeilidComponentRegistryAccessor + core::any::Any + core::fmt::Debug + Send + Sync
 {
@@ -135,7 +152,7 @@ pub trait RoutingDomainController:
 
     /// Gets the dial info details, in preference order, to attempt a connection between two nodes
     /// The best available ordering mode is selected from the sequencing constraint,
-    /// then the dial info filter is applied, and self-dialing is filtered out.
+    /// then the dial info filter is applied, and self-dialing and expired dial info are filtered out.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
     fn get_dial_info_details_between_nodes(
         &self,
@@ -143,6 +160,7 @@ pub trait RoutingDomainController:
         to_node: &dyn HasDialInfoDetailList,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
+        cur_ts: Timestamp,
     ) -> Vec<DialInfoDetail> {
         // Consider outbound capabilities
         let (ordering, outbound_dial_info_filter) = DialInfoFilter::all()
@@ -166,11 +184,10 @@ pub trait RoutingDomainController:
             .map(|did| did.dial_info.socket_address())
             .collect::<BTreeSet<_>>();
 
-        // Get all dial info we could possibly connect to for node B with the selected sequencing
-        // and ensure we don't direct-dial one of our own addresses (would loop back)
         let filter = Box::new(|did: &DialInfoDetail| {
             did.matches_filter(&outbound_dial_info_filter)
                 && !node_a_socket_addresses.contains(&did.dial_info.socket_address())
+                && did.dial_info.expiration().is_none_or(|e| e >= cur_ts)
         });
         let mut all_reachable_dial_info =
             to_node.filtered_dial_info_details(ordering_sort.as_deref(), &filter);

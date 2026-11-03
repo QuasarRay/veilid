@@ -3,15 +3,19 @@ use super::*;
 /// Network platform instance handle
 pub type Network = Arc<dyn PlatformNetwork>;
 
-/// Create a new network platform instance
-pub fn new_platform_network(registry: VeilidComponentRegistry) -> Network {
-    cfg_if! {
-        if #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))] {
-            Arc::new(native::NativeNetwork::new(registry))
-        } else if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-            Arc::new(wasm::WasmNetwork::new(registry))
-        }
+cfg_if! {
+    if #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))] {
+        pub(in crate::network_manager) type PlatformNetworkImpl = native::NativeNetwork;
+    } else if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+        pub(in crate::network_manager) type PlatformNetworkImpl = wasm::WasmNetwork;
     }
+}
+
+/// Create a new network platform instance
+pub(in crate::network_manager) fn new_platform_network(
+    registry: VeilidComponentRegistry,
+) -> Arc<PlatformNetworkImpl> {
+    Arc::new(PlatformNetworkImpl::new(registry))
 }
 
 /// Network base implementation trait

@@ -300,35 +300,66 @@ sealed class VeilidConfigWS with _$VeilidConfigWS {
 }
 
 ////////////
-// @Deprecated('WSS is disabled by default in veilid-flutter')
-// @freezed
-// sealed class VeilidConfigWSS with _$VeilidConfigWSS {
-//   @Deprecated('WSS is disabled by default in veilid-flutter')
-//   const factory VeilidConfigWSS({
-//     required bool connect,
-//     required bool listen,
-//     required int maxConnections,
-//     required String listenAddress,
-//     required String path,
-//     String? url,
-//   }) = _VeilidConfigWSS;
+/// Enable and configure the secure WebSocket protocol.
+@freezed
+sealed class VeilidConfigWSS with _$VeilidConfigWSS {
+  const factory VeilidConfigWSS({
+    required bool connect,
+    required bool listen,
+    required String listenAddress,
+    required String path,
+    String? url,
+  }) = _VeilidConfigWSS;
 
-//   @Deprecated('WSS is disabled by default in veilid-flutter')
-//   factory VeilidConfigWSS.fromJson(dynamic json) =>
-//       _$VeilidConfigWSSFromJson(json as Map<String, dynamic>);
-// }
+  factory VeilidConfigWSS.fromJson(dynamic json) =>
+      _$VeilidConfigWSSFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Enable and configure the WebTransport protocol (HTTP/3 over QUIC).
+///
+/// The listener generates and rotates its own certificate and advertises it by
+/// hash, so a self-signed node needs no CA certificate or hostname.
+@freezed
+sealed class VeilidConfigWebTransport with _$VeilidConfigWebTransport {
+  const factory VeilidConfigWebTransport({
+    /// Allow outbound WebTransport connections.
+    required bool connect,
+
+    /// Accept inbound WebTransport connections.
+    required bool listen,
+
+    /// Local address to bind, as `ip:port`, which shares the node's UDP socket
+    /// when it resolves to the same bind target as udp.listenAddress.
+    required String listenAddress,
+
+    /// URL path segment served by the WebTransport listener.
+    required String path,
+
+    /// Externally-reachable `https://host:port/` URL to advertise, which
+    /// selects CA-signed mode.
+    String? url,
+  }) = _VeilidConfigWebTransport;
+
+  factory VeilidConfigWebTransport.fromJson(dynamic json) =>
+      _$VeilidConfigWebTransportFromJson(json as Map<String, dynamic>);
+}
 
 ////////////
 
-/// Per-protocol (UDP/TCP/WebSocket) network configuration. All protocols are
-/// available by default; the node selects which to use per peer.
+/// Per-protocol (UDP/TCP/WebSocket/secure WebSocket/WebTransport) network
+/// configuration. All protocols are available by default; the node selects
+/// which to use per peer. The wss and webtransport sections are present only
+/// when the native library is built with the matching feature, and are left
+/// out of the JSON when unset.
 @freezed
 sealed class VeilidConfigProtocol with _$VeilidConfigProtocol {
   const factory VeilidConfigProtocol({
     required VeilidConfigUDP udp,
     required VeilidConfigTCP tcp,
     required VeilidConfigWS ws,
-    // required VeilidConfigWSS wss,
+    @JsonKey(includeIfNull: false) VeilidConfigWSS? wss,
+    @JsonKey(includeIfNull: false) VeilidConfigWebTransport? webtransport,
   }) = _VeilidConfigProtocol;
 
   factory VeilidConfigProtocol.fromJson(dynamic json) =>

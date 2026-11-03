@@ -76,10 +76,17 @@ lazy_static! {
 /// Given a 'listen' specifier string from the config:
 /// a port, a set of ip addresses to bind to, and a
 /// bool specifying if multiple ports should be tried
-pub(super) struct NetworkBindSet {
+pub(in crate::network_manager) struct NetworkBindSet {
     pub port: u16,
     pub addrs: Vec<IpAddr>,
     pub search: bool,
+}
+
+/// What one `search_and_bind` attempt settled: this address is done, or the search moves on
+/// to the next port.
+pub(super) enum TryBindOutcome {
+    Bound,
+    TryNextPort,
 }
 
 impl FromStr for NetworkBindSet {
@@ -142,7 +149,7 @@ impl NativeNetwork {
     /// address types enabled in config. Default/port-only/hostname addresses keep
     /// only their enabled families; an explicit single-family address of a disabled
     /// type filters to nothing and is reported as a conflict.
-    fn make_bind_set(&self, listen_address: &str) -> EyreResult<NetworkBindSet> {
+    pub(super) fn make_bind_set(&self, listen_address: &str) -> EyreResult<NetworkBindSet> {
         let mut bind_set = NetworkBindSet::from_str(listen_address)?;
         let allowed = configured_address_type_set(&self.config());
 
@@ -161,6 +168,37 @@ impl NativeNetwork {
             );
         }
         Ok(bind_set)
+    }
+
+    pub(super) fn search_and_bind(
+        &self,
+        bind_set: &NetworkBindSet,
+        what: &str,
+        mut try_bind: impl FnMut(SocketAddr) -> EyreResult<TryBindOutcome>,
+    ) -> EyreResult<bool> {
+        for ip_addr in bind_set.addrs.iter().copied() {
+            let mut port = bind_set.port;
+            loop {
+                let addr = SocketAddr::new(ip_addr, port);
+                match try_bind(addr)? {
+                    TryBindOutcome::Bound => break,
+                    TryBindOutcome::TryNextPort => {}
+                }
+                if !bind_set.search {
+                    veilid_log!(self debug "unable to bind to {} {}", what, addr);
+                    return Ok(false);
+                }
+                if port == 65535u16 {
+                    port = 1024;
+                } else {
+                    port += 1;
+                }
+                if port == bind_set.port {
+                    bail!("unable to find a free port for {} {}", what, ip_addr);
+                }
+            }
+        }
+        Ok(true)
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -184,12 +222,58 @@ impl NativeNetwork {
             );
         }
 
-        if !self.create_inbound_udp_protocol_handlers(bind_set)? {
-            return Ok(StartupDisposition::BindRetry);
+        #[cfg(feature = "enable-protocol-webtransport")]
+        let plan = self.webtransport_bind_plan(&bind_set)?;
+        #[cfg(feature = "enable-protocol-webtransport")]
+        {
+            self.inner.lock().webtransport.shared_bind_mode =
+                matches!(plan, WebTransportBindPlan::Shared(_));
+        }
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        let (inbound_bound, pending_dedicated) = match plan {
+            WebTransportBindPlan::Off => {
+                (self.create_inbound_udp_protocol_handlers(bind_set)?, None)
+            }
+            WebTransportBindPlan::Shared(server_configs) => {
+                let bound =
+                    self.create_inbound_webtransport_udp_handlers(bind_set, server_configs)?;
+                self.seed_webtransport_tls_mtimes();
+                (bound, None)
+            }
+            WebTransportBindPlan::Dedicated(wt_bind_set, server_configs) => {
+                let bound = self.create_inbound_udp_protocol_handlers(bind_set)?;
+                (bound, Some((wt_bind_set, server_configs)))
+            }
         };
+        #[cfg(not(feature = "enable-protocol-webtransport"))]
+        let inbound_bound = self.create_inbound_udp_protocol_handlers(bind_set)?;
+
+        if !inbound_bound {
+            return Ok(StartupDisposition::BindRetry);
+        }
 
         if !self.create_outbound_udp_protocol_handlers()? {
             return Ok(StartupDisposition::BindRetry);
+        }
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if let Some((wt_bind_set, server_configs)) = pending_dedicated {
+            let bound_raw_udp_addrs: BTreeSet<SocketAddr> = self
+                .inner
+                .lock()
+                .udp_protocol_handlers
+                .keys()
+                .copied()
+                .collect();
+            if !self.create_inbound_webtransport_dedicated_handlers(
+                wt_bind_set,
+                server_configs,
+                &bound_raw_udp_addrs,
+            )? {
+                return Ok(StartupDisposition::BindRetry);
+            }
+            self.seed_webtransport_tls_mtimes();
         }
 
         // Now create tasks for udp listeners

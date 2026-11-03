@@ -1,6 +1,8 @@
 mod confirm_dial_info;
 mod network_interfaces_task;
 mod upnp_task;
+#[cfg(feature = "enable-protocol-webtransport")]
+mod webtransport_cert_task;
 
 use super::*;
 
@@ -51,6 +53,20 @@ impl NativeNetwork {
 
         // Set upnp tick task
         impl_setup_task_async_clone!(self, upnp_task, upnp_task_routine);
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        {
+            let this = self.clone();
+            self.webtransport_tasks
+                .cert_task
+                .set_routine(move |s, l, t| {
+                    let this = this.clone();
+                    Box::pin(async move {
+                        this.webtransport_cert_task_routine(s, Timestamp::new(l), Timestamp::new(t))
+                            .await
+                    })
+                });
+        }
     }
 
     #[cfg_attr(
@@ -92,10 +108,22 @@ impl NativeNetwork {
             self.upnp_task.tick().await?;
         }
 
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if self.config().network.protocol.webtransport.listen {
+            self.webtransport_tasks.cert_task.tick().await?;
+        }
+
         Ok(())
     }
 
     pub async fn cancel_tasks(&self) {
+        #[cfg(feature = "enable-protocol-webtransport")]
+        {
+            veilid_log!(self debug "stopping webtransport cert task");
+            if let Err(e) = self.webtransport_tasks.cert_task.stop().await {
+                veilid_log!(self warn "webtransport_cert_task not stopped: {}", e);
+            }
+        }
         veilid_log!(self debug "stopping mtu detection task");
         if let Err(e) = self.mtu_detection_task.stop().await {
             veilid_log!(self warn "mtu_detection_task not stopped: {}", e);

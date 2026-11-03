@@ -65,6 +65,9 @@ impl ConnectionHandle {
         if self.dead.load(Ordering::Relaxed) {
             return ConnectionHandleSendResult::NotSent;
         }
+        if message.len() > MAX_MESSAGE_SIZE {
+            return ConnectionHandleSendResult::NotSent;
+        }
         match self
             .channel
             .send_async((Span::current().id(), message, mtu))

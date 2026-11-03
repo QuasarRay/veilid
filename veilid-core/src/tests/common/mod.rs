@@ -7,5 +7,9 @@ pub mod test_attachment_manager;
 pub mod test_bootstrap;
 pub mod test_dht;
 pub mod test_dht_transactions;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub mod test_veilid_config;
+#[cfg(all(not(target_arch = "wasm32"), feature = "enable-protocol-webtransport"))]
+pub mod test_webtransport_e2e;
 
 use super::*;

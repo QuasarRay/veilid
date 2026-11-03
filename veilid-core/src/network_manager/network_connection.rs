@@ -431,6 +431,10 @@ impl NetworkConnection {
                                         veilid_log!(connection_manager debug e);
                                         RecvLoopAction::Finish
                                     }
+                                    Ok(NetworkResult::InvalidMessage(reason)) => {
+                                        veilid_log!(registry debug "dropping unsendable message on {:?}: {}", protocol_connection, reason);
+                                        RecvLoopAction::Send
+                                    }
                                     Ok(v) => {
                                         network_result_value_or_log!(registry v => [ format!(": send via protocol_connection={:?}", protocol_connection) ] {
                                             return RecvLoopAction::Finish;

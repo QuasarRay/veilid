@@ -7,8 +7,12 @@ use range_set_blaze::RangeSetBlaze;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU16, Ordering};
 
-// AssemblyBuffer Version 1 properties
-const VERSION_1: u8 = 1;
+/// First wire byte of every `AssemblyBuffer`-framed datagram.
+///
+/// The shared-socket demultiplexer in veilid-core tells raw UDP from QUIC by this byte, so it
+/// must never set a QUIC header bit (`& 0xC0 == 0`).
+const ASSEMBLY_BUFFER_FIRST_BYTE: u8 = 1;
+
 type LengthType = u16;
 type SequenceType = u16;
 /// Bytes of framing in every datagram ahead of the message bytes it carries
@@ -252,11 +256,23 @@ impl AssemblyBuffer {
         }
     }
 
+    /// Whether `datagram` is `AssemblyBuffer`-framed, judged by its first byte.
+    #[must_use]
+    pub const fn is_frame(datagram: &[u8]) -> bool {
+        match datagram.first() {
+            Some(&first_byte) => first_byte == ASSEMBLY_BUFFER_FIRST_BYTE,
+            None => false,
+        }
+    }
+
     /// Whether `frame` carries a whole message by itself, so the datagram it came in is a size
     /// the path carried
     #[must_use]
     pub fn is_whole_message_frame(frame: &[u8]) -> bool {
-        if frame.len() <= FRAME_HEADER_LEN || frame.len() > MAX_LEN || frame[0] != VERSION_1 {
+        if frame.len() <= FRAME_HEADER_LEN
+            || frame.len() > MAX_LEN
+            || frame[0] != ASSEMBLY_BUFFER_FIRST_BYTE
+        {
             return false;
         }
         let off = LengthType::from_be_bytes(frame[4..6].try_into().unwrap_or_log());
@@ -290,17 +306,15 @@ impl AssemblyBuffer {
 
         // --- Decode the header
 
-        // Drop versions we don't understand
-        if frame[0] != VERSION_1 {
+        if frame[0] != ASSEMBLY_BUFFER_FIRST_BYTE {
             if debug_target_enabled!("network_result") {
                 return NetworkResult::invalid_message(format!(
-                    "invalid frame version: frame[0]={}",
+                    "invalid framing byte: frame[0]={}",
                     frame[0]
                 ));
             }
-            return NetworkResult::invalid_message("invalid frame version");
+            return NetworkResult::invalid_message("invalid framing byte");
         }
-        // Version 1 header
         let seq = SequenceType::from_be_bytes(frame[2..4].try_into().unwrap_or_log());
         let off = LengthType::from_be_bytes(frame[4..6].try_into().unwrap_or_log());
         let len = LengthType::from_be_bytes(frame[6..FRAME_HEADER_LEN].try_into().unwrap_or_log());
@@ -379,7 +393,7 @@ impl AssemblyBuffer {
         let mut out = zeroed_u8_vec(chunk.len() + FRAME_HEADER_LEN);
 
         // Write out header
-        out[0] = VERSION_1;
+        out[0] = ASSEMBLY_BUFFER_FIRST_BYTE;
         out[1] = 0; // reserved
         out[2..4].copy_from_slice(&seq.to_be_bytes()); // sequence number
         out[4..6].copy_from_slice(&off.to_be_bytes()); // offset of chunk inside message

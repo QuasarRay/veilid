@@ -191,7 +191,7 @@ impl NativeNetwork {
 
         // Probed bind: an occupied port must fail here so the port search
         // advances instead of reuse-binding alongside another process
-        let Some(udp_socket) = bind_async_udp_socket_probed(addr)? else {
+        let Some(udp_socket) = bind_udp_socket_io_probed(addr)? else {
             return Ok(false);
         };
         let socket_arc = Arc::new(udp_socket);
@@ -260,61 +260,48 @@ impl NativeNetwork {
         &self,
         bind_set: NetworkBindSet,
     ) -> EyreResult<bool> {
-        for ip_addr in bind_set.addrs {
-            let mut port = bind_set.port;
-            loop {
-                let addr = SocketAddr::new(ip_addr, port);
-
-                // see if we've already bound to this already
-                // if not, spawn a listener
-                if !self.inner.lock().udp_protocol_handlers.contains_key(&addr) {
-                    let bound = self.clone().create_udp_protocol_handler(addr)?;
-
-                    // Return interface dial infos we listen on
-                    if bound {
-                        let mut inner = self.inner.lock();
-                        let bapp = inner
-                            .bound_address_per_protocol
-                            .entry(ProtocolType::UDP)
-                            .or_default();
-                        bapp.push(addr);
-
-                        veilid_log!(self
-                            debug
-                            "set_preferred_local_address: {:?} {:?} -> {:?}",
-                            ProtocolType::UDP,
-                            addr,
-                            PeerAddress::new(SocketAddress::from_socket_addr(addr), ProtocolType::UDP)
-                        );
-
-                        Self::set_preferred_local_address(
-                            &mut inner,
-                            PeerAddress::new(
-                                SocketAddress::from_socket_addr(addr),
-                                ProtocolType::UDP,
-                            ),
-                        );
-
-                        break;
-                    }
-                }
-                if !bind_set.search {
-                    veilid_log!(self debug "unable to bind to udp {}", addr);
-                    return Ok(false);
-                }
-
-                if port == 65535u16 {
-                    port = 1024;
-                } else {
-                    port += 1;
-                }
-
-                if port == bind_set.port {
-                    bail!("unable to find a free port for udp {}", ip_addr);
-                }
+        self.search_and_bind(&bind_set, "udp", |addr| {
+            // see if we've already bound to this already
+            // if not, spawn a listener
+            if self.inner.lock().udp_protocol_handlers.contains_key(&addr) {
+                return Ok(TryBindOutcome::TryNextPort);
             }
-        }
-        Ok(true)
+            if !self.clone().create_udp_protocol_handler(addr)? {
+                return Ok(TryBindOutcome::TryNextPort);
+            }
+
+            // Return interface dial infos we listen on
+            let mut inner = self.inner.lock();
+            let bapp = inner
+                .bound_address_per_protocol
+                .entry(ProtocolType::UDP)
+                .or_default();
+            bapp.push(addr);
+
+            veilid_log!(self
+                debug
+                "set_preferred_local_address: {:?} {:?} -> {:?}",
+                ProtocolType::UDP,
+                addr,
+                PeerAddress::new(SocketAddress::from_socket_addr(addr), ProtocolType::UDP)
+            );
+
+            Self::set_preferred_local_address(
+                &mut inner,
+                PeerAddress::new(SocketAddress::from_socket_addr(addr), ProtocolType::UDP),
+            );
+
+            Ok(TryBindOutcome::Bound)
+        })
+    }
+
+    /// Stop a UDP handler, drop it from the handler map, and close any WebTransport endpoint
+    /// sharing its socket
+    fn release_udp_protocol_handler(&self, addr: SocketAddr, ph: &RawUdpProtocolHandler) {
+        ph.stop();
+        self.inner.lock().udp_protocol_handlers.remove(&addr);
+        #[cfg(feature = "enable-protocol-webtransport")]
+        self.remove_webtransport_endpoint_at(addr);
     }
 
     /// Reconcile source-bound UDP handlers with the current interface address set
@@ -366,16 +353,56 @@ impl NativeNetwork {
                 .collect()
         };
         for (addr, ph) in stale {
-            ph.stop();
-            self.inner.lock().udp_protocol_handlers.remove(&addr);
+            self.release_udp_protocol_handler(addr, &ph);
             veilid_log!(self debug "released UDP outbound source handler at {} (interface address gone)", addr);
         }
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        let wt_server_configs = self.webtransport_source_handler_server_configs(&wanted);
 
         for addr in wanted {
             let already = self.inner.lock().udp_protocol_handlers.contains_key(&addr);
             if already {
                 continue;
             }
+
+            // The kernel delivers an inbound datagram by longest-prefix match, so QUIC
+            // addressed to this specific global IP lands on this source-bound socket rather
+            // than on the wildcard demux socket; without a quinn endpoint on it, inbound
+            // WebTransport handshakes to our public address are silently dropped.
+            #[cfg(feature = "enable-protocol-webtransport")]
+            {
+                if let Some(server_configs) = &wt_server_configs {
+                    let server_config = server_configs.for_addr(&addr);
+                    match self
+                        .clone()
+                        .create_demuxed_udp_handler(addr, &server_config)
+                    {
+                        Ok(Some(ph)) => {
+                            let inner = self.inner.lock();
+                            for tx in inner.udp_listener_command_txs.iter() {
+                                if let Err(e) = tx.send(UdpListenerCommand::AddHandler(ph.clone()))
+                                {
+                                    veilid_log!(self error
+                                        "failed to send demuxed UDP source handler {} to listener task: {}",
+                                        addr, e
+                                    );
+                                }
+                            }
+                            drop(inner);
+                            veilid_log!(self debug "bound demuxed UDP+WebTransport outbound source handler at {}", addr);
+                        }
+                        Ok(None) => {
+                            veilid_log!(self debug "failed to bind demuxed UDP source handler at {} (address in use)", addr);
+                        }
+                        Err(e) => {
+                            veilid_log!(self debug "failed to bind demuxed UDP source handler at {}: {}", addr, e);
+                        }
+                    }
+                    continue;
+                }
+            }
+
             match RawUdpProtocolHandler::try_new_specific_bound_handler(
                 self.registry(),
                 addr,

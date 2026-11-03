@@ -41,6 +41,7 @@ fn make_peer(
         vec![dial_info_detail(ip)],
         relay_info_list,
         receive_mtus,
+        None,
     );
     let peer_info = PeerInfo::try_new_from_node_info(
         routing_table,

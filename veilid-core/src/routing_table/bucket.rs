@@ -20,6 +20,38 @@ pub struct Bucket {
 pub(super) type EntriesIter<'a> =
     alloc::collections::btree_map::Iter<'a, BareNodeId, Arc<BucketEntry>>;
 
+/// One kickable entry, snapshotted so the eviction sort sees a stable total order.
+#[derive(PartialEq, Eq)]
+pub(super) struct KickCandidate {
+    /// Key this entry is filed under in the bucket, and what eviction removes
+    pub(super) node_id: BareNodeId,
+    /// Node-level state at the time of the snapshot
+    pub(super) state: BucketEntryState,
+    /// When the entry joined the routing table
+    pub(super) time_added: Timestamp,
+    /// Whether every peer info the entry holds has passed its expiration
+    pub(super) expired: bool,
+}
+
+/// Orders candidates so the one to kick first sorts lowest. The order is state ascending, so a
+/// punished entry kicks before a dead one and a reliable one kicks last, then expired before
+/// unexpired, then most recently added first, then node id so the order is total.
+impl Ord for KickCandidate {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.state
+            .cmp(&other.state)
+            .then_with(|| other.expired.cmp(&self.expired))
+            .then_with(|| other.time_added.cmp(&self.time_added))
+            .then_with(|| self.node_id.cmp(&other.node_id))
+    }
+}
+
+impl PartialOrd for KickCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl_veilid_component_accessors!(Bucket);
 
 impl Bucket {
@@ -101,41 +133,39 @@ impl Bucket {
         // Pre-snapshot mutable fields to avoid total-ordering violations from
         // concurrent updates between comparisons (Rust 1.81+ driftsort)
         let cur_ts = Timestamp::now();
-        let mut sorted_entries: Vec<(BareNodeId, Arc<BucketEntry>, BucketEntryState, Timestamp)> =
-            self.entries
-                .iter()
-                .filter(|(k, v)| {
-                    // Skip entries with active NodeRef references
-                    if v.ref_count.load(Ordering::Acquire) > 0 {
-                        return false;
-                    }
-                    // Skip exempt entries
-                    if exempt_peers.contains(k) {
-                        return false;
-                    }
-                    true
-                })
-                .map(|(k, v)| {
-                    let (state, time_added) = v.with(|e| (e.state(cur_ts), e.time_added()));
-                    (k.clone(), v.clone(), state, time_added)
-                })
-                .collect();
-        sorted_entries.sort_unstable_by(|a, b| -> core::cmp::Ordering {
-            // If node ids are equal, they are equal
-            if a.0 == b.0 {
-                return core::cmp::Ordering::Equal;
-            }
-            // first kick punished nodes, then dead nodes, then missing nodes,
-            // then initial nodes, then unreliable nodes, then reliable nodes
-            let st_cmp = a.2.cmp(&b.2);
-            if st_cmp != core::cmp::Ordering::Equal {
-                return st_cmp;
-            }
-            // then kick by time added, most recent nodes are kicked first
-            b.3.cmp(&a.3)
-        });
+        let mut sorted_entries: Vec<KickCandidate> = self
+            .entries
+            .iter()
+            .filter(|(k, v)| {
+                // Skip entries with active NodeRef references
+                if v.ref_count.load(Ordering::Acquire) > 0 {
+                    return false;
+                }
+                // Skip exempt entries
+                if exempt_peers.contains(k) {
+                    return false;
+                }
+                true
+            })
+            .map(|(k, v)| {
+                let (state, time_added, expired) = v.with(|e| {
+                    (
+                        e.state(cur_ts),
+                        e.time_added(),
+                        e.has_peer_info_and_all_expired(cur_ts),
+                    )
+                });
+                KickCandidate {
+                    node_id: k.clone(),
+                    state,
+                    time_added,
+                    expired,
+                }
+            })
+            .collect();
+        sorted_entries.sort_unstable();
 
-        for (bare_node_id, _, _, _) in sorted_entries {
+        for candidate in sorted_entries {
             // If we're not evicting more entries, exit
             if extra_entries == 0 {
                 break;
@@ -145,7 +175,7 @@ impl Bucket {
             // No references; evict it from this bucket. The entry's node ids are left
             // intact — eviction is by bucket key (remove_entry below), and an entry must
             // always retain a best node id.
-            dead_node_ids.insert(bare_node_id);
+            dead_node_ids.insert(candidate.node_id);
         }
 
         // Now purge the dead node ids

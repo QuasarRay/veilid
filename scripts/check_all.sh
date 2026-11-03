@@ -141,13 +141,13 @@ if [ "$earthfile_image" != "$versions_image" ]; then
     fail "Earthfile LINUX_BUILD_IMAGE ($earthfile_image) does not match .dagger/versions.env ($versions_image)."
 fi
 
-# CI's format job (rustfmt) runs on the upstream rust image rather than the veilid toolchain (it is
-# a cheap standalone job, not an earthly one), so its version is a literal that can drift from the
-# pin. rustfmt's output changes between releases, so a drift means CI and this script disagree.
-ci_rust=$(sed -n 's/^  image: rust:\(.*\)-slim$/\1/p' .gitlab-ci.yml)
+# CI's format and verify_executors jobs run on the upstream rust image rather than the veilid
+# toolchain (cheap standalone jobs, not earthly ones), so their version is a literal that can drift
+# from the pin. rustfmt's output changes between releases, so a drift means CI and this script disagree.
+ci_rust=$(sed -n 's/^  image: rust:\(.*\)-slim$/\1/p' .gitlab-ci.yml | sort -u)
 versions_rust=$(. .dagger/versions.env && echo "$RUST_VERSION")
 if [ "$ci_rust" != "$versions_rust" ]; then
-    fail "format job image (rust:$ci_rust-slim) does not match RUST_VERSION ($versions_rust) in .dagger/versions.env."
+    fail "a rust:*-slim job image ($(echo "$ci_rust" | tr '\n' ' ')) does not match RUST_VERSION ($versions_rust) in .dagger/versions.env."
 fi
 
 # Source-only and sub-second, so it runs with the format check rather than with the

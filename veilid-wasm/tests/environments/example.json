@@ -1,0 +1,9 @@
+{
+  "description": "Template for a private network reached over WebTransport. Copy it to another name in this directory and fill in the values from the deploy; only dev.json and example.json are tracked, so the copy stays local.",
+  "networkKey": "the network key password the deploy was built with",
+  "bootstrap": ["wts://bootstrap-1.example.com:5150/wt"],
+  "bootstrapKeys": [
+    "VLD0:replace-with-the-first-bootstrap-signing-key",
+    "VLD0:replace-with-the-second-bootstrap-signing-key"
+  ]
+}

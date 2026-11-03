@@ -25,12 +25,16 @@ enable-crypto-vld0 = ["veilid-core/enable-crypto-vld0"]
 enable-crypto-none = ["veilid-core/enable-crypto-none"]
 crypto-test = ["enable-crypto-vld0", "enable-crypto-none"]
 crypto-test-none = ["enable-crypto-none"]
+aimd-dht = ["veilid-core/aimd-dht"]
 
 # Run against the in-process mock instead of the network. Mutually exclusive with stats, which is
 # not a default here, so it composes with the defaults:
 #   cargo build -p veilid-wasm --features mock-api --target wasm32-unknown-unknown
 mock-api = ["veilid-core/mock-api"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
+# Needs --cfg=web_sys_unstable_apis, which the workspace .cargo/config.toml sets for the
+# wasm target.
+enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 footgun-config = ["veilid-core/footgun-config"]
 unstable-tunnels = ["veilid-core/unstable-tunnels"]

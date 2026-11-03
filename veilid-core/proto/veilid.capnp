@@ -12,6 +12,9 @@ const maxDialInfoDetails :UInt32 = 64;
 const maxRelayInfos :UInt32 = 16;
 const maxTransportMtus :UInt32 = 16;
 
+# DialInfo
+const maxWebTransportCertHashes :UInt32 = 8;
+
 # Answer peer lists
 const maxFindNodeAPeersLen :UInt32 = 20;
 const maxGetValueAPeersLen :UInt32 = 20;
@@ -139,6 +142,15 @@ struct DialInfoWS @0xc76541dea44417c3 {
 struct DialInfoWSS @0xe639faa41b7d7b04 {
     socketAddress           @0  :SocketAddress;
     request                 @1  :Text;
+}
+
+# Shared detail for WebTransport stream (pWTS) and datagram (pWTD) dial info.
+# The two are distinguished by the DialInfo protocolType FOURCC.
+struct DialInfoWebTransport @0x9b2e5d7a3c1f4068 {
+    socketAddress           @0  :SocketAddress;
+    request                 @1  :Text;
+    certHashes              @2  :List(Data);            # SHA-256 hashes of acceptable self-signed certs
+    expiration              @3  :UInt64;                # when this dial info stops being usable (us since epoch), 0 if the advertiser has no window to state
 }
 
 struct DialInfo @0xfd40924f8b57d9a5 {
@@ -276,6 +288,10 @@ struct NodeInfo @0xaab6a61cc9dc8e34 {
     dialInfoDetailList      @6  :List(DialInfoDetail);  # inbound dial info details for this node
     relayInfoList           @7  :List(RelayInfo);       # relay node info, just enough to get connected
     receiveMtus             @8  :List(TransportMtu);    # largest packets this node takes per transport, absent ones take the safe size
+    # When the publisher wants receivers to stop trusting this node info; receivers never
+    # check it against the dial info list, whose own windows are handled at dial time.
+    # Publishers default it to the earliest window among their own dial infos.
+    expiration              @9  :UInt64;                # us since epoch, 0 for no expiration
 }
 
 struct PeerInfo @0xca2ea684ebbdad2f {

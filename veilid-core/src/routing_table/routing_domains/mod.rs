@@ -148,6 +148,32 @@ impl RoutingTable {
             .clone()
     }
 
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    pub fn renew_dial_info_details(
+        &self,
+        routing_domain: RoutingDomain,
+        protocol_types: ProtocolTypeSet,
+        dial_info_details: Vec<DialInfoDetail>,
+    ) -> bool {
+        let controller = self.get_routing_domain_controller(routing_domain);
+
+        let was_published = controller.get_published_peer_info().is_some();
+
+        {
+            let mut editor = controller.edit_dyn();
+            editor.clear_dial_info_details(None, Some(protocol_types));
+            for did in dial_info_details {
+                editor.add_dial_info_detail(did);
+            }
+            editor.commit();
+        }
+
+        was_published && controller.publish_peer_info()
+    }
+
     #[expect(dead_code)]
     pub fn routing_domain_debug(&self, domain: RoutingDomain, alt: bool) -> String {
         self.get_routing_domain_controller(domain)

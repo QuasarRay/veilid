@@ -19,11 +19,18 @@ pub struct NodeInfo {
     relay_info_list: Vec<RelayInfo>,
     #[serde(default)]
     receive_mtus: TransportMtus,
+    #[serde(default, rename = "expiration")]
+    opt_expiration: Option<Timestamp>,
 }
 
 impl fmt::Display for NodeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "timestamp:          {}", f.to_string(self.timestamp))?;
+        writeln!(
+            f,
+            "expiration:         {}",
+            f.to_string_opt(self.opt_expiration)
+        )?;
         writeln!(f, "envelope_support:   {:?}", self.envelope_support)?;
         writeln!(
             f,
@@ -51,6 +58,9 @@ impl fmt::Display for NodeInfo {
 }
 
 impl NodeInfo {
+    /// Build a node info. `opt_expiration` is the publisher's own "treat this record as
+    /// stale after T" and says nothing about the dial infos; the publisher's default
+    /// policy is `min_dial_info_expiration` over its own dial infos.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         timestamp: Timestamp,
@@ -62,6 +72,7 @@ impl NodeInfo {
         mut dial_info_detail_list: Vec<DialInfoDetail>,
         mut relay_info_list: Vec<RelayInfo>,
         receive_mtus: TransportMtus,
+        opt_expiration: Option<Timestamp>,
     ) -> Self {
         envelope_support.sort_unstable();
         crypto_info_list.sort_unstable();
@@ -78,11 +89,21 @@ impl NodeInfo {
             dial_info_detail_list,
             relay_info_list,
             receive_mtus,
+            opt_expiration,
         }
     }
 
-    /// Decode a node info from its packed capnp message
-    pub(crate) fn try_new_from_wire(node_info_message: &[u8]) -> VeilidAPIResult<Self> {
+    /// The publisher's default policy for `opt_expiration`: the earliest window among
+    /// the node's own dial infos, and none when no dial info states one.
+    pub fn min_dial_info_expiration(dial_info_details: &[DialInfoDetail]) -> Option<Timestamp> {
+        dial_info_details
+            .iter()
+            .filter_map(|did| did.dial_info.expiration())
+            .min()
+    }
+
+    /// Decode a node info from its packed capnp message, or `None` when its contents are ignored
+    pub(crate) fn try_new_from_wire(node_info_message: &[u8]) -> VeilidAPIResult<Option<Self>> {
         let node_info_message_reader = ::capnp::serialize_packed::read_message(
             node_info_message,
             capnp::message::ReaderOptions::new(),
@@ -95,11 +116,19 @@ impl NodeInfo {
                 VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
             })?;
 
-        Ok(decode_node_info(&node_info_reader)?)
+        Ok(decode_node_info(&node_info_reader).ignore_ok()?)
     }
 
     pub fn timestamp(&self) -> Timestamp {
         self.timestamp
+    }
+    pub fn expiration(&self) -> Option<Timestamp> {
+        self.opt_expiration
+    }
+
+    pub fn is_expired(&self, cur_ts: Timestamp) -> bool {
+        self.opt_expiration
+            .is_some_and(|expiration| expiration < cur_ts)
     }
     pub fn envelope_support(&self) -> &[EnvelopeVersion] {
         &self.envelope_support

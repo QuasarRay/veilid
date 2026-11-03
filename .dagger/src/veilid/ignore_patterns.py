@@ -26,5 +26,6 @@ DIRECTORY_IGNORE_PATTERNS: list[str] = [
     "**/.gradle",
     "**/node_modules",
     "**/.venv",
+    "**/.vite",
     "**/pkg",
 ]

@@ -51,6 +51,7 @@ mock-api = [
 ]
 
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
+enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 crypto-test-none = ["rt-tokio", "veilid-core/crypto-test-none"]
 debug-json-api = []

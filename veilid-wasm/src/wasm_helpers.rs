@@ -319,9 +319,9 @@ pub mod ts {
         Safe(ts::SafetySpec),
     }
 
-    /// The choice of safety route to include in compiled routes.
+    /// Valid destinations for a message sent over a routing context.
+    // No namespace: inside one, the variant types would shadow the NodeId and RouteId they wrap
     #[derive(Clone, Serialize, Deserialize, Tsify)]
-    #[tsify(namespace)]
     pub enum Target {
         /// Node by its node id
         NodeId(

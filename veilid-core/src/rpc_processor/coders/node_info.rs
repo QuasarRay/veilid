@@ -104,6 +104,8 @@ pub fn decode_node_info(reader: &veilid_capnp::node_info::Reader) -> Result<Node
         TransportMtus::default()
     };
 
+    let opt_expiration = Some(Timestamp::new(reader.get_expiration())).filter(|x| !x.is_zero());
+
     Ok(NodeInfo::new(
         timestamp,
         envelope_support,
@@ -114,6 +116,7 @@ pub fn decode_node_info(reader: &veilid_capnp::node_info::Reader) -> Result<Node
         dial_info_detail_list,
         relay_info_list,
         receive_mtus,
+        opt_expiration,
     ))
 }
 
@@ -122,6 +125,7 @@ pub fn encode_node_info(
     builder: &mut veilid_capnp::node_info::Builder,
 ) -> Result<(), RPCError> {
     builder.set_timestamp(node_info.timestamp().as_u64());
+    builder.set_expiration(node_info.expiration().unwrap_or_default().as_u64());
 
     let mut es_builder = builder
         .reborrow()

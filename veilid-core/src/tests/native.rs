@@ -81,6 +81,16 @@ cfg_if! {
                 }
             };
 
+            (common_sync $test_module:ident) => {
+                paste! {
+                    #[test]
+                    fn [<run_ $test_module>]() {
+                        native_setup();
+                        tests::$test_module::test_all();
+                    }
+                }
+            };
+
         }
 
         static SETUP_ONCE: Once = Once::new();
@@ -122,6 +132,11 @@ cfg_if! {
         #[cfg(not(feature = "mock-api"))]
         run_test!(common test_bootstrap);
 
+        #[cfg(all(feature = "enable-protocol-webtransport", not(feature = "mock-api")))]
+        run_test!(common test_webtransport_e2e);
+        #[cfg(feature = "enable-protocol-webtransport")]
+        run_test!(common_sync test_veilid_config);
+
         // The rest exercise subsystems mock-api compiles out
         #[cfg(not(feature = "mock-api"))]
         run_test!(component table_store);
@@ -137,6 +152,26 @@ cfg_if! {
         run_test!(component rpc_processor);
         #[cfg(not(feature = "mock-api"))]
         run_test!(component attachment_manager);
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        #[test]
+        #[ignore]
+        fn serve_wt_echo_for_browser() {
+            native_setup();
+            block_on(async {
+                network_manager::tests_network_manager::test_webtransport_native::serve_wt_echo_for_browser().await;
+            })
+        }
+
+        #[cfg(feature = "enable-protocol-webtransport")]
+        #[test]
+        #[ignore]
+        fn serve_wt_stress_for_browser() {
+            native_setup();
+            block_on(async {
+                network_manager::tests_network_manager::test_webtransport_native::serve_wt_stress_for_browser().await;
+            })
+        }
 
     }
 

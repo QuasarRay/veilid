@@ -1,13 +1,26 @@
-mod discovery_context;
 mod igd_manager;
 mod low_level_protocol_tcp;
 mod low_level_protocol_udp;
 mod mtu_detection;
 mod network_state;
-mod protocol;
 mod restore;
-mod start_protocols;
 mod tasks;
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod certificate_manager;
+pub(in crate::network_manager) mod discovery_context;
+pub(in crate::network_manager) mod protocol;
+pub(in crate::network_manager) mod start_protocols;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod udp_demux;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod webtransport_certificate_profile;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod webtransport_listener;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod webtransport_quinn_runtime;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) mod webtransport_state;
 
 pub(super) use protocol::*;
 
@@ -21,6 +34,8 @@ use protocol::tcp::RawTcpProtocolHandler;
 use protocol::udp::RawUdpProtocolHandler;
 use protocol::ws::WebsocketProtocolHandler;
 use start_protocols::*;
+#[cfg(feature = "enable-protocol-webtransport")]
+use webtransport_listener::*;
 
 use futures_rustls::{
     pki_types::{
@@ -134,9 +149,12 @@ struct NetworkInner {
     mtu_probe_results: Option<flume::Receiver<MtuProbePassResult>>,
     /// handles on the TCP listeners, to change the segment size they announce
     listener_mss_handles: BTreeMap<SocketAddr, TcpListenerMssHandle>,
+    /// WebTransport endpoints, certificate state and bind mode
+    #[cfg(feature = "enable-protocol-webtransport")]
+    webtransport: webtransport_state::WebTransportState,
 }
 
-pub(super) struct NetworkUnlockedInner {
+pub(in crate::network_manager) struct NetworkUnlockedInner {
     // Startup lock
     startup_lock: StartupLock,
 
@@ -154,6 +172,8 @@ pub(super) struct NetworkUnlockedInner {
     network_interfaces_task: TickTask<EyreReport>,
     upnp_task: TickTask<EyreReport>,
     mtu_detection_task: TickTask<EyreReport>,
+    #[cfg(feature = "enable-protocol-webtransport")]
+    webtransport_tasks: webtransport_state::WebTransportTasks,
     network_task_lock: AsyncRwLock<()>,
 
     // Durations derived from config
@@ -161,7 +181,7 @@ pub(super) struct NetworkUnlockedInner {
 }
 
 #[derive(Clone)]
-pub(super) struct NativeNetwork {
+pub(in crate::network_manager) struct NativeNetwork {
     registry: VeilidComponentRegistry,
     inner: Arc<Mutex<NetworkInner>>,
     unlocked_inner: Arc<NetworkUnlockedInner>,
@@ -381,6 +401,18 @@ impl PlatformNetwork for NativeNetwork {
                         .wrap_err("connect failure")?);
                         network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
+                    #[cfg(feature = "enable-protocol-webtransport")]
+                    ProtocolType::WTS | ProtocolType::WTD => {
+                        network_result_try!(
+                            self.send_webtransport_unbound(
+                                dial_info,
+                                data,
+                                mtu,
+                                connect_timeout_ms
+                            )
+                            .await?
+                        );
+                    }
                 }
                 Ok(NetworkResult::Value(()))
             }
@@ -528,6 +560,11 @@ impl PlatformNetwork for NativeNetwork {
                             )
                             .await
                             .wrap_err("connect failure")?,
+                            #[cfg(feature = "enable-protocol-webtransport")]
+                            ProtocolType::WTS | ProtocolType::WTD => {
+                                self.connect_webtransport_unbound(dial_info, connect_timeout_ms)
+                                    .await?
+                            }
                         };
                         // Attribute connect+send only; a missing reply is the peer's silence
                         let pnc = match connect_res {
@@ -754,31 +791,36 @@ impl PlatformNetwork for NativeNetwork {
                 ));
             }
 
-            // Handle connectionless protocol
-            let peer_socket_addr = dial_info.to_socket_addr();
-            // Prefer a source-bound handler for PublicInternet sends
-            let preferred_local = self.preferred_outbound_source_addr(&dial_info);
-            let ph = match self.find_best_udp_protocol_handler(&peer_socket_addr, &preferred_local)
-            {
-                Some(ph) => ph,
-                None => {
-                    return Ok(NetworkResult::no_connection_other(
-                        "no appropriate UDP protocol handler for dial_info",
-                    ));
+            let unique_flow = if dial_info.protocol_type() == ProtocolType::UDP {
+                // Handle connectionless protocol
+                let peer_socket_addr = dial_info.to_socket_addr();
+                // Prefer a source-bound handler for PublicInternet sends
+                let preferred_local = self.preferred_outbound_source_addr(&dial_info);
+                let ph = match self
+                    .find_best_udp_protocol_handler(&peer_socket_addr, &preferred_local)
+                {
+                    Some(ph) => ph,
+                    None => {
+                        return Ok(NetworkResult::no_connection_other(
+                            "no appropriate UDP protocol handler for dial_info",
+                        ));
+                    }
+                };
+                let ttl = hole_punch_ttl(
+                    &self.config().internal().network,
+                    &self.interfaces.interface_address_state(),
+                    dial_info.address_type(),
+                );
+                let flow = network_result_try!(ph
+                    .send_hole_punch(peer_socket_addr, ttl)
+                    .wrap_err("failed to send hole punch to dial info")?);
+                UniqueFlow {
+                    flow,
+                    connection_id: None,
+                    dialed: true,
                 }
-            };
-            let ttl = hole_punch_ttl(
-                &self.config().internal().network,
-                &self.interfaces.interface_address_state(),
-                dial_info.address_type(),
-            );
-            let flow = network_result_try!(ph
-                .send_hole_punch(peer_socket_addr, ttl)
-                .wrap_err("failed to send hole punch to dial info")?);
-            let unique_flow = UniqueFlow {
-                flow,
-                connection_id: None,
-                dialed: true,
+            } else {
+                network_result_try!(self.send_quic_hole_punch(&dial_info)?)
             };
 
             // Network accounting
@@ -896,6 +938,20 @@ impl PlatformNetwork for NativeNetwork {
     }
 }
 
+#[cfg(not(feature = "enable-protocol-webtransport"))]
+impl NativeNetwork {
+    #[expect(clippy::unused_async)]
+    async fn startup_webtransport(&self) {}
+
+    fn close_webtransport_endpoints(&self, _inner: &mut NetworkInner) {}
+
+    fn send_quic_hole_punch(&self, _dial_info: &DialInfo) -> EyreResult<NetworkResult<UniqueFlow>> {
+        Ok(NetworkResult::ServiceUnavailable(
+            "unimplemented for this protocol".to_owned(),
+        ))
+    }
+}
+
 impl NativeNetwork {
     /// Dial info is known good on the current interface state
     fn record_confirmed_interface_generation(&self) {
@@ -931,6 +987,8 @@ impl NativeNetwork {
             mtu_probe_passes: None,
             mtu_probe_results: None,
             listener_mss_handles: BTreeMap::new(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            webtransport: webtransport_state::WebTransportState::default(),
         }
     }
 
@@ -965,6 +1023,8 @@ impl NativeNetwork {
                 "mtu_detection_task",
                 MTU_DETECTION_TASK_TICK_PERIOD_SECS,
             ),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            webtransport_tasks: webtransport_state::WebTransportTasks::new(),
             network_task_lock: AsyncRwLock::new(()),
             timings: NativeNetworkTimings::new(&config),
         }
@@ -992,7 +1052,9 @@ impl NativeNetwork {
         self.timings().send_timeout_ms
     }
 
-    fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
+    pub(in crate::network_manager) fn load_certs(
+        path: &Path,
+    ) -> io::Result<Vec<CertificateDer<'static>>> {
         let cvec = CertificateDer::<'static>::pem_reader_iter(&mut BufReader::new(
             // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
             File::open(path)?,
@@ -1002,7 +1064,9 @@ impl NativeNetwork {
         Ok(cvec)
     }
 
-    fn load_keys(path: &Path) -> io::Result<Vec<PrivateKeyDer<'static>>> {
+    pub(in crate::network_manager) fn load_keys(
+        path: &Path,
+    ) -> io::Result<Vec<PrivateKeyDer<'static>>> {
         {
             if let Ok(v) = PrivatePkcs1KeyDer::<'static>::pem_reader_iter(&mut BufReader::new(
                 // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -1375,6 +1439,8 @@ impl NativeNetwork {
         }
         self.inner.lock().igd_manager = igd_manager;
 
+        self.startup_webtransport().await;
+
         // Bind all listening network protocols
         let res = self.bind_all_listeners();
         if !matches!(res, Ok(StartupDisposition::Success)) {
@@ -1426,6 +1492,9 @@ impl NativeNetwork {
             }
             // Drop senders so listener channel-wait futures observe ChannelClosed
             inner.udp_listener_command_txs.clear();
+            // Close the WebTransport endpoints before they are dropped, so quinn releases
+            // their sockets instead of holding them while connections linger.
+            self.close_webtransport_endpoints(&mut inner);
             drop(inner.stop_source.take());
         }
         veilid_log!(self debug "stopping {} low level network tasks", unord.len());

@@ -1,5 +1,7 @@
 mod tcp;
 mod udp;
+#[cfg(feature = "enable-protocol-webtransport")]
+mod webtransport;
 mod ws;
 #[cfg(feature = "enable-protocol-wss")]
 mod wss;
@@ -8,6 +10,8 @@ use super::*;
 
 pub(crate) use tcp::*;
 pub(crate) use udp::*;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(crate) use webtransport::*;
 pub(crate) use ws::*;
 #[cfg(feature = "enable-protocol-wss")]
 pub(crate) use wss::*;
@@ -23,6 +27,10 @@ pub(crate) enum DialInfo {
     WS(DialInfoWS),
     #[cfg(feature = "enable-protocol-wss")]
     WSS(DialInfoWSS),
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WebTransportStream(Box<DialInfoWebTransport>),
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WebTransportDatagram(Box<DialInfoWebTransport>),
 }
 impl Default for DialInfo {
     fn default() -> Self {
@@ -62,6 +70,28 @@ impl fmt::Display for DialInfo {
                     }
                     _ => write!(f, "wss|{}|{}", di.socket_address.ip_addr(), di.request),
                 }
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            DialInfo::WebTransportStream(di) => {
+                write!(
+                    f,
+                    "wts|{}|{}|{}|{}",
+                    di.socket_address,
+                    di.request,
+                    encode_webtransport_cert_hashes(&di.cert_hashes),
+                    di.expiration.unwrap_or_default().as_u64()
+                )
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            DialInfo::WebTransportDatagram(di) => {
+                write!(
+                    f,
+                    "wtd|{}|{}|{}|{}",
+                    di.socket_address,
+                    di.request,
+                    encode_webtransport_cert_hashes(&di.cert_hashes),
+                    di.expiration.unwrap_or_default().as_u64()
+                )
             }
         }
     }
@@ -137,6 +167,45 @@ impl FromStr for DialInfo {
                             format!("wss://{}", rest),
                         )
                     }
+                }
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            "wts" | "wtd" => {
+                let mut parts = rest.splitn(4, '|');
+                let sa = parts.next().ok_or_else(|| {
+                    VeilidAPIError::parse_error("missing webtransport socket address", s)
+                })?;
+                let request = parts.next().ok_or_else(|| {
+                    VeilidAPIError::parse_error("missing webtransport request", s)
+                })?;
+                let cert_hashes = decode_webtransport_cert_hashes(parts.next().unwrap_or(""))?;
+                let expiration = match parts.next() {
+                    Some(x) if !x.is_empty() => {
+                        let us = x.parse::<u64>().map_err(|e| {
+                            VeilidAPIError::parse_error(
+                                format!("invalid webtransport expiration: {}", e),
+                                x,
+                            )
+                        })?;
+                        (us != 0).then(|| Timestamp::new(us))
+                    }
+                    _ => None,
+                };
+                let socket_address = SocketAddress::from_str(sa)?;
+                if proto == "wts" {
+                    DialInfo::try_webtransport_stream(
+                        socket_address,
+                        request.to_string(),
+                        cert_hashes,
+                        expiration,
+                    )
+                } else {
+                    DialInfo::try_webtransport_datagram(
+                        socket_address,
+                        request.to_string(),
+                        cert_hashes,
+                        expiration,
+                    )
                 }
             }
             _ => Err(VeilidAPIError::parse_error(
@@ -217,6 +286,85 @@ impl DialInfo {
             request: url[6..].to_string(),
         }))
     }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    pub fn try_webtransport_stream(
+        socket_address: SocketAddress,
+        url: String,
+        cert_hashes: Vec<[u8; 32]>,
+        expiration: Option<Timestamp>,
+    ) -> VeilidAPIResult<Self> {
+        Self::validate_webtransport_url(socket_address, &url, &cert_hashes)?;
+        Ok(Self::WebTransportStream(Box::new(DialInfoWebTransport {
+            socket_address: socket_address.canonical(),
+            request: url,
+            cert_hashes,
+            expiration,
+        })))
+    }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    pub fn try_webtransport_datagram(
+        socket_address: SocketAddress,
+        url: String,
+        cert_hashes: Vec<[u8; 32]>,
+        expiration: Option<Timestamp>,
+    ) -> VeilidAPIResult<Self> {
+        Self::validate_webtransport_url(socket_address, &url, &cert_hashes)?;
+        Ok(Self::WebTransportDatagram(Box::new(DialInfoWebTransport {
+            socket_address: socket_address.canonical(),
+            request: url,
+            cert_hashes,
+            expiration,
+        })))
+    }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn validate_webtransport_url(
+        socket_address: SocketAddress,
+        url: &str,
+        cert_hashes: &[[u8; 32]],
+    ) -> VeilidAPIResult<()> {
+        if !url.starts_with("https://") {
+            apibail_parse_error!("webtransport url must use https scheme", url);
+        }
+        let split_url = SplitUrl::from_str(url).map_err(|e| {
+            VeilidAPIError::parse_error(format!("unable to split WebTransport url: {}", e), url)
+        })?;
+        let url_port = split_url.port.unwrap_or(443u16);
+        if url_port != socket_address.port() {
+            apibail_parse_error!("socket address port doesn't match url port", url);
+        }
+        if let SplitUrlHost::IpAddr(a) = split_url.host {
+            if !Self::webtransport_ip_literal_matches_socket_address(socket_address, a) {
+                apibail_parse_error!(
+                    format!("request address does not match socket address: {}", a),
+                    socket_address.to_string()
+                );
+            }
+        }
+        if !Self::webtransport_hostname_pins_no_cert_hashes(&split_url.host, cert_hashes) {
+            apibail_parse_error!(
+                "webtransport dial info with certificate hashes must use an IP-literal host, not a DNS hostname",
+                url
+            );
+        }
+        Ok(())
+    }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn webtransport_ip_literal_matches_socket_address(
+        socket_address: SocketAddress,
+        host: IpAddr,
+    ) -> bool {
+        socket_address.ip_addr() == host
+    }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn webtransport_hostname_pins_no_cert_hashes(
+        host: &SplitUrlHost,
+        cert_hashes: &[[u8; 32]],
+    ) -> bool {
+        match host {
+            SplitUrlHost::IpAddr(_) => true,
+            SplitUrlHost::Hostname(_) => cert_hashes.is_empty(),
+        }
+    }
     pub fn protocol_type(&self) -> ProtocolType {
         match self {
             Self::UDP(_) => ProtocolType::UDP,
@@ -224,6 +372,10 @@ impl DialInfo {
             Self::WS(_) => ProtocolType::WS,
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(_) => ProtocolType::WSS,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(_) => ProtocolType::WTS,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportDatagram(_) => ProtocolType::WTD,
         }
     }
     pub fn address_type(&self) -> AddressType {
@@ -239,6 +391,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.address(),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.address(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.address()
+            }
         }
     }
     #[expect(dead_code)]
@@ -249,6 +405,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.set_address(address),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.set_address(address),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.set_address(address)
+            }
         }
     }
     pub fn socket_address(&self) -> SocketAddress {
@@ -258,6 +418,8 @@ impl DialInfo {
             Self::WS(di) => di.socket_address,
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => di.socket_address,
         }
     }
     pub fn ip_addr(&self) -> IpAddr {
@@ -267,6 +429,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.ip_addr(),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.ip_addr(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.ip_addr()
+            }
         }
     }
     pub fn port(&self) -> u16 {
@@ -276,6 +442,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.port(),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.port(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.port()
+            }
         }
     }
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
@@ -286,6 +456,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.set_port(port),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.set_port(port),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.set_port(port)
+            }
         }
     }
     pub fn to_socket_addr(&self) -> SocketAddr {
@@ -295,6 +469,10 @@ impl DialInfo {
             Self::WS(di) => di.socket_address.socket_addr(),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => di.socket_address.socket_addr(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                di.socket_address.socket_addr()
+            }
         }
     }
     pub fn peer_address(&self) -> PeerAddress {
@@ -304,6 +482,12 @@ impl DialInfo {
             Self::WS(di) => PeerAddress::new(di.socket_address, ProtocolType::WS),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => PeerAddress::new(di.socket_address, ProtocolType::WSS),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) => PeerAddress::new(di.socket_address, ProtocolType::WTS),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportDatagram(di) => {
+                PeerAddress::new(di.socket_address, ProtocolType::WTD)
+            }
         }
     }
     pub fn request(&self) -> Option<String> {
@@ -313,6 +497,19 @@ impl DialInfo {
             Self::WS(di) => Some(format!("ws://{}", di.request)),
             #[cfg(feature = "enable-protocol-wss")]
             Self::WSS(di) => Some(format!("wss://{}", di.request)),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                Some(di.request.clone())
+            }
+        }
+    }
+    pub fn expiration(&self) -> Option<Timestamp> {
+        match self {
+            Self::UDP(_) | Self::TCP(_) | Self::WS(_) => None,
+            #[cfg(feature = "enable-protocol-wss")]
+            Self::WSS(_) => None,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => di.expiration,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -320,6 +517,29 @@ impl DialInfo {
         let address = socket_address.address();
         let port = socket_address.port();
         (address.is_global() || address.is_local()) && port > 0
+    }
+
+    pub fn validate(&self) -> VeilidAPIResult<()> {
+        if !self.is_valid() {
+            apibail_parse_error!(
+                "dial info address is not routable, or its port is zero",
+                self.socket_address().to_string()
+            );
+        }
+        match self {
+            Self::UDP(_) | Self::TCP(_) => Ok(()),
+            Self::WS(di) => {
+                Self::try_ws(di.socket_address, format!("ws://{}", di.request)).map(|_| ())
+            }
+            #[cfg(feature = "enable-protocol-wss")]
+            Self::WSS(di) => {
+                Self::try_wss(di.socket_address, format!("wss://{}", di.request)).map(|_| ())
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransportStream(di) | Self::WebTransportDatagram(di) => {
+                Self::validate_webtransport_url(di.socket_address, &di.request, &di.cert_hashes)
+            }
+        }
     }
 
     pub fn make_filter(&self) -> DialInfoFilter {
@@ -337,6 +557,10 @@ impl DialInfo {
             (DialInfo::WS(a), DialInfo::WS(b)) => a.cmp(b),
             #[cfg(feature = "enable-protocol-wss")]
             (DialInfo::WSS(a), DialInfo::WSS(b)) => a.cmp(b),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            (DialInfo::WebTransportStream(a), DialInfo::WebTransportStream(b)) => a.cmp(b),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            (DialInfo::WebTransportDatagram(a), DialInfo::WebTransportDatagram(b)) => a.cmp(b),
             _ => {
                 #[cfg(debug_assertions)]
                 // PANIC-CENSUS: debug-only release logs and orders anyway
@@ -355,4 +579,34 @@ impl MatchesDialInfoFilter for DialInfo {
     fn matches_filter(&self, filter: &DialInfoFilter) -> bool {
         filter.contains_transport(self.into())
     }
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn encode_webtransport_cert_hashes(cert_hashes: &[[u8; 32]]) -> String {
+    cert_hashes
+        .iter()
+        .map(hex::encode)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn decode_webtransport_cert_hashes(s: &str) -> VeilidAPIResult<Vec<[u8; 32]>> {
+    let mut out = Vec::new();
+    if s.is_empty() {
+        return Ok(out);
+    }
+    for part in s.split(',') {
+        let bytes = hex::decode(part).map_err(|e| {
+            VeilidAPIError::parse_error(format!("invalid hex in cert hash: {}", e), part)
+        })?;
+        let h: [u8; 32] = bytes.try_into().map_err(|_| {
+            VeilidAPIError::parse_error(
+                "webtransport cert hash must be 32 bytes (64 hex chars)",
+                part,
+            )
+        })?;
+        out.push(h);
+    }
+    Ok(out)
 }

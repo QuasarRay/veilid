@@ -344,4 +344,24 @@ protocol:
         listen_address: ':5150'
         path: 'ws'
         # url: ''
+    webtransport:
+        connect: true
+        listen: true
+        listen_address: ':5150'
+        path: 'wt'
+        # url: ''
 ```
+
+#### core:network:protocol:webtransport
+
+WebTransport (HTTP/3 over QUIC) supports both self-signed certificate mode (default) and CA-signed bootstrap mode.
+
+Both inbound `listen` and outbound `connect` are on by default. The opt-in gate is the `enable-protocol-webtransport` cargo feature. It stays out of the default feature set, so a build without it carries no WebTransport, and a build that compiles it in has already opted in. Set `listen: false` to dial WebTransport peers without accepting or advertising inbound WebTransport.
+
+`listen_address` is parsed the same way as it is for the other protocols, and an empty value binds the default port. When it resolves to the same address/port as `udp.listen_address`, WebTransport shares the node's UDP socket via QUIC demultiplexing. When it resolves to a different address/port, WebTransport gets a dedicated QUIC-only UDP socket. A dedicated socket carries QUIC only and shares no raw UDP handler, which disables QUIC hole punching (NAT traversal) for WebTransport. A NAT'd peer that relies on hole punching cannot be reached over WebTransport while this node uses a dedicated bind. Set `listen_address` equal to `udp.listen_address` if WebTransport NAT traversal is required.
+
+The `path` parameter sets the URL path for the WebTransport endpoint (default `'wt'`). Self-signed dial-info URLs are advertised as `https://{address}:{port}/wt`. Inbound sessions requesting a different path are rejected with 404.
+
+In CA-signed mode (when `url` is set), the listener serves the CA certificate from `network.tls` instead of self-signed certificates, and advertises the provided URL. If the URL has no path component, the configured `path` is appended. If it has a path component, it must match `path`.
+
+In CA-signed mode a node can also advertise its dial info by IP literal (`https://{ip}:{port}/{path}`). This lets a peer that already learned this node dial the IP directly instead of re-resolving the hostname, which frequently resolves to a UDP-blackholed IPv6 address. It is enabled by convention rather than a config field. Drop a per-family IP-SAN certificate next to the configured `network.tls` certificate, named `ipv4` / `ipv6` with the same directory and extension. For example, if `network.tls.certificate_path` is `/etc/veilid-server/ssl/certs/server.crt`, the siblings are `/etc/veilid-server/ssl/certs/ipv4.crt` and `/etc/veilid-server/ssl/certs/ipv6.crt`, with matching `ipv4`/`ipv6` keys next to `network.tls.private_key_path`. A family is advertised by IP literal only when its sibling certificate is present and readable. When neither family's sibling is present, the node logs at info level and advertises the configured hostname URL instead. An IP-SAN certificate does not follow DHCP renewal, host migration, or multihoming, so a node whose advertised IP can change should either keep these certificates current or omit them and fall back to hostname advertisement.

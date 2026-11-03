@@ -82,6 +82,11 @@ pub const IPADDR_MAX_INACTIVE_DURATION: TimestampDuration = TimestampDuration::n
 pub const ADDRESS_FILTER_TASK_INTERVAL_SECS: u32 = 60;
 /// Delay between hole punch operations to improve likelihood of seqential state processing
 pub const HOLE_PUNCH_DELAY_MS: u32 = 100;
+#[cfg(all(
+    feature = "enable-protocol-webtransport",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+pub const QUIC_HOLE_PUNCH_MIN_CONNECT_TIMEOUT_MS: u32 = 2000;
 /// Number of rpc relay operations that can be handles simultaneously
 pub const RELAY_WORKERS_PER_CORE: u32 = 16;
 
@@ -112,11 +117,16 @@ impl NetworkManagerTimings {
     }
 }
 
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(super) fn hole_punch_is_webtransport(dial_info: &DialInfo) -> bool {
+    WEBTRANSPORT_PROTOCOL_TYPES.contains(dial_info.protocol_type())
+}
+
 /// Things we get when we start up and go away when we shut down
 /// Routing table is not in here because we want it to survive a network shutdown/startup restart
 #[derive(Clone)]
 struct NetworkComponents {
-    net: Network,
+    net: Arc<PlatformNetworkImpl>,
     connection_manager: ConnectionManager,
     receipt_manager: ReceiptManager,
 }
@@ -386,7 +396,18 @@ impl NetworkManager {
     }
 
     fn opt_net(&self) -> Option<Network> {
-        self.components.read().as_ref().map(|x| x.net.clone())
+        self.components
+            .read()
+            .as_ref()
+            .map(|x| x.net.clone() as Network)
+    }
+
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    fn platform_net(&self) -> Arc<PlatformNetworkImpl> {
+        self.components.read().as_ref().unwrap_or_log().net.clone()
     }
 
     fn receipt_manager(&self) -> ReceiptManager {
@@ -971,11 +992,9 @@ impl NetworkManager {
                 opt_dial_info,
             } => {
                 let routing_table = self.routing_table();
-                let rpc = self.rpc_processor();
 
                 // Add the peer info to our routing table
-                let mut peer_nr = match routing_table.register_node_with_peer_info(peer_info, false)
-                {
+                let peer_nr = match routing_table.register_node_with_peer_info(peer_info, false) {
                     Ok(nr) => nr,
                     Err(e) => {
                         return Ok(NetworkResult::invalid_message(format!(
@@ -985,52 +1004,109 @@ impl NetworkManager {
                     }
                 };
 
-                // Get the udp direct dialinfo for the hole punch
-                let hole_punch_di = if let Some(hope_punch_di) = opt_dial_info {
-                    // Specific dialinfo provided, restrict to this dial info
-                    let filter = routing_table
-                        .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
-                        .with_dial_info_filter(hope_punch_di.make_filter());
-                    peer_nr.set_filter(filter);
-                    hope_punch_di
-                } else {
-                    // No specific dialinfo provided, default to UDP protocol
-                    let outbound_nrf = routing_table
-                        .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
-                        .with_protocol_type(ProtocolType::UDP);
-                    peer_nr.set_filter(outbound_nrf);
-                    let Some(hole_punch_dial_info_detail) = peer_nr.first_dial_info_detail() else {
-                        return Ok(NetworkResult::no_connection_other(format!(
-                            "No hole punch capable dialinfo found for node: {}",
-                            peer_nr
-                        )));
-                    };
-
-                    // Now that we picked a specific dialinfo, further restrict the noderef to the specific address type
-                    let filter = peer_nr.take_filter();
-                    let filter = filter
-                        .with_address_type(hole_punch_dial_info_detail.dial_info.address_type());
-                    peer_nr.set_filter(filter);
-                    hole_punch_dial_info_detail.dial_info
-                };
-
-                // Do our half of the hole punch by sending an empty packet
-                // Both sides will do this and then the receipt will get sent over the punched hole
-                let unique_flow =
-                    network_result_try!(self.net().send_hole_punch(hole_punch_di).await?);
-
-                // Add small delay to encourage packets to be delivered in order
-                sleep(HOLE_PUNCH_DELAY_MS).await;
-
-                // Pinned to the punched hole, since a receipt through a relay proves nothing about it
-                rpc.rpc_call_return_receipt(
-                    Destination::direct(peer_nr.with_reply_flow(unique_flow.flow), None),
-                    receipt,
-                )
-                .await
-                .wrap_err("rpc failure")
+                match opt_dial_info {
+                    #[cfg(feature = "enable-protocol-webtransport")]
+                    Some(hole_punch_di) if hole_punch_is_webtransport(&hole_punch_di) => {
+                        self.handle_hole_punch_webtransport(peer_nr, receipt, hole_punch_di)
+                            .await
+                    }
+                    opt_dial_info => {
+                        self.handle_hole_punch_udp(peer_nr, receipt, opt_dial_info)
+                            .await
+                    }
+                }
             }
         }
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    async fn handle_hole_punch_udp(
+        &self,
+        mut peer_nr: FilteredNodeRef,
+        receipt: Bytes,
+        opt_dial_info: Option<DialInfo>,
+    ) -> EyreResult<NetworkResult<()>> {
+        let routing_table = self.routing_table();
+        let rpc = self.rpc_processor();
+
+        // Get the udp direct dialinfo for the hole punch
+        let hole_punch_di = if let Some(hope_punch_di) = opt_dial_info {
+            // Specific dialinfo provided, restrict to this dial info
+            let filter = routing_table
+                .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
+                .with_dial_info_filter(hope_punch_di.make_filter());
+            peer_nr.set_filter(filter);
+            hope_punch_di
+        } else {
+            // No specific dialinfo provided, default to UDP protocol
+            let outbound_nrf = routing_table
+                .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
+                .with_protocol_type(ProtocolType::UDP);
+            peer_nr.set_filter(outbound_nrf);
+            let Some(hole_punch_dial_info_detail) = peer_nr.first_dial_info_detail() else {
+                return Ok(NetworkResult::no_connection_other(format!(
+                    "No hole punch capable dialinfo found for node: {}",
+                    peer_nr
+                )));
+            };
+
+            // Now that we picked a specific dialinfo, further restrict the noderef to the specific address type
+            let filter = peer_nr.take_filter();
+            let filter =
+                filter.with_address_type(hole_punch_dial_info_detail.dial_info.address_type());
+            peer_nr.set_filter(filter);
+            hole_punch_dial_info_detail.dial_info
+        };
+
+        // Do our half of the hole punch by sending an empty packet
+        // Both sides will do this and then the receipt will get sent over the punched hole
+        let unique_flow = network_result_try!(self.net().send_hole_punch(hole_punch_di).await?);
+
+        // Add small delay to encourage packets to be delivered in order
+        sleep(HOLE_PUNCH_DELAY_MS).await;
+
+        // Pinned to the punched hole, since a receipt through a relay proves nothing about it
+        rpc.rpc_call_return_receipt(
+            Destination::direct(peer_nr.with_reply_flow(unique_flow.flow), None),
+            receipt,
+        )
+        .await
+        .wrap_err("rpc failure")
+    }
+
+    #[cfg(feature = "enable-protocol-webtransport")]
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    async fn handle_hole_punch_webtransport(
+        &self,
+        mut peer_nr: FilteredNodeRef,
+        receipt: Bytes,
+        hole_punch_di: DialInfo,
+    ) -> EyreResult<NetworkResult<()>> {
+        let routing_table = self.routing_table();
+        let rpc = self.rpc_processor();
+
+        let receipt_returns_over_punched_udp_flow = routing_table
+            .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
+            .with_protocol_type(ProtocolType::UDP)
+            .with_address_type(hole_punch_di.address_type());
+        peer_nr.set_filter(receipt_returns_over_punched_udp_flow);
+
+        let unique_flow = network_result_try!(self.net().send_hole_punch(hole_punch_di).await?);
+
+        sleep(HOLE_PUNCH_DELAY_MS).await;
+
+        rpc.rpc_call_return_receipt(
+            Destination::direct(peer_nr.with_reply_flow(unique_flow.flow), None),
+            receipt,
+        )
+        .await
+        .wrap_err("rpc failure")
     }
 
     /// Builds an envelope for sending over the network
@@ -1543,7 +1619,7 @@ impl NetworkManager {
 
     /// Record the last flow for a peer after one of OUR sends succeeded.
     ///
-    /// Skips UDP: a flow we only sent on says nothing the dial info didn't, and remembering
+    /// Skips raw UDP: a flow we only sent on says nothing the dial info didn't, and remembering
     /// it lets the existing-flow shortcuts bypass contact method selection. The receive path
     /// calls `set_last_flow` directly, where a UDP flow does carry information.
     pub(super) fn set_last_flow_from_send(
@@ -1552,7 +1628,7 @@ impl NetworkManager {
         flow: Flow,
         timestamp: Timestamp,
     ) {
-        if flow.protocol_type().low_level_protocol_type() == LowLevelProtocolType::UDP {
+        if flow.protocol_type() == ProtocolType::UDP {
             return;
         }
         self.set_last_flow(node_ref, flow, timestamp);

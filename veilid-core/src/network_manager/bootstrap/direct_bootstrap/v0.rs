@@ -57,7 +57,7 @@ impl NetworkManager {
         let mut nodes_proto_v6 = [0usize, 0usize, 0usize, 0usize];
 
         let filter = Box::new(
-            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+            move |opt_snap: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
                 let snap = opt_snap.as_ref().unwrap_or_log();
 
                 // skip nodes on our local network here
@@ -78,6 +78,10 @@ impl NetworkManager {
                     return false;
                 };
                 let node_info = pi.node_info();
+
+                if node_info.is_expired(cur_ts) {
+                    return false;
+                }
 
                 // Bootstraps must have -only- inbound capable network class and direct dialinfo
                 if !node_info.is_fully_direct_inbound() {
@@ -126,7 +130,10 @@ impl NetworkManager {
     }
 
     /// Retrieve up to N of each type of protocol capable nodes for all crypto kinds
-    fn find_bootstrap_nodes_filtered(&self, max_per_type: usize) -> Vec<NodeRef> {
+    pub(in crate::network_manager) fn find_bootstrap_nodes_filtered(
+        &self,
+        max_per_type: usize,
+    ) -> Vec<NodeRef> {
         let mut out =
             self.find_bootstrap_nodes_filtered_per_crypto_kind(VALID_CRYPTO_KINDS[0], max_per_type);
 

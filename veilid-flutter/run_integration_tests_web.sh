@@ -74,6 +74,12 @@ if [ "$LIVE" != true ]; then
     # Unions with wasm_build.sh's own set; mock-api-wasm carries default-wasm
     WASM_BUILD_ARGS+=("--features=mock-api-wasm")
 fi
+# The blob is built here rather than by the native build hook, so --protocols
+# picks its cargo features up as a build argument
+PROTOCOL_FEATURES="$(integration_test_protocol_features)"
+if [ "$LIVE" = true ] && [ -n "$PROTOCOL_FEATURES" ]; then
+    WASM_BUILD_ARGS+=("--features=$PROTOCOL_FEATURES")
+fi
 
 DEFINES=()
 if [ "$DEBUG" -eq 1 ]; then
@@ -85,6 +91,9 @@ DEFINES+=(--dart-define=LOG_DIRECTIVES="${LOG_DIRECTIVES:-#common=debug}")
 if [ "$LIVE" != true ]; then
     DEFINES+=(--dart-define=VEILID_MOCK=true)
 fi
+# Narrows the node to the protocols --protocols named, when it named any
+set_integration_test_protocol_defines
+DEFINES+=(${INTEGRATION_TEST_PROTOCOL_DEFINES[@]+"${INTEGRATION_TEST_PROTOCOL_DEFINES[@]}"})
 
 if [ "${SKIP_WASM_BUILD:-0}" != "1" ]; then
     "$SCRIPTDIR/example/scripts/wasm_update.sh" \

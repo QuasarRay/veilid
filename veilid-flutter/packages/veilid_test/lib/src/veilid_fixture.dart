@@ -12,6 +12,72 @@ import 'log_fixture.dart';
 
 const kIsWeb = bool.fromEnvironment('dart.library.js_util');
 
+/// Every protocol name PROTOCOLS accepts.
+const _protocolNames = ['udp', 'tcp', 'ws', 'wss', 'webtransport'];
+
+/// Stand-ins for the sections a core built without the matching feature leaves
+/// out of its default config, carrying core's listen address and path.
+const _defaultWSS = VeilidConfigWSS(
+  connect: true,
+  listen: false,
+  listenAddress: '',
+  path: 'ws',
+);
+const _defaultWebTransport = VeilidConfigWebTransport(
+  connect: true,
+  listen: false,
+  listenAddress: '',
+  path: 'wt',
+);
+
+/// PROTOCOLS=ws,wss narrows the node to an outbound-only client over exactly
+/// the protocols named, so a suite can exercise one transport at a time.
+VeilidConfig _selectProtocols(VeilidConfig config) {
+  final selectionStr = const String.fromEnvironment('PROTOCOLS').trim();
+  if (selectionStr.isEmpty) {
+    return config;
+  }
+  final selected = selectionStr.split(',').map((e) => e.trim()).toSet();
+  for (final name in selected) {
+    if (!_protocolNames.contains(name)) {
+      throw Exception(
+        'unknown protocol "$name" in PROTOCOLS; '
+        'expected a comma-separated subset of ${_protocolNames.join(', ')}',
+      );
+    }
+  }
+
+  final protocol = config.network.protocol;
+  return config.copyWith(
+    network: config.network.copyWith(
+      protocol: protocol.copyWith(
+        udp: protocol.udp.copyWith(enabled: selected.contains('udp')),
+        tcp: protocol.tcp.copyWith(
+          connect: selected.contains('tcp'),
+          listen: false,
+        ),
+        ws: protocol.ws.copyWith(
+          connect: selected.contains('ws'),
+          listen: false,
+        ),
+        wss: (protocol.wss ?? _defaultWSS).copyWith(
+          connect: selected.contains('wss'),
+          listen: false,
+        ),
+        webtransport: (protocol.webtransport ?? _defaultWebTransport).copyWith(
+          connect: selected.contains('webtransport'),
+          listen: false,
+        ),
+      ),
+      // A native node with no listeners never confirms dial info without this.
+      // The wasm network does not read the setting, so web keeps its own.
+      privacy: kIsWeb
+          ? config.network.privacy
+          : config.network.privacy.copyWith(requireInboundRelay: true),
+    ),
+  );
+}
+
 abstract class VeilidFixture {
   Future<void> setUp();
   Future<void> tearDown();
@@ -196,6 +262,8 @@ class DefaultVeilidFixture implements VeilidFixture {
             allowInsecureFallback: !kIsWeb && Platform.isLinux,
           ),
     );
+
+    config = _selectProtocols(config);
 
     final us = _veilidUpdateStream = await Veilid.instance.startupVeilidCore(
       config,

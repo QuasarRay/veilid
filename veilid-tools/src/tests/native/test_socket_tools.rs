@@ -146,6 +146,13 @@ pub fn test_udp_ipv4_fragmentation_allowed() {
     assert_eq!(value, libc::IP_PMTUDISC_DONT);
 }
 
+pub fn test_routed_local_ip_resolves_v4_loopback() {
+    let remote = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9);
+    let ip = routed_local_ip(&remote).expect("loopback route should resolve a source ip");
+    assert!(ip.is_ipv4(), "source family must match the v4 destination");
+    assert!(!ip.is_unspecified(), "a routed source ip must be specified");
+}
+
 pub async fn test_all() {
     test_borrowed_socket_operations().await;
     test_tcp_mss_clamp().await;
@@ -154,4 +161,5 @@ pub async fn test_all() {
     test_udp_icmp_errors_stay_out_of_recv().await;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     test_udp_ipv4_fragmentation_allowed();
+    test_routed_local_ip_resolves_v4_loopback();
 }

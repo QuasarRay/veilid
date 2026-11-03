@@ -72,6 +72,16 @@ else
         status=$?
         [ $status -eq 0 ] && { timed mock-run mock_pass; status=$?; }
     fi
+
+    # A third pass over veilid-core with WebTransport on, where the transport, certificate and
+    # demux suites run. Additive, not a replacement: the feature is off by default.
+    if [ $status -eq 0 ]; then
+        echo "Running WebTransport unit tests for target $TARGET..."
+        cargo nextest run --tests --target $TARGET --all-targets --locked \
+            -p veilid-core --features=debug-locks,enable-protocol-webtransport \
+            -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live) + test(=tests::bootstrap_records::tests::txt_records_survive_restart))'
+        status=$?
+    fi
 fi
 if [ $status -eq 0 ]; then
     echo "Finished running unit tests for target $TARGET..."

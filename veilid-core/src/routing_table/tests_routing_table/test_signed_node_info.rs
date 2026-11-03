@@ -61,6 +61,7 @@ pub async fn test_signed_node_info() {
                 receive_mtus,
             )],
             receive_mtus,
+            None,
         );
 
         // Make peerinfo from nodeinfo

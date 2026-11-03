@@ -1,3 +1,5 @@
+#[cfg(feature = "enable-protocol-webtransport")]
+use super::certificate_manager::CertificateAdvertisement;
 use super::*;
 use igd_manager::IGDAddressType;
 
@@ -415,6 +417,49 @@ impl NativeNetwork {
         change.moved
     }
 
+    /// Rebuild the stored network state so its interface entries carry the certificate hashes
+    /// in `advertisement`, which is what the network interfaces task compares against.
+    #[cfg(feature = "enable-protocol-webtransport")]
+    pub(super) fn renew_webtransport_dial_info(
+        &self,
+        advertisement: CertificateAdvertisement,
+    ) -> EyreResult<()> {
+        if advertisement.cert_hashes.is_empty() {
+            bail!("no WebTransport certificate to renew dial info with");
+        }
+
+        let Some(last_network_state) = self.last_network_state() else {
+            return Ok(());
+        };
+
+        let detect = self.routing_domains_detecting_address_changes();
+        let mut new_network_state = NetworkState::new(
+            self.registry(),
+            last_network_state.protocol_config.clone(),
+            last_network_state.address_config.clone(),
+            last_network_state.interface_address_state.clone(),
+            detect,
+        );
+        self.add_interface_dial_info(&mut new_network_state)?;
+        let new_network_state = Arc::new(new_network_state);
+
+        let routing_table = self.routing_table();
+        for routing_domain in new_network_state.routing_domain_network_states.keys() {
+            let webtransport_dial_info_details = restamp_webtransport_dial_info(
+                &routing_table.dial_info_details(*routing_domain),
+                &advertisement,
+            );
+            routing_table.renew_dial_info_details(
+                *routing_domain,
+                WEBTRANSPORT_PROTOCOL_TYPES,
+                webtransport_dial_info_details,
+            );
+        }
+
+        self.inner.lock().network_state = Some(new_network_state);
+        Ok(())
+    }
+
     // TODO: This, along with the binding code should be part of the protocol trait
     #[cfg_attr(feature = "instrument", instrument(level = "debug", err, skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn add_interface_dial_info(
@@ -483,6 +528,23 @@ impl NativeNetwork {
                 .cloned();
             if let Some(bound_addresses) = opt_bound_addresses {
                 self.add_tcp_interface_dial_info(config.clone(), &bound_addresses, network_state)?;
+            }
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if network_state
+            .protocol_config
+            .inbound
+            .contains(ProtocolType::WTS)
+        {
+            if let Some(bound_addresses) = self.webtransport_bound_addresses() {
+                match self.webtransport_cert_mode() {
+                    WebTransportCertMode::CaSigned(_) => {
+                        self.add_wt_ca_dial_info(&bound_addresses, network_state)?
+                    }
+                    WebTransportCertMode::SelfSigned => {
+                        self.add_wt_interface_dial_info(&bound_addresses, network_state)?
+                    }
+                }
             }
         }
 
@@ -557,6 +619,10 @@ impl NativeNetwork {
         if config.network.protocol.wss.listen {
             inbound.insert(ProtocolType::WSS);
         }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if config.network.protocol.webtransport.listen && config.network.protocol.udp.enabled {
+            inbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
+        }
 
         let mut outbound = ProtocolTypeSet::new();
         if config.network.protocol.udp.enabled {
@@ -571,6 +637,10 @@ impl NativeNetwork {
         #[cfg(feature = "enable-protocol-wss")]
         if config.network.protocol.wss.connect {
             outbound.insert(ProtocolType::WSS);
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if config.network.protocol.webtransport.connect {
+            outbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
         }
 
         let mut family_global = AddressTypeSet::new();

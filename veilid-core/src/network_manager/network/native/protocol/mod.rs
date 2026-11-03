@@ -1,5 +1,7 @@
 pub mod tcp;
 pub mod udp;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub mod webtransport;
 pub mod wrtc;
 pub mod ws;
 
@@ -14,6 +16,8 @@ pub(super) enum NativeProtocolNetworkConnection {
     Ws(ws::WebsocketNetworkConnectionWS),
     #[cfg(feature = "enable-protocol-wss")]
     Wss(ws::WebsocketNetworkConnectionWSS),
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WebTransport(Box<webtransport::WebTransportNetworkConnection>),
     //WebRTC(wrtc::WebRTCNetworkConnection),
 }
 
@@ -26,6 +30,8 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
             Self::Ws(w) => w.flow(),
             #[cfg(feature = "enable-protocol-wss")]
             Self::Wss(w) => w.flow(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransport(w) => w.flow(),
         }
     }
 
@@ -37,6 +43,8 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
             Self::Ws(_) => Direction::Out,
             #[cfg(feature = "enable-protocol-wss")]
             Self::Wss(_) => Direction::Out,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransport(w) => w.direction(),
         }
     }
 
@@ -49,6 +57,8 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
                 Self::Ws(w) => w.close().await,
                 #[cfg(feature = "enable-protocol-wss")]
                 Self::Wss(w) => w.close().await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.close(),
             }
         })
     }
@@ -66,6 +76,8 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
                 Self::Ws(w) => w.send(message).await,
                 #[cfg(feature = "enable-protocol-wss")]
                 Self::Wss(w) => w.send(message).await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.send(message).await,
             }
         })
     }
@@ -78,6 +90,8 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
                 Self::Ws(w) => w.recv().await,
                 #[cfg(feature = "enable-protocol-wss")]
                 Self::Wss(w) => w.recv().await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.recv().await,
             }
         })
     }
@@ -124,6 +138,10 @@ impl NativeProtocolNetworkConnection {
                     timeout_ms,
                 )
                 .await
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTS | ProtocolType::WTD => {
+                webtransport::connect(registry, local_address, dial_info, timeout_ms, None).await
             }
         }
     }

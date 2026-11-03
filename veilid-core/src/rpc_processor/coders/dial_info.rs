@@ -77,6 +77,49 @@ pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<Dial
             )
             .map_err(RPCError::map_protocol("invalid WSS dial info"))
         }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        FOURCC_PROTOCOL_TYPE_WTS | FOURCC_PROTOCOL_TYPE_WTD => {
+            let wt = reader
+                .get_detail()
+                .get_as::<veilid_capnp::dial_info_web_transport::Reader>()?;
+
+            rpc_ignore_missing_property!(wt, socket_address);
+            let socket_address_reader = wt.get_socket_address()?;
+            let socket_address = decode_socket_address(&socket_address_reader)?;
+            reject_unspecified_socket_address(&socket_address)?;
+            rpc_ignore_missing_property!(wt, request);
+            let request = wt
+                .get_request()?
+                .to_string()
+                .map_err(RPCError::map_protocol(
+                    "invalid WebTransport request string",
+                ))?;
+            rpc_ignore_missing_property!(wt, cert_hashes);
+            let cert_hashes_reader = wt.get_cert_hashes()?;
+            rpc_ignore_max_len!(cert_hashes_reader, MAX_CERT_HASHES);
+            let mut cert_hashes = Vec::<[u8; 32]>::with_capacity(cert_hashes_reader.len() as usize);
+            for i in 0..cert_hashes_reader.len() {
+                let h = cert_hashes_reader
+                    .get(i)
+                    .map_err(RPCError::map_protocol("invalid WebTransport cert hash"))?;
+                let arr = <[u8; 32]>::try_from(h)
+                    .map_err(|_| RPCError::ignore("WebTransport cert hash is not 32 bytes"))?;
+                cert_hashes.push(arr);
+            }
+            let expiration = Some(Timestamp::new(wt.get_expiration())).filter(|x| !x.is_zero());
+            if pt == FOURCC_PROTOCOL_TYPE_WTS {
+                DialInfo::try_webtransport_stream(socket_address, request, cert_hashes, expiration)
+                    .map_err(RPCError::map_protocol("invalid WebTransport dial info"))
+            } else {
+                DialInfo::try_webtransport_datagram(
+                    socket_address,
+                    request,
+                    cert_hashes,
+                    expiration,
+                )
+                .map_err(RPCError::map_protocol("invalid WebTransport dial info"))
+            }
+        }
         _ => Err(RPCError::ignore("unknown protocol type")),
     }
 }
@@ -157,6 +200,51 @@ pub fn encode_dial_info(
             );
             requestb.push_str(request.as_str());
         }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfo::WebTransportStream(wt) => {
+            builder.set_protocol_type(FOURCC_PROTOCOL_TYPE_WTS);
+            encode_dial_info_web_transport(wt, builder)?;
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfo::WebTransportDatagram(wt) => {
+            builder.set_protocol_type(FOURCC_PROTOCOL_TYPE_WTD);
+            encode_dial_info_web_transport(wt, builder)?;
+        }
     };
+    Ok(())
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn encode_dial_info_web_transport(
+    wt: &DialInfoWebTransport,
+    builder: &mut veilid_capnp::dial_info::Builder,
+) -> Result<(), RPCError> {
+    let mut b = builder
+        .reborrow()
+        .init_detail()
+        .init_as::<veilid_capnp::dial_info_web_transport::Builder>();
+
+    encode_socket_address(&wt.socket_address, &mut b.reborrow().init_socket_address())?;
+    {
+        let mut requestb = b.reborrow().init_request(
+            wt.request
+                .len()
+                .try_into()
+                .map_err(RPCError::map_protocol("request too long"))?,
+        );
+        requestb.push_str(wt.request.as_str());
+    }
+    {
+        let mut hashesb = b.reborrow().init_cert_hashes(
+            wt.cert_hashes
+                .len()
+                .try_into()
+                .map_err(RPCError::map_protocol("too many cert hashes"))?,
+        );
+        for (i, h) in wt.cert_hashes.iter().enumerate() {
+            hashesb.set(i as u32, h.as_slice());
+        }
+    }
+    b.set_expiration(wt.expiration.unwrap_or_default().as_u64());
     Ok(())
 }

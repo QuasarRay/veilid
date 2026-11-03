@@ -80,11 +80,8 @@ impl RelayRequirements {
 
             // If this dial info class wants a NAT keepalive, then we need to keep a track of it
             if did.class.wants_nat_keepalive() {
-                need_nat_keepalives.insert((
-                    pt.low_level_protocol_type(),
-                    at,
-                    did.dial_info.port(),
-                ));
+                let llpt = pt.low_level_protocol_type();
+                need_nat_keepalives.insert((llpt, at, did.dial_info.port()));
             }
         }
 

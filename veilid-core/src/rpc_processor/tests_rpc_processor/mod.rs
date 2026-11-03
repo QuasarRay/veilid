@@ -5,6 +5,8 @@ mod test_fanout_call;
 mod test_fanout_config;
 mod test_fanout_queue;
 mod test_invalid_answer;
+mod test_node_info;
+mod test_peer_info;
 mod test_signed_value_data;
 mod test_transport_mtus;
 
@@ -31,6 +33,7 @@ pub async fn test_all() {
     test_fanout_call::test_demoted_straggler_is_cut_at_the_grace().await;
     test_fanout_queue::test_next_straggler_cut_matches_the_cut().await;
     test_invalid_answer::test_invalid_answer_fails_its_question_at_once().await;
+    test_peer_info::test_ignored_node_info_drops_only_its_peer().await;
     test_signed_value_data::test_encode_and_decode_signed_value_data();
     test_destination::test_same_target_ignores_how_it_is_reached();
     test_dial_info::test_encode_and_decode_dial_info_udp();
@@ -38,6 +41,32 @@ pub async fn test_all() {
     test_dial_info::test_encode_and_decode_dial_info_ws();
     #[cfg(feature = "enable-protocol-wss")]
     test_dial_info::test_encode_and_decode_dial_info_wss();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_encode_and_decode_dial_info_wts();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_encode_and_decode_dial_info_wtd();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_webtransport_protocol_type_properties();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_webtransport_url_validation();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_decode_dial_info_caps_cert_hashes();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_decode_dial_info_rejects_wrong_length_cert_hash();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_dial_info::test_decode_dial_info_absent_webtransport_expiration_is_none();
+    test_dial_info::test_dial_info_expiration_is_webtransport_only();
+    test_node_info::test_encode_and_decode_node_info_expiration();
+    test_node_info::test_decode_node_info_absent_expiration_is_none();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_node_info::test_min_dial_info_expiration();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_node_info::test_decode_node_info_keeps_stated_expiration_independent_of_dial_info();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_node_info::test_decode_node_info_ignores_relay_dial_info_expiration();
+    #[cfg(feature = "enable-protocol-webtransport")]
+    test_node_info::test_decode_node_info_skips_dial_info_with_wrong_length_cert_hash();
+    test_dial_info::test_decode_dial_info_skips_unknown_protocol();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv4();
     test_dial_info::test_decode_dial_info_rejects_unspecified_ipv6();
     test_fanout_config::test_absent_fanout_config_is_the_default();

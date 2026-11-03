@@ -540,6 +540,7 @@ impl ConnectionManager {
         let remote_addr = peer_address.socket_addr();
         let remote = (
             dial_info.protocol_type().low_level_protocol_type(),
+            dial_info.protocol_type().sequence_ordering(),
             *peer_address.socket_address(),
         );
         // Prefer a publicly-routable source (PublicInternet only); else use configured listener
@@ -630,6 +631,35 @@ impl ConnectionManager {
         });
 
         // Add to the connection table
+        let mut inner = self.arc.inner.lock();
+        let inner = match &mut *inner {
+            Some(v) => v,
+            None => {
+                bail!("shutting down");
+            }
+        };
+
+        self.on_new_protocol_network_connection(inner, prot_conn, Some(dial_info))
+    }
+
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    pub async fn register_outbound_protocol_connection(
+        &self,
+        prot_conn: ProtocolNetworkConnection,
+        dial_info: DialInfo,
+    ) -> EyreResult<NetworkResult<ConnectionHandle>> {
+        let Ok(_guard) = self.arc.startup_lock.enter() else {
+            return Ok(NetworkResult::service_unavailable(
+                "connection manager is not started",
+            ));
+        };
+
+        let remote_addr = dial_info.peer_address().socket_addr();
+        let _lock_guard = self.arc.address_lock_table.lock_tag(remote_addr).await;
+
         let mut inner = self.arc.inner.lock();
         let inner = match &mut *inner {
             Some(v) => v,

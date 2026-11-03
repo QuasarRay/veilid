@@ -1,4 +1,5 @@
 import { VeilidWASMConfig, veilidClient } from 'veilid-wasm';
+import { configuredTestEnvironment } from './test-environment.js';
 
 // `process` is undefined in worker/service-worker bundles; fall back to an empty env there.
 const env: Record<string, string | undefined> =
@@ -42,14 +43,15 @@ export const veilidCoreStartupConfig = () => {
   // console.log("starting config")
   const defaultConfig = veilidClient.defaultConfig();
   defaultConfig.programName = 'veilid-wasm-test';
-  if (env.NETWORK_KEY) {
-    defaultConfig.network.networkKeyPassword = env.NETWORK_KEY;
+  const environment = configuredTestEnvironment();
+  if (environment?.networkKey !== undefined) {
+    defaultConfig.network.networkKeyPassword = environment.networkKey;
   }
-  if (env.BOOTSTRAP_KEYS) {
-    defaultConfig.network.routingTable.bootstrapKeys = env.BOOTSTRAP_KEYS.split(',');
+  if (environment?.bootstrapKeys !== undefined) {
+    defaultConfig.network.routingTable.bootstrapKeys = environment.bootstrapKeys;
   }
-  if (env.BOOTSTRAP) {
-    defaultConfig.network.routingTable.bootstrap = env.BOOTSTRAP.split(',');
+  if (environment?.bootstrap !== undefined) {
+    defaultConfig.network.routingTable.bootstrap = environment.bootstrap;
   }
   // Ensure we are starting from scratch
   defaultConfig.tableStore.delete = true;

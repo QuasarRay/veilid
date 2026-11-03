@@ -117,6 +117,13 @@ pub fn load_default_config() -> EyreResult<config::Config> {
         builder = builder.set_default("core.network.protocol.wss.listen_address", ":5150")?;
     }
 
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        builder = builder
+            .set_default("core.network.protocol.webtransport.listen_address", ":5150")?
+            .set_default("core.network.protocol.webtransport.path", "wt")?;
+    }
+
     #[cfg(feature = "opentelemetry-otlp")]
     {
         builder = builder.set_default("logging.otlp.grpc_endpoint", "localhost:4317")?;
@@ -686,6 +693,35 @@ impl Default for Wss {
     }
 }
 
+#[cfg(feature = "enable-protocol-webtransport")]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WebTransport {
+    /// Allow outbound WebTransport connections.
+    pub connect: bool,
+    /// Accept inbound WebTransport connections.
+    pub listen: bool,
+    /// Local address to bind, as `host:port`; the node's UDP address shares its socket.
+    pub listen_address: NamedSocketAddrs,
+    /// URL path served by the WebTransport listener.
+    pub path: PathBuf,
+    /// Externally-reachable URL to advertise, which selects CA-signed mode.
+    pub url: Option<ParsedUrl>,
+}
+#[cfg(feature = "enable-protocol-webtransport")]
+impl Default for WebTransport {
+    fn default() -> Self {
+        let d = VeilidConfigWebTransport::default();
+        Self {
+            connect: d.connect,
+            listen: d.listen,
+            listen_address: NamedSocketAddrs::default(),
+            path: PathBuf::from(d.path),
+            url: None,
+        }
+    }
+}
+
 /// Per-protocol network configuration.
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(default)]
@@ -699,6 +735,9 @@ pub struct Protocol {
     /// Secure WebSocket configuration.
     #[cfg(feature = "enable-protocol-wss")]
     pub wss: Wss,
+    /// WebTransport configuration.
+    #[cfg(feature = "enable-protocol-webtransport")]
+    pub webtransport: WebTransport,
 }
 
 /// Privacy and relay preferences.
@@ -1811,6 +1850,18 @@ impl Settings {
                 set_config_value!(inner.core.network.protocol.wss.url, value);
             }
         }
+        cfg_if::cfg_if! {
+            if #[cfg(feature="enable-protocol-webtransport")] {
+                set_config_value!(inner.core.network.protocol.webtransport.connect, value);
+                set_config_value!(inner.core.network.protocol.webtransport.listen, value);
+                set_config_value!(
+                    inner.core.network.protocol.webtransport.listen_address,
+                    value
+                );
+                set_config_value!(inner.core.network.protocol.webtransport.path, value);
+                set_config_value!(inner.core.network.protocol.webtransport.url, value);
+            }
+        }
         set_config_value!(inner.core.network.privacy.require_inbound_relay, value);
         #[cfg(feature = "geolocation")]
         set_config_value!(inner.core.network.privacy.country_code_denylist, value);
@@ -2034,6 +2085,37 @@ impl Settings {
                             .to_string_lossy()
                             .to_string(),
                         url: match inner.core.network.protocol.wss.url {
+                            Some(ref a) => Some(
+                                a.with_offset_port(subnode_offset)
+                                    .map_err(VeilidAPIError::internal)
+                                    .map(|x| x.urlstring.clone())?,
+                            ),
+                            None => None,
+                        },
+                    },
+                    #[cfg(feature = "enable-protocol-webtransport")]
+                    webtransport: VeilidConfigWebTransport {
+                        connect: inner.core.network.protocol.webtransport.connect,
+                        listen: inner.core.network.protocol.webtransport.listen,
+                        listen_address: inner
+                            .core
+                            .network
+                            .protocol
+                            .webtransport
+                            .listen_address
+                            .with_offset_port(subnode_offset)
+                            .map_err(VeilidAPIError::internal)?
+                            .name
+                            .clone(),
+                        path: inner
+                            .core
+                            .network
+                            .protocol
+                            .webtransport
+                            .path
+                            .to_string_lossy()
+                            .to_string(),
+                        url: match inner.core.network.protocol.webtransport.url {
                             Some(ref a) => Some(
                                 a.with_offset_port(subnode_offset)
                                     .map_err(VeilidAPIError::internal)
@@ -2392,6 +2474,32 @@ mod tests {
             }
         }
         //
+        cfg_if::cfg_if! {
+            if #[cfg(feature="enable-protocol-webtransport")] {
+                assert!(s.core.network.protocol.webtransport.connect);
+                assert!(s.core.network.protocol.webtransport.listen);
+                assert_eq!(
+                    s.core.network.protocol.webtransport.listen_address.name,
+                    ":5150"
+                );
+                for addr in &s.core.network.protocol.webtransport.listen_address.addrs {
+                    assert!(valid_socket_addrs.contains(addr));
+                }
+                assert!(!s
+                    .core
+                    .network
+                    .protocol
+                    .webtransport
+                    .listen_address
+                    .addrs
+                    .is_empty());
+                assert_eq!(
+                    s.core.network.protocol.webtransport.path,
+                    std::path::PathBuf::from("wt")
+                );
+                assert_eq!(s.core.network.protocol.webtransport.url, None);
+            }
+        }
         assert!(!s.core.network.privacy.require_inbound_relay);
         #[cfg(feature = "geolocation")]
         assert_eq!(s.core.network.privacy.country_code_denylist, &[]);

@@ -427,16 +427,21 @@ impl RoutingTable {
         let opt_published_peer_info = self.get_published_peer_info(routing_domain);
         let include_self = opt_published_peer_info
             .as_ref()
-            .map(|x| x.node_info().has_all_capabilities(capabilities))
+            .map(|x| {
+                x.node_info().has_all_capabilities(capabilities) && !x.is_expired(Timestamp::now())
+            })
             .unwrap_or_default();
 
         // find N nodes closest to the target node in our routing table
         let filter = Box::new(
-            |opt_entry: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+            |opt_entry: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
                 // Ensure only things that are valid in the chosen routing domain,
                 // and with matching capabilities are returned
                 match opt_entry {
-                    Some(snap) => snap.has_all_capabilities(routing_domain, capabilities),
+                    Some(snap) => {
+                        snap.has_all_capabilities(routing_domain, capabilities)
+                            && !snap.has_expired_peer_info(routing_domain, cur_ts)
+                    }
                     None => include_self,
                 }
             },
@@ -485,13 +490,16 @@ impl RoutingTable {
 
         let hash_coordinate2 = hash_coordinate.clone();
         let filter = Box::new(
-            move |opt_entry: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+            move |opt_entry: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
                 // Exclude our own node
                 let Some(snap) = opt_entry else {
                     return false;
                 };
                 // Exclude non-reliable nodes
                 if !snap.is_reliable() {
+                    return false;
+                }
+                if snap.has_expired_peer_info(routing_domain, cur_ts) {
                     return false;
                 }
                 // Ensure only things that have a minimum set of capabilities are returned

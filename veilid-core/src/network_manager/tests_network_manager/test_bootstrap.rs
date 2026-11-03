@@ -1,5 +1,6 @@
 use super::*;
 use crate::crypto::tests_crypto::*;
+use crate::routing_table::tests_routing_table::fix_crypto_info_list;
 use crate::tests::*;
 
 fn make_mock_bootstrap_record(include_timestamp: bool) -> BootstrapRecord {
@@ -22,6 +23,17 @@ fn make_mock_bootstrap_record(include_timestamp: bool) -> BootstrapRecord {
                 "wss://example.com:5150/wss".to_owned(),
             )
             .expect("should make wss dialinfo"),
+        },
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_stream(
+                SocketAddress::new(Address::IPV4(Ipv4Addr::UNSPECIFIED), 5150),
+                "https://example.com:5150/wt".to_owned(),
+                vec![],
+                None,
+            )
+            .expect("should make webtransport dialinfo"),
         },
     ];
     let opt_timestamp = if include_timestamp {
@@ -209,6 +221,7 @@ pub async fn test_bootstrap_peer_json_binding() {
         }],
         vec![],
         TransportMtus::default(),
+        None,
     );
     let secret_keys =
         SecretKeyGroup::from(SecretKey::new(keypair.kind(), keypair.ref_value().secret()));
@@ -371,4 +384,261 @@ pub fn test_bootstrap_cache_cap() {
         .collect();
     let cache = BootstrapCache::new(strings, vec![]);
     assert_eq!(cache.record_strings().len(), MAX_BOOTSTRAP_RECORD_STRINGS);
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub async fn test_webtransport_ip_literal_record_single_hostname() {
+    let registry = mock_registry::init("").await;
+    let network_manager = registry.network_manager();
+    let dial_info_converter = MockDialInfoConverter::default();
+
+    let addr = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
+    let dial_info_details = vec![
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::udp(addr),
+        },
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_stream(
+                addr,
+                "https://1.2.3.4:5150/".to_owned(),
+                vec![],
+                None,
+            )
+            .expect("should make ip-literal webtransport dialinfo"),
+        },
+    ];
+    let bsrec = BootstrapRecord::new(
+        PublicKeyGroup::from(mock_public_keys()),
+        VALID_ENVELOPE_VERSIONS.to_vec(),
+        dial_info_details,
+        None,
+        vec![],
+    );
+
+    let v0str = bsrec
+        .to_v0_string(&dial_info_converter)
+        .await
+        .expect("ip-literal webtransport must serialize into a single-hostname record");
+    assert!(
+        v0str.contains("example.com"),
+        "record should use the PTR-derived hostname: {v0str}"
+    );
+    assert!(
+        v0str.contains("B5150"),
+        "record should include the WTS short form: {v0str}"
+    );
+
+    let bsrec2 =
+        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
+            .await
+            .expect("should parse string")
+            .expect("should be valid record");
+    assert!(
+        bsrec2.dial_info_details().iter().any(|did| {
+            did.dial_info.protocol_type() == ProtocolType::WTS && did.dial_info.port() == 5150
+        }),
+        "parsed record should contain the WTS dial info"
+    );
+
+    mock_registry::terminate(registry).await;
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub async fn test_webtransport_short_form_slash_tolerant() {
+    let dial_info_converter = MockDialInfoConverter::default();
+    for short in ["B5150", "B5150/"] {
+        let sdi = ShortDialInfo {
+            short_url: short.to_string(),
+            hostname: "example.com".to_string(),
+        };
+        let dis = dial_info_converter
+            .try_vec_from_short(&sdi)
+            .await
+            .unwrap_or_else(|e| panic!("short form {short} should parse: {e}"));
+        assert!(!dis.is_empty(), "short form {short} produced no dial info");
+        for di in dis {
+            assert_eq!(di.protocol_type(), ProtocolType::WTS, "short form {short}");
+            assert_eq!(di.port(), 5150, "short form {short}");
+        }
+    }
+}
+
+fn current_bootstrap_socket_address() -> SocketAddress {
+    SocketAddress::new(Address::IPV4(Ipv4Addr::new(18, 218, 0, 180)), 5150)
+}
+
+fn expired_bootstrap_socket_address() -> SocketAddress {
+    SocketAddress::new(Address::IPV4(Ipv4Addr::new(18, 218, 0, 181)), 5150)
+}
+
+fn bootstrap_candidate_peer_info(
+    routing_table: &RoutingTable,
+    crypto_info_list: Vec<CryptoInfo>,
+    socket_address: SocketAddress,
+    expiration: Option<Timestamp>,
+) -> Arc<PeerInfo> {
+    let node_info = NodeInfo::new(
+        Timestamp::new(0),
+        vec![ENVELOPE_VERSION_ENV0],
+        crypto_info_list,
+        CONNECTIVITY_CAPABILITIES.to_vec(),
+        ProtocolTypeSet::new(),
+        AddressTypeSet::new(),
+        vec![DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::tcp(socket_address),
+        }],
+        vec![],
+        TransportMtus::default(),
+        expiration,
+    );
+
+    Arc::new(
+        PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
+            .expect("should build unsigned peer info"),
+    )
+}
+
+pub(super) fn register_current_and_expired(
+    routing_table: &RoutingTable,
+) -> (Arc<PeerInfo>, Arc<PeerInfo>) {
+    let current = bootstrap_candidate_peer_info(
+        routing_table,
+        fix_crypto_info_list(true),
+        current_bootstrap_socket_address(),
+        None,
+    );
+    let expired = bootstrap_candidate_peer_info(
+        routing_table,
+        fix_crypto_info_list(false),
+        expired_bootstrap_socket_address(),
+        Some(Timestamp::new(1)),
+    );
+    routing_table
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&current)), true)
+        .expect("should register the current node");
+    routing_table
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&expired)), true)
+        .expect("should register the expired node");
+    (current, expired)
+}
+
+pub async fn test_bootstrap_v0_omits_expired_peer_info() {
+    let registry = mock_registry::init("bootstrap_v0_expiration").await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let (current, expired) = register_current_and_expired(&routing_table);
+
+        let answers = network_manager.find_bootstrap_nodes_filtered(2);
+        let answered_node_ids: Vec<NodeIdGroup> = answers.iter().map(|nr| nr.node_ids()).collect();
+
+        assert!(
+            answered_node_ids.contains(current.node_ids()),
+            "a bootstrap candidate whose peer info has not expired must still be answered: \
+             {answered_node_ids:?}"
+        );
+        assert!(
+            !answered_node_ids.contains(expired.node_ids()),
+            "a bootstrap must not hand out peer info that has expired: {answered_node_ids:?}"
+        );
+    }
+    mock_registry::terminate(registry).await;
+}
+
+pub async fn test_bootstrap_v1_omits_expired_peer_info() {
+    let registry = mock_registry::init("bootstrap_v1_expiration").await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let (current, expired) = register_current_and_expired(&routing_table);
+
+        let bsrecs = [&current, &expired]
+            .into_iter()
+            .map(|peer_info| {
+                BootstrapRecord::new(
+                    peer_info.node_info().public_keys(),
+                    VALID_ENVELOPE_VERSIONS.to_vec(),
+                    peer_info.node_info().dial_info_detail_list().to_vec(),
+                    None,
+                    vec![],
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let peers = network_manager.bootstrap_peer_info_for_records(&bsrecs);
+        let peer_node_ids: Vec<NodeIdGroup> =
+            peers.iter().map(|pi| pi.node_ids().clone()).collect();
+
+        assert!(
+            peer_node_ids.contains(current.node_ids()),
+            "a record whose peer info has not expired must still carry it: {peer_node_ids:?}"
+        );
+        assert!(
+            !peer_node_ids.contains(expired.node_ids()),
+            "a record whose peer info has expired must be answered with records alone: \
+             {peer_node_ids:?}"
+        );
+    }
+    mock_registry::terminate(registry).await;
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub async fn test_webtransport_datagram_shares_the_stream_short_form() {
+    let registry = mock_registry::init("").await;
+    let network_manager = registry.network_manager();
+    let dial_info_converter = MockDialInfoConverter::default();
+
+    let addr = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
+    let url = "https://1.2.3.4:5150/wt".to_owned();
+    let dial_info_details = vec![
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_stream(addr, url.clone(), vec![], None)
+                .expect("should make wts dialinfo"),
+        },
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_datagram(addr, url, vec![], None)
+                .expect("should make wtd dialinfo"),
+        },
+    ];
+    let bsrec = BootstrapRecord::new(
+        PublicKeyGroup::from(mock_public_keys()),
+        VALID_ENVELOPE_VERSIONS.to_vec(),
+        dial_info_details,
+        None,
+        vec![],
+    );
+
+    let v0str = bsrec
+        .to_v0_string(&dial_info_converter)
+        .await
+        .expect("a webtransport pair must serialize");
+    let short_urls = v0str
+        .split('|')
+        .nth(4)
+        .expect("record has a short url list");
+    assert_eq!(
+        short_urls, "B5150/wt",
+        "the stream and datagram dial info must dedupe into the one stream short form, and the \
+         datagram must never emit a short form of its own: {v0str}"
+    );
+
+    let bsrec2 =
+        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
+            .await
+            .expect("should parse string")
+            .expect("should be valid record");
+    assert!(
+        bsrec2
+            .dial_info_details()
+            .iter()
+            .all(|did| did.dial_info.protocol_type() == ProtocolType::WTS),
+        "the short form parses back to the stream dial info alone"
+    );
+
+    mock_registry::terminate(registry).await;
 }

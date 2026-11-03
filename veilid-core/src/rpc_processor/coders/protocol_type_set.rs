@@ -5,6 +5,10 @@ pub const FOURCC_PROTOCOL_TYPE_TCP: u32 = u32::from_be_bytes(*b"pTCP");
 pub const FOURCC_PROTOCOL_TYPE_WS: u32 = u32::from_be_bytes(*b"p_WS");
 #[cfg(feature = "enable-protocol-wss")]
 pub const FOURCC_PROTOCOL_TYPE_WSS: u32 = u32::from_be_bytes(*b"pWSS");
+#[cfg(feature = "enable-protocol-webtransport")]
+pub const FOURCC_PROTOCOL_TYPE_WTS: u32 = u32::from_be_bytes(*b"pWTS");
+#[cfg(feature = "enable-protocol-webtransport")]
+pub const FOURCC_PROTOCOL_TYPE_WTD: u32 = u32::from_be_bytes(*b"pWTD");
 
 pub fn decode_protocol_type_set(
     reader: &::capnp::primitive_list::Reader<'_, u32>,
@@ -25,6 +29,14 @@ pub fn decode_protocol_type_set(
             #[cfg(feature = "enable-protocol-wss")]
             FOURCC_PROTOCOL_TYPE_WSS => {
                 out.insert(ProtocolType::WSS);
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            FOURCC_PROTOCOL_TYPE_WTS => {
+                out.insert(ProtocolType::WTS);
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            FOURCC_PROTOCOL_TYPE_WTD => {
+                out.insert(ProtocolType::WTD);
             }
             _ => {
                 // skip unknown protocol types
@@ -48,6 +60,10 @@ pub fn encode_protocol_type_set(
                 ProtocolType::WS => FOURCC_PROTOCOL_TYPE_WS,
                 #[cfg(feature = "enable-protocol-wss")]
                 ProtocolType::WSS => FOURCC_PROTOCOL_TYPE_WSS,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                ProtocolType::WTS => FOURCC_PROTOCOL_TYPE_WTS,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                ProtocolType::WTD => FOURCC_PROTOCOL_TYPE_WTD,
             },
         );
     }

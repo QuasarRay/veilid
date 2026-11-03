@@ -15,7 +15,7 @@ impl MockDialInfoConverter {
 impl DialInfoConverterResolver for MockDialInfoConverter {
     fn ptr_lookup(&self, _ip_addr: IpAddr) -> PinBoxFuture<'_, EyreResult<String>> {
         self.resolve_count.fetch_add(1, Ordering::AcqRel);
-        pin_dyn_future!(async move { Ok("fake_hostname".to_string()) })
+        pin_dyn_future!(async move { Ok("example.com".to_string()) })
     }
 
     fn to_socket_addrs(

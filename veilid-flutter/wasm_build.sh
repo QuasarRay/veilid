@@ -18,6 +18,13 @@ else
     RELEASE=0
 fi
 
+# A RUSTFLAGS in the environment replaces the `[target.wasm32-unknown-unknown]` rustflags in
+# the workspace `.cargo/config.toml` wholesale rather than adding to them, so re-add the
+# `--cfg=web_sys_unstable_apis` that the web-sys WebTransport bindings need. Both cargo
+# invocations below set RUSTFLAGS themselves, so the config entry never applies on its own;
+# unlike wasm_build_js.sh, this has to happen unconditionally.
+export RUSTFLAGS="--cfg=web_sys_unstable_apis${RUSTFLAGS:+ $RUSTFLAGS}"
+
 # Output filenames: veilid_flutter.js + veilid_flutter_bg.wasm.
 if [ "$RELEASE" -eq 1 ]; then
     OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/size/pkg

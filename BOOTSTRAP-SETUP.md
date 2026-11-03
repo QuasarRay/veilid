@@ -164,3 +164,28 @@ V0:
 | 2.bootstrap | IPv4                         | A           |
 | 2.bootstrap | IPv6                         | AAAA        |
 | 2.bootstrap | TXTRecord v0 for bootstrap 2 | TXT         |
+
+## WebTransport bootstrap (reverse DNS and certificate SAN)
+
+WebTransport bootstrap entries (the `B` short form, `wts://`) have a stricter naming
+requirement than the WSS/WS entries in the same record. When the bootstrap record is built,
+the WebTransport hostname is derived from the socket address by reverse DNS (PTR), the
+same way the UDP/TCP/WS short forms are, so the whole record advertises one consistent
+per-backend hostname. A browser then reconstructs `wts://<ptr-name>:port` and validates it
+against the server's CA-signed certificate, so the certificate's SAN must cover that PTR
+name.
+
+Two conditions must hold on each bootstrap backend:
+
+1. The backend IP has a PTR record resolving to a hostname, as required above for
+   the record to build with a consistent hostname.
+2. The certificate SAN covers the PTR name. A Let's Encrypt certificate that covers both
+   the round-robin name (`bootstrap-v1.veilid.net`) and the per-backend PTR name
+   (`bootstrap-1.veilid.net`) satisfies this.
+
+If reverse DNS is missing, the WebTransport short form falls back to a bare IP literal that a
+CA-signed certificate cannot validate. WebTransport bootstrap then fails for that host while
+the WSS/WS entries in the same record continue to work. Both failure modes are logged
+(facility `net`) when the record is built: a missing PTR, and a PTR name the certificate SAN
+does not cover. Check the bootstrap server's logs if only the WebTransport bootstrap path
+fails.

@@ -24,20 +24,7 @@ impl NetworkManager {
         }
 
         // Add peer infos if we have them, only for the peers present in the records
-        let peers: Vec<Arc<PeerInfo>> = cache
-            .records()
-            .iter()
-            .filter_map(|bsrec| {
-                if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                    routing_table.get_published_peer_info(routing_domain)
-                } else {
-                    let best_public_key = bsrec.public_keys().first()?;
-                    let best_node_id = routing_table.generate_node_id(best_public_key).ok()?;
-                    let nr = routing_table.lookup_node_id(best_node_id).ok().flatten()?;
-                    nr.get_peer_info(routing_domain)
-                }
-            })
-            .collect();
+        let peers = self.bootstrap_peer_info_for_records(cache.records());
 
         Some(BootV1Response { records, peers })
     }
@@ -74,5 +61,28 @@ impl NetworkManager {
                 "bootstrap reply could not be sent",
             )),
         }
+    }
+
+    pub(in crate::network_manager) fn bootstrap_peer_info_for_records(
+        &self,
+        bsrecs: &[BootstrapRecord],
+    ) -> Vec<Arc<PeerInfo>> {
+        let routing_table = self.routing_table();
+        let routing_domain = RoutingDomain::PublicInternet;
+        let cur_ts = Timestamp::now();
+
+        bsrecs
+            .iter()
+            .filter_map(|bsrec| {
+                if routing_table.matches_own_public_key(bsrec.public_keys()) {
+                    return routing_table.get_published_peer_info(routing_domain);
+                }
+                let best_public_key = bsrec.public_keys().first()?;
+                let best_node_id = routing_table.generate_node_id(best_public_key).ok()?;
+                let nr = routing_table.lookup_node_id(best_node_id).ok().flatten()?;
+                nr.get_peer_info(routing_domain)
+            })
+            .filter(|peer_info| !peer_info.is_expired(cur_ts))
+            .collect()
     }
 }

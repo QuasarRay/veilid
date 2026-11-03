@@ -1,3 +1,5 @@
+#[cfg(feature = "enable-protocol-webtransport")]
+pub mod webtransport;
 pub mod wrtc;
 pub mod ws;
 
@@ -8,6 +10,8 @@ use std::io;
 pub(super) enum WasmProtocolNetworkConnection {
     //Dummy(DummyNetworkConnection),
     Ws(ws::WebsocketNetworkConnection),
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WebTransport(webtransport::WebTransportNetworkConnection),
     //WebRTC(wrtc::WebRTCNetworkConnection),
 }
 
@@ -16,6 +20,8 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
         match self {
             //            Self::Dummy(d) => d.flow(),
             Self::Ws(w) => w.flow(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransport(w) => w.flow(),
         }
     }
 
@@ -23,6 +29,8 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
         match self {
             // WASM can only connect, never accept
             Self::Ws(_) => Direction::Out,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransport(_) => Direction::Out,
         }
     }
 
@@ -31,6 +39,8 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
             match self {
                 //            Self::Dummy(d) => d.close(),
                 Self::Ws(w) => w.close().await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.close().await,
             }
         })
     }
@@ -44,6 +54,8 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
             match self {
                 //            Self::Dummy(d) => d.send(message),
                 Self::Ws(w) => w.send(message).await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.send(message).await,
             }
         })
     }
@@ -53,6 +65,8 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
             match self {
                 //            Self::Dummy(d) => d.recv(),
                 Self::Ws(w) => w.recv().await,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                Self::WebTransport(w) => w.recv().await,
             }
         })
     }
@@ -77,6 +91,11 @@ impl WasmProtocolNetworkConnection {
             #[cfg(feature = "enable-protocol-wss")]
             ProtocolType::WSS => {
                 ws::WebsocketProtocolHandler::connect(registry, dial_info, timeout_ms).await
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTS | ProtocolType::WTD => {
+                webtransport::WebTransportProtocolHandler::connect(registry, dial_info, timeout_ms)
+                    .await
             }
         }
     }

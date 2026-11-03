@@ -1,7 +1,8 @@
 #!/bin/bash
-# eslint over veilid-wasm/tests and the example test bench, each from its own config and
+# eslint and tsc over veilid-wasm/tests and the example test bench, each from its own config and
 # package-lock. The type-aware rules read the generated pkg/veilid_wasm.d.ts, so this runs after
-# scripts/_check_wasm_builds.sh js.
+# scripts/_check_wasm_builds.sh js. tsc is the only type check: wdio loads the suites through tsx,
+# which strips types without checking them.
 set -eou pipefail
 
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -15,8 +16,8 @@ if [ ! -f veilid-wasm/pkg/veilid_wasm.d.ts ]; then
 fi
 
 for dir in veilid-wasm/tests veilid-wasm/example/test-bench; do
-    echo "Running eslint for $dir..."
-    (cd "$dir" && npm ci --no-audit --no-fund && npx eslint .)
+    echo "Running eslint and tsc for $dir..."
+    (cd "$dir" && npm ci --no-audit --no-fund && npx eslint . && npx tsc -b)
 done
 
 popd >/dev/null

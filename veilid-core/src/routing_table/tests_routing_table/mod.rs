@@ -1,11 +1,17 @@
 pub mod mocks;
 pub mod test_bucket_entry_state;
 pub mod test_cache_validity;
+#[cfg(feature = "enable-protocol-webtransport")]
+pub mod test_contact_method_expiration;
+pub mod test_kick_candidate_order;
 pub mod test_network_estimator;
 pub mod test_nodes_needed;
 pub mod test_own_dial_info;
+pub mod test_peer_info_expiration;
 pub mod test_persisted_cbor;
 pub mod test_persisted_reset;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod test_publish_peer_info;
 pub mod test_relay_info;
 pub mod test_restore_point;
 pub mod test_route_stats;
@@ -36,6 +42,8 @@ pub async fn test_all() {
     test_route_stats::test_all();
     test_weighted_blame::test_charges_follow_the_blame_weight().await;
     test_route_stats::test_dead_route_hops_hold_in_their_epoch().await;
+    test_kick_candidate_order::test_kick_candidates_sort_in_kick_order();
+    test_kick_candidate_order::test_kick_candidate_order_breaks_ties_on_node_id();
     test_serialize_routing_table::test_kick_preserves_best_node_id().await;
     test_serialize_routing_table::test_load_rejects_entries_without_node_ids().await;
     test_serialize_routing_table::test_replace_node_ids_rejects_without_valid_id().await;
@@ -54,6 +62,26 @@ pub async fn test_all() {
     test_relay_info::test_relay_info_equivalent();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_transport_mtus::test_publish_waits_for_transport_mtus().await;
+    test_peer_info_expiration::test_expired_peer_info_is_not_returned_to_askers().await;
+    test_peer_info_expiration::test_expired_responsive_entry_is_evicted_after_dead().await;
+    test_peer_info_expiration::test_expired_responsive_entry_keeps_closest_exemption().await;
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        test_contact_method_expiration::test_expired_webtransport_dial_info_is_skipped_for_contact(
+        )
+        .await;
+        test_contact_method_expiration::test_peer_with_only_expired_dial_info_has_no_direct_contact()
+            .await;
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    {
+        test_publish_peer_info::test_dial_info_validate_is_per_kind();
+        test_publish_peer_info::test_publish_refuses_invalid_dial_info().await;
+        #[cfg(feature = "enable-protocol-webtransport")]
+        test_publish_peer_info::test_publish_refuses_invalid_webtransport_dial_info().await;
+        #[cfg(feature = "enable-protocol-webtransport")]
+        test_publish_peer_info::test_published_peer_info_expires_with_its_dial_info().await;
+    }
     test_routing_metrics::test_bucket_depth();
     test_routing_metrics::test_practical_max_size_zero();
     test_routing_metrics::test_practical_max_size_small_network_holds_most_nodes();

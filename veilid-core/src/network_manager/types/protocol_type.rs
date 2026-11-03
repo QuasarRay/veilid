@@ -24,6 +24,14 @@ static PROTOCOL_TYPE_ORDERING: LazyLock<BTreeMap<(Sequencing, ProtocolType), usi
                     out.insert((pref, ProtocolType::WSS), order);
                 }
             }
+            cfg_if::cfg_if! {
+                if #[cfg(feature="enable-protocol-webtransport")] {
+                    order += 1;
+                    out.insert((pref, ProtocolType::WTS), order);
+                    order += 1;
+                    out.insert((pref, ProtocolType::WTD), order);
+                }
+            }
         }
         // Sequencing::PreferOrdered | Sequencing::EnsureOrdered
         for pref in [Sequencing::PreferOrdered, Sequencing::EnsureOrdered] {
@@ -42,6 +50,15 @@ static PROTOCOL_TYPE_ORDERING: LazyLock<BTreeMap<(Sequencing, ProtocolType), usi
 
             order += 1;
             out.insert((pref, ProtocolType::UDP), order);
+
+            cfg_if::cfg_if! {
+                if #[cfg(feature="enable-protocol-webtransport")] {
+                    order += 1;
+                    out.insert((pref, ProtocolType::WTS), order);
+                    order += 1;
+                    out.insert((pref, ProtocolType::WTD), order);
+                }
+            }
         }
 
         out
@@ -74,36 +91,70 @@ pub(crate) enum ProtocolType {
     WS = 2,
     #[cfg(feature = "enable-protocol-wss")]
     WSS = 3,
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WTS = 4,
+    #[cfg(feature = "enable-protocol-webtransport")]
+    WTD = 5,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct ProtocolDescriptor {
+    pub framing: FramingType,
+    pub ordering: SequenceOrdering,
+    pub low_level: LowLevelProtocolType,
 }
 
 impl ProtocolType {
-    pub fn sequence_ordering(&self) -> SequenceOrdering {
+    pub(crate) fn descriptor(&self) -> ProtocolDescriptor {
+        use FramingType::{Connection, Message};
+        use SequenceOrdering::{Ordered, Unordered};
         match self {
-            ProtocolType::UDP => SequenceOrdering::Unordered,
-            ProtocolType::TCP => SequenceOrdering::Ordered,
-            ProtocolType::WS => SequenceOrdering::Ordered,
+            ProtocolType::UDP => ProtocolDescriptor {
+                framing: Message,
+                ordering: Unordered,
+                low_level: LowLevelProtocolType::UDP,
+            },
+            ProtocolType::TCP => ProtocolDescriptor {
+                framing: Connection,
+                ordering: Ordered,
+                low_level: LowLevelProtocolType::TCP,
+            },
+            ProtocolType::WS => ProtocolDescriptor {
+                framing: Connection,
+                ordering: Ordered,
+                low_level: LowLevelProtocolType::TCP,
+            },
             #[cfg(feature = "enable-protocol-wss")]
-            ProtocolType::WSS => SequenceOrdering::Ordered,
+            ProtocolType::WSS => ProtocolDescriptor {
+                framing: Connection,
+                ordering: Ordered,
+                low_level: LowLevelProtocolType::TCP,
+            },
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTS => ProtocolDescriptor {
+                framing: Connection,
+                ordering: Ordered,
+                low_level: LowLevelProtocolType::UDP,
+            },
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTD => ProtocolDescriptor {
+                framing: Message,
+                ordering: Unordered,
+                low_level: LowLevelProtocolType::UDP,
+            },
         }
+    }
+
+    pub fn sequence_ordering(&self) -> SequenceOrdering {
+        self.descriptor().ordering
     }
 
     pub fn framing_type(&self) -> FramingType {
-        match self {
-            ProtocolType::UDP => FramingType::Message,
-            ProtocolType::TCP => FramingType::Connection,
-            ProtocolType::WS => FramingType::Connection,
-            #[cfg(feature = "enable-protocol-wss")]
-            ProtocolType::WSS => FramingType::Connection,
-        }
+        self.descriptor().framing
     }
 
     pub fn low_level_protocol_type(&self) -> LowLevelProtocolType {
-        match self {
-            ProtocolType::UDP => LowLevelProtocolType::UDP,
-            ProtocolType::TCP | ProtocolType::WS => LowLevelProtocolType::TCP,
-            #[cfg(feature = "enable-protocol-wss")]
-            ProtocolType::WSS => LowLevelProtocolType::TCP,
-        }
+        self.descriptor().low_level
     }
     pub fn sort_order(&self, sequencing: Sequencing) -> usize {
         *PROTOCOL_TYPE_ORDERING
@@ -161,6 +212,10 @@ impl fmt::Display for ProtocolType {
             ProtocolType::WS => write!(f, "WS"),
             #[cfg(feature = "enable-protocol-wss")]
             ProtocolType::WSS => write!(f, "WSS"),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTS => write!(f, "WTS"),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTD => write!(f, "WTD"),
         }
     }
 }
@@ -174,6 +229,10 @@ impl FromStr for ProtocolType {
             "WS" => Ok(ProtocolType::WS),
             #[cfg(feature = "enable-protocol-wss")]
             "WSS" => Ok(ProtocolType::WSS),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            "WTS" => Ok(ProtocolType::WTS),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            "WTD" => Ok(ProtocolType::WTD),
             _ => Err(VeilidAPIError::parse_error(
                 "ProtocolType::from_str failed",
                 s,
@@ -183,3 +242,7 @@ impl FromStr for ProtocolType {
 }
 
 pub type ProtocolTypeSet = EnumSet<ProtocolType>;
+
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(crate) const WEBTRANSPORT_PROTOCOL_TYPES: ProtocolTypeSet =
+    enum_set!(ProtocolType::WTS | ProtocolType::WTD);

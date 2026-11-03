@@ -526,6 +526,9 @@ impl BucketEntryInner {
             RoutingDomain::PublicInternet => &mut self.public_internet.peer_info,
         };
 
+        let cur_ts = Timestamp::now();
+        let may_revive = !peer_info.is_expired(cur_ts);
+
         // See if we have an existing PeerInfo to update or not
         let mut node_info_changed = false;
         // let mut had_previous_node_info = false;
@@ -547,7 +550,9 @@ impl BucketEntryInner {
                         // No need to update the signednodeinfo though since the timestamp is the same
                         // Let the node try to live again but don't mark it as seen yet
                         self.updated_since_last_network_change = true;
-                        self.revive(Timestamp::now());
+                        if may_revive {
+                            self.revive(cur_ts);
+                        }
                     }
                     return false;
                 }
@@ -567,7 +572,9 @@ impl BucketEntryInner {
         *opt_current_pi = Some(peer_info.clone());
         self.set_envelope_support(envelope_support);
         self.updated_since_last_network_change = true;
-        self.revive(Timestamp::now());
+        if may_revive {
+            self.revive(cur_ts);
+        }
 
         // Update geolocation info
         #[cfg(feature = "geolocation")]
@@ -613,6 +620,23 @@ impl BucketEntryInner {
 
         // Return the peerinfo
         opt_current_pi.clone()
+    }
+
+    pub fn has_peer_info_and_all_expired(&self, cur_ts: Timestamp) -> bool {
+        let mut any = false;
+        for peer_info in [
+            self.public_internet.peer_info.as_ref(),
+            self.local_network.peer_info.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            any = true;
+            if !peer_info.is_expired(cur_ts) {
+                return false;
+            }
+        }
+        any
     }
 
     pub fn best_routing_domain(

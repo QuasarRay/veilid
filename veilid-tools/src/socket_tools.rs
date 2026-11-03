@@ -7,9 +7,27 @@ use std::sync::atomic::AtomicU32;
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
         pub use async_std::net::{TcpStream, TcpListener, UdpSocket};
+
+        /// Readiness selector for [`UdpSocketIo::try_io`], mirroring the tokio type of the
+        /// same name.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Interest(u8);
+
+        impl Interest {
+            /// Readable readiness.
+            pub const READABLE: Interest = Interest(0b01);
+            /// Writable readiness.
+            pub const WRITABLE: Interest = Interest(0b10);
+        }
+
+        type UdpSocketIoInner = Async<std::net::UdpSocket>;
     } else if #[cfg(feature="rt-tokio")] {
         pub use tokio::net::{TcpStream, TcpListener, UdpSocket};
         pub use tokio_util::compat::*;
+        /// Readiness selector for [`UdpSocketIo::try_io`].
+        pub use tokio::io::Interest;
+
+        type UdpSocketIoInner = UdpSocket;
     } else {
         compile_error!("needs executor implementation");
     }
@@ -64,6 +82,205 @@ pub fn bind_async_udp_socket_probed(local_address: SocketAddr) -> io::Result<Opt
 
     // The shared socket keeps outbound source binding on this port possible
     bind_async_udp_socket(local_address)
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+/// A bound UDP socket registered once with the runtime's I/O reactor, offering both
+/// readiness polling and ordinary async datagram I/O over that one registration.
+///
+/// quinn drives a UDP socket through readiness ([`poll_recv_ready`](Self::poll_recv_ready),
+/// [`writable`](Self::writable), [`try_io`](Self::try_io)) so it can run its own batched
+/// `sendmsg`/`recvmsg` against the raw descriptor, while a raw UDP protocol handler wants
+/// [`send_to`](Self::send_to)/[`recv_from`](Self::recv_from). Both come from one type because
+/// a descriptor shared between them must not be registered with the reactor twice.
+pub struct UdpSocketIo(UdpSocketIoInner);
+
+impl UdpSocketIo {
+    /// Register a bound UDP socket with the runtime's I/O reactor, putting it in
+    /// non-blocking mode.
+    pub fn from_std(socket: std::net::UdpSocket) -> io::Result<Self> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                // `Async::new` sets non-blocking mode itself.
+                Ok(Self(Async::new(socket)?))
+            } else if #[cfg(feature="rt-tokio")] {
+                socket.set_nonblocking(true)?;
+                Ok(Self(UdpSocket::from_std(socket)?))
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// Deregister the socket from the reactor and return it. It stays in non-blocking mode.
+    pub fn into_std(self) -> io::Result<std::net::UdpSocket> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                self.0.into_inner()
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.into_std()
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// The address the socket is bound to.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                self.0.get_ref().local_addr()
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.local_addr()
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// Poll for readability, registering `cx`'s waker if the socket is not readable yet.
+    ///
+    /// Only one task may poll this at a time, on either runtime.
+    pub fn poll_recv_ready(&self, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                self.0.poll_readable(cx)
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.poll_recv_ready(cx)
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// Wait until the socket is writable.
+    pub async fn writable(&self) -> io::Result<()> {
+        self.0.writable().await
+    }
+
+    /// Run a non-blocking socket operation against the raw descriptor, keeping the reactor's
+    /// readiness state consistent with an `io::ErrorKind::WouldBlock` result.
+    ///
+    /// `interest` names the readiness the operation consumes. Callers poll for that readiness
+    /// first and retry on `WouldBlock`.
+    pub fn try_io<R>(
+        &self,
+        interest: Interest,
+        f: impl FnOnce() -> io::Result<R>,
+    ) -> io::Result<R> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                // async-io consumes readiness on the poll that reports it, so a `WouldBlock`
+                // here leaves nothing to clear and the next poll re-arms the reactor.
+                let _ = interest;
+                f()
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.try_io(interest, f)
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// Receive a single datagram, returning its length and source address.
+    pub async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                self.0.read_with(|s| s.recv_from(buf)).await
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.recv_from(buf).await
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+
+    /// Send a single datagram to `target`, returning the number of bytes sent.
+    pub async fn send_to(&self, buf: &[u8], target: SocketAddr) -> io::Result<usize> {
+        cfg_if! {
+            if #[cfg(feature="rt-async-std")] {
+                self.0.write_with(|s| s.send_to(buf, target)).await
+            } else if #[cfg(feature="rt-tokio")] {
+                self.0.send_to(buf, target).await
+            } else {
+                compile_error!("needs executor implementation");
+            }
+        }
+    }
+}
+
+impl fmt::Debug for UdpSocketIo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UdpSocketIo")
+            .field("local_addr", &self.local_addr().ok())
+            .finish()
+    }
+}
+
+cfg_if! {
+    if #[cfg(unix)] {
+        impl std::os::fd::AsFd for UdpSocketIo {
+            fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+                std::os::fd::AsFd::as_fd(&self.0)
+            }
+        }
+
+        impl std::os::fd::AsRawFd for UdpSocketIo {
+            fn as_raw_fd(&self) -> std::os::fd::RawFd {
+                std::os::fd::AsRawFd::as_raw_fd(&self.0)
+            }
+        }
+    } else if #[cfg(windows)] {
+        impl std::os::windows::io::AsSocket for UdpSocketIo {
+            fn as_socket(&self) -> std::os::windows::io::BorrowedSocket<'_> {
+                std::os::windows::io::AsSocket::as_socket(&self.0)
+            }
+        }
+
+        impl std::os::windows::io::AsRawSocket for UdpSocketIo {
+            fn as_raw_socket(&self) -> std::os::windows::io::RawSocket {
+                std::os::windows::io::AsRawSocket::as_raw_socket(&self.0)
+            }
+        }
+    } else {
+        compile_error!("UdpSocketIo: unsupported platform");
+    }
+}
+
+/// Bind a [`UdpSocketIo`] to `local_address` with `SO_REUSEADDR`/`SO_REUSEPORT` set.
+///
+/// The [`UdpSocketIo`] counterpart of [`bind_async_udp_socket`].
+///
+/// Returns `Ok(None)` if the address could not be bound (a bind failure is not an error).
+/// Errors only on socket creation or option failures.
+pub fn bind_udp_socket_io(local_address: SocketAddr) -> io::Result<Option<UdpSocketIo>> {
+    let Some(socket) = new_bound_shared_socket2_udp(local_address)? else {
+        return Ok(None);
+    };
+    Ok(Some(UdpSocketIo::from_std(socket.into())?))
+}
+
+/// Bind a [`UdpSocketIo`] to `local_address`, probing the port with a non-shared socket
+/// first so an occupied port fails instead of silently reuse-binding alongside another
+/// process.
+///
+/// The [`UdpSocketIo`] counterpart of [`bind_async_udp_socket_probed`], for inbound listeners
+/// found by port search.
+///
+/// Returns `Ok(None)` if the address could not be bound (a bind failure is not an error).
+/// Errors only on socket creation or option failures.
+pub fn bind_udp_socket_io_probed(local_address: SocketAddr) -> io::Result<Option<UdpSocketIo>> {
+    // Create a default non-shared socket and bind it to assert the port is free
+    let Some(socket) = new_bound_default_socket2_udp(local_address)? else {
+        return Ok(None);
+    };
+
+    // Drop the probe so we can make a shared socket in its place
+    drop(socket);
+
+    // The shared socket keeps outbound source binding on this port possible
+    bind_udp_socket_io(local_address)
 }
 
 /// Bind a TCP listener to `local_address`.
@@ -526,6 +743,176 @@ fn allow_ipv4_fragmentation(socket: &Socket) -> io::Result<()> {
     Ok(())
 }
 
+/// Run `wrap`, which may set its own fragmentation options on `socket`, then put back the ones
+/// this module's builder chose, so raw datagrams on a socket shared with QUIC keep that policy.
+///
+/// Errors with `wrap`'s error, or with the io error from writing back a saved option.
+pub fn keep_udp_fragmentation_options<R>(
+    socket: &UdpSocketIo,
+    wrap: impl FnOnce() -> io::Result<R>,
+) -> io::Result<R> {
+    // An option the socket's family does not have fails to read, and is left alone
+    let saved: Vec<_> = UDP_FRAGMENTATION_OPTIONS
+        .iter()
+        .filter_map(|&(level, name)| {
+            get_udp_int_option(socket, level, name)
+                .ok()
+                .map(|value| (level, name, value))
+        })
+        .collect();
+    let out = wrap()?;
+    for (level, name, value) in saved {
+        set_udp_int_option(socket, level, name, value)?;
+    }
+    Ok(out)
+}
+
+/// The options that decide whether a UDP socket's datagrams may be fragmented
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const UDP_FRAGMENTATION_OPTIONS: &[(core::ffi::c_int, core::ffi::c_int)] = &[
+    (libc::IPPROTO_IP, libc::IP_MTU_DISCOVER),
+    (libc::IPPROTO_IPV6, libc::IPV6_MTU_DISCOVER),
+    (libc::IPPROTO_IPV6, libc::IPV6_DONTFRAG),
+];
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+const UDP_FRAGMENTATION_OPTIONS: &[(core::ffi::c_int, core::ffi::c_int)] = &[
+    (libc::IPPROTO_IP, libc::IP_DONTFRAG),
+    (libc::IPPROTO_IPV6, libc::IPV6_DONTFRAG),
+];
+// IPV6_DONTFRAG from netinet6/in6.h, which the libc crate does not export here
+#[cfg(any(target_os = "openbsd", target_os = "netbsd"))]
+const UDP_FRAGMENTATION_OPTIONS: &[(core::ffi::c_int, core::ffi::c_int)] =
+    &[(libc::IPPROTO_IPV6, 62)];
+#[cfg(windows)]
+const UDP_FRAGMENTATION_OPTIONS: &[(core::ffi::c_int, core::ffi::c_int)] = &[
+    (
+        winapi::shared::ws2def::IPPROTO_IP,
+        winapi::shared::ws2ipdef::IP_DONTFRAGMENT,
+    ),
+    (
+        winapi::shared::ws2def::IPPROTO_IPV6 as core::ffi::c_int,
+        winapi::shared::ws2ipdef::IPV6_DONTFRAG,
+    ),
+];
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))
+))]
+const UDP_FRAGMENTATION_OPTIONS: &[(core::ffi::c_int, core::ffi::c_int)] =
+    &[(libc::IPPROTO_IPV6, libc::IPV6_DONTFRAG)];
+
+#[cfg(unix)]
+fn get_udp_int_option(
+    socket: &UdpSocketIo,
+    level: core::ffi::c_int,
+    name: core::ffi::c_int,
+) -> io::Result<core::ffi::c_int> {
+    use std::os::fd::AsRawFd;
+
+    let mut value: libc::c_int = 0;
+    let mut len = core::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: the socket is open, and `value` and `len` outlive this synchronous call
+    let res = unsafe {
+        libc::getsockopt(
+            socket.as_raw_fd(),
+            level,
+            name,
+            (&mut value as *mut libc::c_int).cast(),
+            &mut len,
+        )
+    };
+    if res != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(value)
+}
+
+#[cfg(unix)]
+fn set_udp_int_option(
+    socket: &UdpSocketIo,
+    level: core::ffi::c_int,
+    name: core::ffi::c_int,
+    value: core::ffi::c_int,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: the socket is open, and `value` outlives this synchronous call
+    let res = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            level,
+            name,
+            (&value as *const libc::c_int).cast(),
+            core::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if res != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn get_udp_int_option(
+    socket: &UdpSocketIo,
+    level: core::ffi::c_int,
+    name: core::ffi::c_int,
+) -> io::Result<core::ffi::c_int> {
+    use std::os::windows::io::AsRawSocket;
+    use winapi::um::winsock2::{getsockopt, SOCKET, SOCKET_ERROR};
+
+    let mut value: core::ffi::c_int = 0;
+    let mut len = core::mem::size_of::<core::ffi::c_int>() as core::ffi::c_int;
+    // SAFETY: the socket is open, and `value` and `len` outlive this synchronous call
+    let res = unsafe {
+        getsockopt(
+            socket.as_raw_socket() as SOCKET,
+            level,
+            name,
+            (&mut value as *mut core::ffi::c_int).cast(),
+            &mut len,
+        )
+    };
+    if res == SOCKET_ERROR {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(value)
+}
+
+#[cfg(windows)]
+fn set_udp_int_option(
+    socket: &UdpSocketIo,
+    level: core::ffi::c_int,
+    name: core::ffi::c_int,
+    value: core::ffi::c_int,
+) -> io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use winapi::um::winsock2::{setsockopt, SOCKET, SOCKET_ERROR};
+
+    // SAFETY: the socket is open, and `value` outlives this synchronous call
+    let res = unsafe {
+        setsockopt(
+            socket.as_raw_socket() as SOCKET,
+            level,
+            name,
+            (&value as *const core::ffi::c_int).cast(),
+            core::mem::size_of::<core::ffi::c_int>() as core::ffi::c_int,
+        )
+    };
+    if res == SOCKET_ERROR {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Keep ICMP port unreachable and TTL expired out of recv, as on other platforms; Windows
 /// otherwise fails the next receive on the port with WSAECONNRESET or WSAENETRESET
 #[cfg(windows)]
@@ -717,20 +1104,27 @@ pub fn domain_for_address(address: SocketAddr) -> core::ffi::c_int {
     socket2::Domain::for_address(address).into()
 }
 
+/// Local source IP the OS routing table would pick to reach `remote`.
+///
+/// Connects a throwaway, unspecified-bound UDP socket; no packets are sent. `None` if the
+/// probe socket can't be created or connected.
+#[must_use]
+pub fn routed_local_ip(remote: &SocketAddr) -> Option<IpAddr> {
+    let socket = std::net::UdpSocket::bind(compatible_unspecified_socket_addr(remote)).ok()?;
+    socket.connect(remote).ok()?;
+    Some(socket.local_addr().ok()?.ip())
+}
+
 /// Local IPv4 the kernel would pick as the source for outbound traffic.
 ///
 /// UDP-connects to an unallocated probe; no packets are sent. `None` if no
 /// default IPv4 route exists.
 #[must_use]
 pub fn primary_source_ipv4() -> Option<Ipv4Addr> {
-    let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
-    let sockaddrv4 = SocketAddr::V4(SocketAddrV4::new(ipv4addr, 5155));
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect(sockaddrv4).ok()?;
-    if let Ok(SocketAddr::V4(local)) = socket.local_addr() {
-        Some(*local.ip())
-    } else {
-        None
+    let remote = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5155));
+    match routed_local_ip(&remote)? {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
     }
 }
 
@@ -740,14 +1134,15 @@ pub fn primary_source_ipv4() -> Option<Ipv4Addr> {
 /// default IPv6 route exists.
 #[must_use]
 pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
-    let ipv6addr = "2222::1".parse::<Ipv6Addr>().unwrap();
-    let sockaddrv6 = SocketAddr::V6(SocketAddrV6::new(ipv6addr, 5155, 0, 0));
-    let socket = std::net::UdpSocket::bind("[::]:0").ok()?;
-    socket.connect(sockaddrv6).ok()?;
-    if let Ok(SocketAddr::V6(local)) = socket.local_addr() {
-        Some(*local.ip())
-    } else {
-        None
+    let remote = SocketAddr::V6(SocketAddrV6::new(
+        Ipv6Addr::new(0x2222, 0, 0, 0, 0, 0, 0, 1),
+        5155,
+        0,
+        0,
+    ));
+    match routed_local_ip(&remote)? {
+        IpAddr::V6(ip) => Some(ip),
+        IpAddr::V4(_) => None,
     }
 }
 

@@ -39,6 +39,7 @@ rt-tokio = ["veilid-core/rt-tokio", "tokio"]
 flame = ["veilid-core/instrument"]
 debug-locks = ["veilid-core/debug-locks"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
+enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 opentelemetry = [
     "rt-tokio",

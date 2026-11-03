@@ -103,6 +103,76 @@ pub fn fix_dial_info_detail() -> DialInfoDetail {
     }
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub fn fix_relay_socket_address() -> SocketAddress {
+    SocketAddress::new(Address::IPV4(Ipv4Addr::new(18, 218, 0, 161)), 53)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub fn make_public_internet_ready_to_publish(routing_table: &RoutingTable) {
+    assert!(
+        !routing_table.is_own_direct_dial_info_address(&fix_relay_socket_address()),
+        "publishing purges every routing table entry whose direct dial info overlaps our own, \
+         so a relay fixture sharing an address with this node would vanish and test nothing"
+    );
+
+    let node_info = NodeInfo::new(
+        Timestamp::new(0),
+        vec![ENVELOPE_VERSION_ENV0],
+        fix_crypto_info_list(true),
+        PUBLIC_INTERNET_CAPABILITIES.to_vec(),
+        ProtocolTypeSet::new(),
+        AddressTypeSet::new(),
+        vec![DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::tcp(fix_relay_socket_address()),
+        }],
+        vec![],
+        TransportMtus::default(),
+        None,
+    );
+    let relay_peer_info = Arc::new(
+        PeerInfo::try_new_from_node_info(
+            routing_table,
+            RoutingDomain::PublicInternet,
+            &fix_crypto_info_list_secrets(),
+            node_info,
+        )
+        .expect("should build signed relay peer info"),
+    );
+    let relay_node = routing_table
+        .register_node_with_peer_info(
+            Arc::new(UnverifiedPeerInfo::from_verified(&relay_peer_info)),
+            false,
+        )
+        .expect("should register relay peer info")
+        .unfiltered();
+
+    let controller = routing_table
+        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
+    let requirements = controller.read_dyn().relay_requirements();
+    let relay = RoutingDomainRelay::new(
+        RoutingDomain::PublicInternet,
+        relay_node,
+        RelayKind::Inbound,
+    );
+
+    let mut editor = controller.edit();
+    editor.set_network_config(RoutingDomainNetworkConfig::new(
+        ProtocolTypeSet::all(),
+        ProtocolTypeSet::all(),
+        AddressTypeSet::all(),
+        PUBLIC_INTERNET_CAPABILITIES.iter().copied().collect(),
+    ));
+    editor.set_relay_compilation(Some(RelayCompilation {
+        requirements,
+        relays: vec![relay].into(),
+    }));
+    editor.set_receive_mtus(Some(TransportMtus::default()));
+    editor.set_confirmed(true);
+    editor.commit();
+}
+
 pub fn fix_peer_info(
     routing_table: &RoutingTable,
     crypto_info_list: Vec<CryptoInfo>,
@@ -133,6 +203,7 @@ pub fn fix_peer_info_at(
         vec![fix_dial_info_detail()],
         vec![],
         TransportMtus::default(),
+        None,
     );
 
     PeerInfo::try_new_from_node_info(
@@ -157,6 +228,7 @@ pub fn fix_unsigned_peer_info(
         vec![fix_dial_info_detail()],
         vec![],
         TransportMtus::default(),
+        None,
     );
 
     PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)

@@ -407,8 +407,7 @@ impl NativeNetwork {
                 })
                 .collect();
 
-            let mut inbound_protocol_map =
-                HashMap::<(AddressType, LowLevelProtocolType, u16), Vec<ProtocolType>>::new();
+            let mut inbound_protocol_map = InboundProtocolMap::new();
 
             for at in protocol_config.family_global {
                 for pt in protocol_config.inbound {
@@ -420,8 +419,7 @@ impl NativeNetwork {
                     }
 
                     if let Some(pla) = inner.preferred_local_addresses.get(&key) {
-                        let llpt = pt.low_level_protocol_type();
-                        let itmkey = (at, llpt, pla.port());
+                        let itmkey = (at, pt.low_level_protocol_type(), pla.port());
                         inbound_protocol_map
                             .entry(itmkey)
                             .and_modify(|x| x.push(pt))
@@ -622,6 +620,36 @@ impl NativeNetwork {
                 format!("wss://{}/{}", addr, self.config().network.protocol.wss.path),
             )
             .unwrap_or_log(),
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTS => {
+                let advertisement = self.webtransport_current_advertisement();
+                let url = self.webtransport_detected_request_url(&addr);
+                DialInfo::try_webtransport_stream(
+                    addr,
+                    url,
+                    advertisement.cert_hashes,
+                    advertisement.expiration,
+                )
+                .unwrap_or_log()
+            }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            ProtocolType::WTD => {
+                let advertisement = self.webtransport_current_advertisement();
+                let url = self.webtransport_detected_request_url(&addr);
+                DialInfo::try_webtransport_datagram(
+                    addr,
+                    url,
+                    advertisement.cert_hashes,
+                    advertisement.expiration,
+                )
+                .unwrap_or_log()
+            }
         }
+    }
+
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn webtransport_detected_request_url(&self, addr: &SocketAddress) -> String {
+        webtransport_socket_request_url(addr.socket_addr(), &self.webtransport_advertised_path())
+            .unwrap_or_log()
     }
 }

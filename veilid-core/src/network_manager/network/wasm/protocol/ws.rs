@@ -127,7 +127,7 @@ impl WebsocketProtocolHandler {
         timeout_ms: u32,
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         // Split dial info up
-        let (_tls, scheme) = match dial_info {
+        let (tls, scheme) = match dial_info {
             DialInfo::WS(_) => (false, "ws"),
             #[cfg(feature = "enable-protocol-wss")]
             DialInfo::WSS(_) => (true, "wss"),
@@ -140,7 +140,28 @@ impl WebsocketProtocolHandler {
         }
 
         let socket_address = dial_info.socket_address();
-        let connect_request = if socket_address.ip_addr().is_unspecified() {
+
+        if !tls && is_secure_context() {
+            // Plain ws:// is mixed content from a secure context unless the peer is loopback,
+            // which the browser treats as potentially trustworthy.
+            let target_is_local = if socket_address.ip_addr().is_unspecified() {
+                matches!(&split_url.host, SplitUrlHost::Hostname(h) if h.eq_ignore_ascii_case("localhost"))
+            } else {
+                socket_address.ip_addr().is_loopback()
+            };
+            if !target_is_local {
+                veilid_log!(registry debug
+                    "WS: refusing ws:// to non-local {} from a secure context (mixed content)", socket_address);
+                return Ok(NetworkResult::no_connection_other(
+                    "ws:// is blocked as mixed content in a secure context",
+                ));
+            }
+        }
+
+        // A browser validates the certificate against the URL host, so WSS dials the advertised
+        // hostname (an IP literal fails with CloseEvent 1015) and can Happy-Eyeball across
+        // A/AAAA, while plaintext WS dials the exact advertised address.
+        let connect_request = if tls || socket_address.ip_addr().is_unspecified() {
             request
         } else {
             let ip_based_url = SplitUrl::new(

@@ -343,6 +343,13 @@ fn records_from_response(data: &[u8]) -> Vec<String> {
 }
 
 fn network_block(port: u16, routing_table: &str) -> String {
+    // The default WebTransport listen address would bind a dedicated socket on 5150; share the
+    // test's UDP socket instead so parallel tests do not collide
+    #[cfg(feature = "enable-protocol-webtransport")]
+    let webtransport =
+        format!("\n            webtransport:\n                listen_address: ':{port}'");
+    #[cfg(not(feature = "enable-protocol-webtransport"))]
+    let webtransport = String::new();
     format!(
         r#"        routing_table:
 {routing_table}
@@ -356,7 +363,7 @@ fn network_block(port: u16, routing_table: &str) -> String {
                 listen_address: ':{port}'
             ws:
                 connect: false
-                listen: false"#
+                listen: false{webtransport}"#
     )
 }
 

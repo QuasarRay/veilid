@@ -7,6 +7,7 @@ mod test_igd;
 mod test_network_interfaces;
 mod test_resolver;
 mod test_socket_tools;
+mod test_udp_socket_io;
 mod test_udp_ttl_send;
 mod test_yield_timing;
 
@@ -102,6 +103,10 @@ pub async fn run_all_tests() {
     test_yield_timing::test_all().await;
     info!("TEST: exec_test_wake_and_deadline");
     test_wake_and_deadline::test_all().await;
+    info!("TEST: exec_test_sleep_until");
+    test_sleep_until::test_all().await;
+    info!("TEST: exec_test_udp_socket_io");
+    test_udp_socket_io::test_all().await;
 
     info!("Finished unit tests");
 }
@@ -354,6 +359,22 @@ cfg_if! {
             setup();
             block_on(async {
                 test_yield_timing::test_all().await;
+            });
+        }
+
+        #[test]
+        fn run_test_sleep_until() {
+            setup();
+            block_on(async {
+                test_sleep_until::test_all().await;
+            });
+        }
+
+        #[test]
+        fn run_test_udp_socket_io() {
+            setup();
+            block_on(async {
+                test_udp_socket_io::test_all().await;
             });
         }
     }

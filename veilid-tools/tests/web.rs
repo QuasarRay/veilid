@@ -129,3 +129,10 @@ async fn run_test_tracked_mutex() {
 
     test_tracked_mutex::test_all();
 }
+
+#[wasm_bindgen_test]
+async fn run_test_sleep_until() {
+    setup();
+
+    test_sleep_until::test_all().await;
+}

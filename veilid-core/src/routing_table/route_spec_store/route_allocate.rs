@@ -510,7 +510,7 @@ impl RouteSpecStore {
         #[cfg(feature = "geolocation")]
         let registry = self.registry();
         Box::new(
-            move |entry: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| -> bool {
+            move |entry: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| -> bool {
                 // Exclude our own node from routes
                 let Some(snap) = entry else {
                     return false;
@@ -518,6 +518,10 @@ impl RouteSpecStore {
 
                 // Defensively exclude nodes that aren't responsive
                 if !snap.state.is_responsive() {
+                    return false;
+                }
+
+                if snap.has_expired_peer_info(RoutingDomain::PublicInternet, cur_ts) {
                     return false;
                 }
 

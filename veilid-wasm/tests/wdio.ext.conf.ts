@@ -27,7 +27,6 @@ export const config: typeof baseConfig = {
       },
       'goog:loggingPrefs': { browser: 'OFF' },
       'wdio:enforceWebDriverClassic': true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any,
+    } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
   ],
 };

@@ -4,8 +4,9 @@ use crate::network_manager::*;
 use crate::routing_table::*;
 use crate::storage_manager::*;
 
+/// Boxed so that an inlined copy of this future does not grow every test that calls it.
 pub(crate) async fn init<S: AsRef<str>>(namespace: S) -> VeilidComponentRegistry {
-    init_with_config(namespace, |_| {}).await
+    Box::pin(init_with_config(namespace, |_| {})).await
 }
 
 pub(crate) async fn init_with_config<S: AsRef<str>>(

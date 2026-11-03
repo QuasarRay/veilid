@@ -189,6 +189,89 @@ impl Default for VeilidConfigWSS {
     }
 }
 
+/// Enable and configure WebTransport (HTTP/3 over QUIC).
+///
+/// `listen_address` means the same thing here as it does for the other protocols. When it
+/// resolves to the same bind target as `udp.listen_address`, WebTransport shares the node's
+/// UDP listener socket and port, with the QUIC traffic demultiplexed from raw UDP. When it
+/// resolves to a different bind target, WebTransport binds a dedicated QUIC-only UDP socket
+/// instead. `listen` defaults to false in the browser, which cannot accept inbound
+/// connections.
+///
+/// By default the listener generates and rotates its own ECDSA-P256 certificate and
+/// advertises it by SHA-256 hash, so no CA certificate or hostname is required. Setting
+/// `url` switches it into CA-signed mode for bootstrap servers reachable by domain name:
+/// the certificate comes from `network.tls` and clients validate it against the system
+/// CA roots.
+///
+/// ```yaml
+/// webtransport:
+///     connect: true
+///     listen: true
+///     listen_address: ':5150'
+///     path: 'wt'
+///     url: ''
+///
+#[cfg(feature = "enable-protocol-webtransport")]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
+pub struct VeilidConfigWebTransport {
+    /// Allow outbound WebTransport connections.
+    pub connect: bool,
+    /// Accept inbound WebTransport connections.
+    pub listen: bool,
+    /// Local address to bind, as `ip:port` (empty binds the default port). A bind target
+    /// equal to `udp.listen_address`'s shares the node's UDP socket rather than binding a
+    /// dedicated one.
+    #[serde(default)]
+    pub listen_address: String,
+    /// URL path segment served by the WebTransport listener. Advertised self-signed URLs
+    /// become `https://{addr}:{port}/{path}`, and inbound requests with a different path
+    /// are rejected.
+    #[serde(default = "default_webtransport_path")]
+    pub path: String,
+    /// Externally-reachable `https://host:port/` URL to advertise, which selects CA-signed
+    /// mode.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub url: Option<String>,
+}
+
+#[cfg(feature = "enable-protocol-webtransport")]
+fn default_webtransport_path() -> String {
+    "wt".to_string()
+}
+
+/// Maximum length of an inbound WebTransport CONNECT request path, mirroring the WS listener's
+/// `MAX_WS_HEADER_LENGTH` cap on a single request header.
+///
+/// The HTTP/3 layer bounds a CONNECT header block only by its 64 KiB frame limit, so without
+/// this the path an unauthenticated peer sends is copied and logged at that size.
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(crate) const MAX_WEBTRANSPORT_PATH_LENGTH: usize = 512;
+
+#[cfg(feature = "enable-protocol-webtransport")]
+impl Default for VeilidConfigWebTransport {
+    fn default() -> Self {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+                // Browsers connect out via WebTransport but cannot listen.
+                let connect = true;
+                let listen = false;
+            } else {
+                let connect = true;
+                let listen = true;
+            }
+        }
+        Self {
+            connect,
+            listen,
+            listen_address: String::from(""),
+            path: default_webtransport_path(),
+            url: None,
+        }
+    }
+}
+
 /// Configure Network Protocols.
 ///
 /// Veilid can communicate over UDP, TCP, and Web Sockets.
@@ -206,8 +289,19 @@ pub struct VeilidConfigProtocol {
     /// WebSocket protocol configuration.
     pub ws: VeilidConfigWS,
     /// Secure WebSocket protocol configuration.
+    ///
+    /// `#[serde(default)]` keeps configs that leave this section out deserializing
+    /// against a feature-enabled core.
     #[cfg(feature = "enable-protocol-wss")]
+    #[serde(default)]
     pub wss: VeilidConfigWSS,
+    /// WebTransport protocol configuration.
+    ///
+    /// `#[serde(default)]` keeps externally-supplied configs that predate this field
+    /// deserializing against a feature-enabled core.
+    #[cfg(feature = "enable-protocol-webtransport")]
+    #[serde(default)]
+    pub webtransport: VeilidConfigWebTransport,
 }
 
 /// Privacy preferences for routes.
@@ -1381,6 +1475,56 @@ impl VeilidConfig {
         Ok(())
     }
 
+    /// Peers dial the advertised WebTransport URL after WHATWG normalization, so a configured
+    /// path that normalization rewrites, or that overruns the listener's request path cap,
+    /// would 404 against this node's own listener.
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn validate_webtransport_path(&self) -> VeilidAPIResult<()> {
+        let request_path = format!(
+            "/{}",
+            self.network.protocol.webtransport.path.trim_matches('/')
+        );
+        let advertised = url::Url::parse(&format!("https://veilid.invalid{request_path}"))
+            .map_err(|e| {
+                VeilidAPIError::generic(format!(
+                    "invalid 'network.protocol.webtransport.path': {e}"
+                ))
+            })?;
+        if advertised.path() != request_path {
+            apibail_generic!(format!(
+                "'network.protocol.webtransport.path' is rewritten to '{}' by URL normalization and would not match this node's own advertised WebTransport URL",
+                advertised.path()
+            ));
+        }
+        if request_path.len() > MAX_WEBTRANSPORT_PATH_LENGTH {
+            apibail_generic!(format!(
+                "'network.protocol.webtransport.path' makes a request path longer than the {MAX_WEBTRANSPORT_PATH_LENGTH} byte WebTransport listener limit"
+            ));
+        }
+        Ok(())
+    }
+
+    /// A dialing peer takes its CONNECT path from the advertised URL as the `url` crate parses
+    /// it, so the configured path must match that round trip rather than a percent-decoding of
+    /// the configured URL.
+    #[cfg(feature = "enable-protocol-webtransport")]
+    fn validate_webtransport_url(&self, url: &str) -> VeilidAPIResult<()> {
+        SplitUrl::from_str(url).map_err(|e| {
+            VeilidAPIError::generic(format!("invalid 'network.protocol.webtransport.url': {e}"))
+        })?;
+        let advertised = url::Url::parse(url).map_err(|e| {
+            VeilidAPIError::generic(format!("invalid 'network.protocol.webtransport.url': {e}"))
+        })?;
+        let url_path = advertised.path().trim_matches('/');
+        let configured_path = self.network.protocol.webtransport.path.trim_matches('/');
+        if !url_path.is_empty() && url_path != configured_path {
+            apibail_generic!(
+                "WebTransport URL path in 'network.protocol.webtransport.url' must match 'network.protocol.webtransport.path'"
+            );
+        }
+        Ok(())
+    }
+
     /// Check the config for invalid or out-of-range values.
     pub fn validate(&self) -> VeilidAPIResult<()> {
         Self::validate_program_name(&self.program_name)?;
@@ -1407,6 +1551,39 @@ impl VeilidConfig {
                 apibail_generic!(
                     "WSS URL must be specified in config key 'network.protocol.wss.url'"
                 );
+            }
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if self.network.protocol.webtransport.listen {
+            if !self.network.protocol.udp.enabled {
+                apibail_generic!(
+                    "'network.protocol.webtransport.listen' requires 'network.protocol.udp.enabled', because the WebTransport listener is only bound alongside the UDP protocol handlers"
+                );
+            }
+            if self
+                .network
+                .protocol
+                .webtransport
+                .url
+                .as_ref()
+                .is_some_and(|u| !u.is_empty())
+                && (self.network.tls.certificate_path.is_empty()
+                    || self.network.tls.private_key_path.is_empty())
+            {
+                apibail_generic!(
+                    "WebTransport CA-signed mode ('network.protocol.webtransport.url' is set) requires 'network.tls.certificate_path' and 'network.tls.private_key_path'"
+                );
+            }
+            self.validate_webtransport_path()?;
+            if let Some(url) = self
+                .network
+                .protocol
+                .webtransport
+                .url
+                .as_ref()
+                .filter(|u| !u.is_empty())
+            {
+                self.validate_webtransport_url(url)?;
             }
         }
         if self.internal().network.rpc.max_route_hop_count == 0 {

@@ -10,14 +10,13 @@
     "@eslint/js": "^9.39.1",
     "@typescript-eslint/eslint-plugin": "^8.48.1",
     "@typescript-eslint/parser": "^8.48.1",
-    "@wdio/browser-runner": "^9.21.0",
-    "@wdio/cli": "^9.21.1",
-    "@wdio/mocha-framework": "^7.7.3",
+    "@wdio/browser-runner": "^9.33.1",
+    "@wdio/cli": "^9.33.1",
+    "@wdio/mocha-framework": "^9.33.1",
     "@wdio/spec-reporter": "^8.16.3",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "prettier": "3.9.10",
-    "ts-node": "^10.9.1",
     "typescript": "^5.2.2",
     "typescript-eslint": "^8.48.1",
     "veilid-wasm": "file:../pkg",
@@ -30,5 +29,8 @@
     "build:ext": "vite build --config vite.ext.config.ts",
     "test:ext": "npm run build:ext && wdio run ./wdio.ext.conf.ts",
     "start": "tsc && npm run test:headless"
+  },
+  "overrides": {
+    "yauzl": "^3.4.0"
   }
 }

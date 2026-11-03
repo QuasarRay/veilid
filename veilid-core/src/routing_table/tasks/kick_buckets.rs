@@ -65,6 +65,10 @@ impl RoutingTable {
                             continue;
                         }
 
+                        // An entry whose stored peer info has expired keeps its place
+                        // here while the node still answers: our next ping after the
+                        // peer republishes refreshes the record through sender peer
+                        // info.
                         let state = entry.with(|e| e.state(cur_ts));
                         match state {
                             BucketEntryState::Dead

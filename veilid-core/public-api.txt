@@ -1191,7 +1191,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -2674,6 +2674,8 @@ pub fn veilid_core::TimestampDuration::f64_mul(self, f64) -> Self
 pub fn veilid_core::TimestampDuration::interval<F, FUT>(self, &str, bool, F) -> veilid_tools::pin::PinBoxFutureStatic<()> where F: core::ops::function::Fn() -> FUT + core::marker::Send + core::marker::Sync + 'static, FUT: core::future::future::Future<Output = ()> + core::marker::Send
 pub fn veilid_core::TimestampDuration::is_zero(&self) -> bool
 pub fn veilid_core::TimestampDuration::millis_u32(&self) -> core::result::Result<u32, alloc::string::String>
+pub const fn veilid_core::TimestampDuration::new_days(u32) -> Self
+pub const fn veilid_core::TimestampDuration::new_hours(u32) -> Self
 pub const fn veilid_core::TimestampDuration::new_ms(u64) -> Self
 pub const fn veilid_core::TimestampDuration::new_secs(u32) -> Self
 pub const fn veilid_core::TimestampDuration::saturating_add(self, Self) -> Self

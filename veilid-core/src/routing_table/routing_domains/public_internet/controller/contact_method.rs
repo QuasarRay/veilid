@@ -4,20 +4,32 @@ impl_veilid_log_facility!("rtab");
 
 /// Context for calculating contact method
 pub struct ContactMethodContext {
+    /// The peers, dial info filter and sequencing the methods are computed for
     pub request: ContactMethodRequest,
+    /// The time the context was built, against which dial info expirations are judged
+    pub cur_ts: Timestamp,
+    /// The best crypto kind the two peers share
     pub best_ck: CryptoKind,
+    /// Node B's id under that crypto kind
     pub node_b_id: NodeId,
+    /// Node B's dial info node A reaches directly, within the request's filter
     pub a_to_b_direct_dids: Vec<DialInfoDetail>,
+    /// Node B's dial info node A reaches only with a signal
     pub a_to_b_signalled_dids: Vec<DialInfoDetail>,
+    /// Node A's dial info node B reaches directly, under an open filter
     pub b_to_a_direct_dids: Vec<DialInfoDetail>,
+    /// Node A's dial info node B reaches only with a signal
     pub b_to_a_signalled_dids: Vec<DialInfoDetail>,
+    /// Node B's relays node A reaches directly, with the dial info to use
     pub node_b_reachable_relays: Vec<(RelayInfo, Vec<DialInfoDetail>)>,
+    /// Node A is one of node B's relays, so a connection should already exist
     pub should_have_existing_connection: bool,
 }
 impl fmt::Debug for ContactMethodContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ContactMethodContext")
             .field("request", &self.request)
+            .field("cur_ts", &self.cur_ts)
             .field("best_ck", &self.best_ck)
             .field("node_b_id", &self.node_b_id)
             .field("a_to_b_direct_dids", &self.a_to_b_direct_dids)
@@ -32,6 +44,68 @@ impl fmt::Debug for ContactMethodContext {
             .finish()
     }
 }
+fn add_hole_punch_contact_methods(
+    out: &mut Vec<ContactMethod>,
+    ctx: &ContactMethodContext,
+    signalling_dids: &[DialInfoDetail],
+    select: impl Fn(&DialInfoDetail) -> bool,
+) {
+    // Collect the dialinfo from node A to node B that require signal
+    let mut target_dids = ctx
+        .a_to_b_signalled_dids
+        .iter()
+        .filter(|did| select(did))
+        .collect::<Vec<_>>();
+    let target_transport_types = target_dids
+        .iter()
+        .map(|did| did.dial_info.transport_type())
+        .collect::<HashSet<_>>();
+
+    // Collect the dialinfo from node B to node A that require signal
+    let mut reverse_dids = ctx
+        .b_to_a_signalled_dids
+        .iter()
+        .filter(|did| select(did))
+        .collect::<Vec<_>>();
+    let reverse_transport_types = reverse_dids
+        .iter()
+        .map(|did| did.dial_info.transport_type())
+        .collect::<HashSet<_>>();
+
+    // Get the best forward and reverse dial info that have the same protocol type and address type
+    let intersected_transport_types = target_transport_types
+        .intersection(&reverse_transport_types)
+        .copied()
+        .collect::<HashSet<_>>();
+    if intersected_transport_types.is_empty() {
+        return;
+    }
+
+    target_dids.retain(|did| intersected_transport_types.contains(&did.dial_info.transport_type()));
+    reverse_dids
+        .retain(|did| intersected_transport_types.contains(&did.dial_info.transport_type()));
+
+    // Add holepunch-capable pairs
+    for target_did in target_dids.iter() {
+        for reverse_did in reverse_dids.iter() {
+            // Ensure both dialinfo have the same transport type
+            if target_did.dial_info.transport_type() != reverse_did.dial_info.transport_type() {
+                continue;
+            }
+
+            // The target and ourselves have a dialinfo each can reach,
+            // so add them for each signalling dialinfo
+            for signalling_did in signalling_dids.iter() {
+                out.push(ContactMethod::SignalHolePunch {
+                    relay_di: signalling_did.dial_info.clone(),
+                    hole_punch_di: target_did.dial_info.clone(),
+                    reverse_hole_punch_di: reverse_did.dial_info.clone(),
+                });
+            }
+        }
+    }
+}
+
 impl ContactMethodContext {
     pub fn node_a(&self) -> &NodeInfo {
         self.request.peer_a.node_info()
@@ -117,6 +191,7 @@ impl PublicInternetRoutingDomainController {
         to_node: &dyn HasDialInfoDetailList,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
+        cur_ts: Timestamp,
     ) -> Vec<DialInfoDetail> {
         let from_node_addresses = from_node
             .dial_info_detail_list()
@@ -129,6 +204,7 @@ impl PublicInternetRoutingDomainController {
             to_node,
             dial_info_filter,
             sequencing,
+            cur_ts,
         );
         direct_dids.retain(|did| !from_node_addresses.contains(&did.dial_info.address()));
         direct_dids
@@ -142,6 +218,8 @@ impl PublicInternetRoutingDomainController {
         // Get the nodeinfos for convenience
         let node_a = request.peer_a.node_info();
         let node_b = request.peer_b.node_info();
+
+        let cur_ts = Timestamp::now();
 
         // Get the node ids that would be used between these peers
         let cck = common_crypto_kinds(
@@ -163,6 +241,7 @@ impl PublicInternetRoutingDomainController {
             node_b,
             request.dial_info_filter,
             request.sequencing,
+            cur_ts,
         );
 
         let a_to_b_signalled_dids = a_to_b_direct_dids
@@ -178,6 +257,7 @@ impl PublicInternetRoutingDomainController {
             node_a,
             DialInfoFilter::all(),
             request.sequencing,
+            cur_ts,
         );
         let b_to_a_signalled_dids = b_to_a_direct_dids
             .extract_if(.., |did| did.class.requires_signal())
@@ -219,6 +299,7 @@ impl PublicInternetRoutingDomainController {
                         &node_b_relay,
                         request.dial_info_filter,
                         request.sequencing,
+                        cur_ts,
                     )
                     .into_iter()
                     .filter(|did| !did.class.requires_signal())
@@ -230,6 +311,7 @@ impl PublicInternetRoutingDomainController {
 
         let ctx = ContactMethodContext {
             request,
+            cur_ts,
             best_ck,
             //node_a_id,
             node_b_id,
@@ -281,68 +363,14 @@ impl PublicInternetRoutingDomainController {
             }
         }
 
-        // Collect the low-level udp dialinfo from node A to node B that require signal
-        let mut target_udp_dids = ctx
-            .a_to_b_signalled_dids
-            .iter()
-            .filter(|did| {
-                did.dial_info.protocol_type().low_level_protocol_type() == LowLevelProtocolType::UDP
-            })
-            .collect::<Vec<_>>();
-        let target_udp_transport_types = target_udp_dids
-            .iter()
-            .map(|did| did.dial_info.transport_type())
-            .collect::<HashSet<_>>();
+        add_hole_punch_contact_methods(out, ctx, &signalling_dids, |did| {
+            did.dial_info.protocol_type() == ProtocolType::UDP
+        });
 
-        // Collect the low-level udp dialinfo from node B to node A that require signal
-        let mut reverse_udp_dids = ctx
-            .b_to_a_signalled_dids
-            .iter()
-            .filter(|did| {
-                did.dial_info.protocol_type().low_level_protocol_type() == LowLevelProtocolType::UDP
-            })
-            .collect::<Vec<_>>();
-        let reverse_udp_transport_types = reverse_udp_dids
-            .iter()
-            .map(|did| did.dial_info.transport_type())
-            .collect::<HashSet<_>>();
-
-        // Get the best forward and reverse dial info that have the same protocol type and address type
-        let intersected_udp_transport_types = target_udp_transport_types
-            .intersection(&reverse_udp_transport_types)
-            .copied()
-            .collect::<HashSet<_>>();
-
-        if !intersected_udp_transport_types.is_empty() {
-            target_udp_dids.retain(|did| {
-                intersected_udp_transport_types.contains(&did.dial_info.transport_type())
-            });
-            reverse_udp_dids.retain(|did| {
-                intersected_udp_transport_types.contains(&did.dial_info.transport_type())
-            });
-
-            // Add holepunch-capable pairs
-            for target_udp_did in target_udp_dids.iter() {
-                for reverse_udp_did in reverse_udp_dids.iter() {
-                    // Ensure both dialinfo have the same transport type
-                    if target_udp_did.dial_info.transport_type()
-                        != reverse_udp_did.dial_info.transport_type()
-                    {
-                        continue;
-                    }
-
-                    // The target and ourselves have a udp dialinfo that they can reach,
-                    // so add them for each signalling dialinfo
-                    for signalling_did in signalling_dids.iter() {
-                        out.push(ContactMethod::SignalHolePunch {
-                            relay_di: signalling_did.dial_info.clone(),
-                            hole_punch_di: target_udp_did.dial_info.clone(),
-                            reverse_hole_punch_di: reverse_udp_did.dial_info.clone(),
-                        });
-                    }
-                }
-            }
-        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        add_hole_punch_contact_methods(out, ctx, &signalling_dids, |did| {
+            did.dial_info.protocol_type() == ProtocolType::WTS
+        });
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
@@ -389,6 +417,7 @@ impl PublicInternetRoutingDomainController {
                 node_a_relay,
                 ctx.request.dial_info_filter,
                 ctx.request.sequencing,
+                ctx.cur_ts,
             ) {
                 // Skip anything that requires a signal
                 if relay_target_did.class.requires_signal() {

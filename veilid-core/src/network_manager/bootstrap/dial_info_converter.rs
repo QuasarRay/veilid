@@ -52,6 +52,8 @@ where
                 "W" => format!("ws://{}:{}", hostname, port),
                 #[cfg(feature = "enable-protocol-wss")]
                 "S" => format!("wss://{}:{}", hostname, port),
+                #[cfg(feature = "enable-protocol-webtransport")]
+                "B" => format!("wts://{}:{}", hostname, port),
                 _ => {
                     apibail_parse_error!("invalid short url type", short);
                 }
@@ -76,6 +78,8 @@ where
                 "ws" => split_url.port.unwrap_or(80u16),
                 #[cfg(feature = "enable-protocol-wss")]
                 "wss" => split_url.port.unwrap_or(443u16),
+                #[cfg(feature = "enable-protocol-webtransport")]
+                "wts" => split_url.port.unwrap_or(443u16),
                 _ => {
                     apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
                 }
@@ -107,6 +111,13 @@ where
                     "wss" => DialInfo::try_wss(
                         SocketAddress::from_socket_addr(sa).canonical(),
                         url.to_string(),
+                    )?,
+                    #[cfg(feature = "enable-protocol-webtransport")]
+                    "wts" => DialInfo::try_webtransport_stream(
+                        SocketAddress::from_socket_addr(sa).canonical(),
+                        url.replacen("wts://", "https://", 1),
+                        vec![],
+                        None,
                     )?,
                     _ => {
                         apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
@@ -175,6 +186,43 @@ where
                         hostname: split_url.host.to_string(),
                     }
                 }
+                // The datagram half shares the stream's `B` short form, which the generator then
+                // dedupes into a single entry; a short form of its own would not parse back.
+                #[cfg(feature = "enable-protocol-webtransport")]
+                DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => {
+                    let split_url = SplitUrl::from_str(&di.request).unwrap_or_log();
+                    let url_host = split_url.host.to_string();
+                    let url_host_is_name = matches!(split_url.host, SplitUrlHost::Hostname(_));
+                    let port = split_url.port.unwrap_or(443);
+                    let path = split_url
+                        .path
+                        .map(|p| p.to_string())
+                        .filter(|p| !p.is_empty())
+                        .map(|p| format!("/{}", p))
+                        .unwrap_or_default();
+                    let ip = di.socket_address.ip_addr();
+                    let hostname = match self.ptr_lookup(ip).await {
+                        Ok(ptr_name) => {
+                            if url_host_is_name && ptr_name != url_host {
+                                tracing::info!(target: "net",
+                                    "WebTransport bootstrap short form for {} advertises PTR-derived hostname {:?}, which differs from the dial info URL host {:?}; browser validation requires the CA certificate SAN to cover {:?}",
+                                    ip, ptr_name, url_host, ptr_name);
+                            }
+                            ptr_name
+                        }
+                        Err(e) => {
+                            let fallback = di.socket_address.to_string();
+                            tracing::warn!(target: "net",
+                                "WebTransport bootstrap short form for {}: reverse DNS (PTR) lookup failed ({}); falling back to the IP literal {:?}. A CA-signed WebTransport certificate cannot validate a bare IP, so WebTransport bootstrap fails for this host while WSS/WS entries in the same record still work. Configure reverse DNS resolving to a name covered by the certificate SAN.",
+                                ip, e, fallback);
+                            fallback
+                        }
+                    };
+                    ShortDialInfo {
+                        short_url: format!("B{}{}", port, path),
+                        hostname,
+                    }
+                }
             }
         })
     }
@@ -213,6 +261,8 @@ where
                     }
                     split_url.to_string()
                 }
+                #[cfg(feature = "enable-protocol-webtransport")]
+                DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => di.request,
             }
         })
     }

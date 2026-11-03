@@ -140,7 +140,7 @@ impl VeilidClient {
     }
 
     /// The largest DHT value sequence number. Subtract `n` for a `minSeqnum` that leaves `n` writes
-    #[wasm_bindgen(getter, unchecked_return_type = "ValueSeqNum")]
+    #[wasm_bindgen(getter, unchecked_return_type = "number")]
     #[must_use]
     pub fn VALUE_SEQ_NUM_MAX() -> JsValue {
         JsValue::from(u32::from(ValueSeqNum::MAX))

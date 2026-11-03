@@ -4,9 +4,10 @@
 # Pipeline: cargo build → wasm-bindgen → wasm-opt (release only).
 #
 # Usage:
-#   ./wasm_build_js.sh                 # debug build (keeps DWARF info)
+#   ./wasm_build_js.sh                 # debug build (debug-api, wasm-bindgen --keep-debug)
 #   ./wasm_build_js.sh release         # size profile + wasm-opt -Oz
 #   ./wasm_build_js.sh release --features=foo
+#   ./wasm_build_js.sh release --no-wasm-opt   # release build, skip the slow wasm-opt pass
 #
 # Extra args after the optional `release` token are forwarded to cargo build.
 
@@ -23,15 +24,36 @@ else
     RELEASE=0
 fi
 
+SKIP_WASM_OPT=0
+CARGO_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-wasm-opt|--skip-wasm-opt)
+            SKIP_WASM_OPT=1
+            ;;
+        *)
+            CARGO_ARGS+=("$arg")
+            ;;
+    esac
+done
+set -- "${CARGO_ARGS[@]}"
+
 OUTPUTDIR="$SCRIPTDIR/pkg"
 WORKSPACE_TARGET="$SCRIPTDIR/../target/wasm32-unknown-unknown"
 
 # --- cargo build -------------------------------------------------------------
+# A RUSTFLAGS in the environment replaces the `[target.wasm32-unknown-unknown]` rustflags in
+# the workspace `.cargo/config.toml` wholesale rather than adding to them, so re-add the
+# `--cfg=web_sys_unstable_apis` that the web-sys WebTransport bindings need.
+if [ -n "$RUSTFLAGS" ]; then
+    export RUSTFLAGS="$RUSTFLAGS --cfg=web_sys_unstable_apis"
+fi
+
 if [ "$RELEASE" -eq 1 ]; then
     cargo build --target wasm32-unknown-unknown --profile size "$@"
     WASM_IN="$WORKSPACE_TARGET/size/veilid_wasm.wasm"
 else
-    RUSTFLAGS="-g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --features debug-api "$@"
+    cargo build --target wasm32-unknown-unknown --features debug-api "$@"
     WASM_IN="$WORKSPACE_TARGET/debug/veilid_wasm.wasm"
 fi
 
@@ -46,7 +68,10 @@ else
 fi
 
 # --- wasm-opt (release only) ------------------------------------------------
-if [ "$RELEASE" -eq 1 ]; then
+if [ "$RELEASE" -eq 1 ] && [ "$SKIP_WASM_OPT" -eq 1 ]; then
+    echo "Skipping wasm-opt (--no-wasm-opt); release bundle is unoptimized."
+fi
+if [ "$RELEASE" -eq 1 ] && [ "$SKIP_WASM_OPT" -eq 0 ]; then
     wasm-opt \
         --converge \
         --low-memory-unused \

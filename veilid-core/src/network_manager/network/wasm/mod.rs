@@ -38,7 +38,7 @@ struct WasmNetworkInner {
     offline_event_listener_jh: Option<MustJoinHandle<()>>,
 }
 
-pub(super) struct WasmNetworkUnlockedInner {
+pub(in crate::network_manager) struct WasmNetworkUnlockedInner {
     // Startup lock
     startup_lock: StartupLock,
     // Bound on one send; a stalled connection parks channel sends forever otherwise
@@ -46,7 +46,7 @@ pub(super) struct WasmNetworkUnlockedInner {
 }
 
 #[derive(Clone)]
-pub(super) struct WasmNetwork {
+pub(in crate::network_manager) struct WasmNetwork {
     registry: VeilidComponentRegistry,
     inner: Arc<Mutex<WasmNetworkInner>>,
     unlocked_inner: Arc<WasmNetworkUnlockedInner>,
@@ -267,6 +267,19 @@ impl PlatformNetwork for WasmNetwork {
                         .wrap_err("connect failure")?);
                         network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
                     }
+                    #[cfg(feature = "enable-protocol-webtransport")]
+                    ProtocolType::WTS | ProtocolType::WTD => {
+                        let pnc = network_result_try!(
+                            webtransport::WebTransportProtocolHandler::connect(
+                                self.registry(),
+                                dial_info,
+                                timeout_ms
+                            )
+                            .await
+                            .wrap_err("connect failure")?
+                        );
+                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
+                    }
                 };
                 Ok(NetworkResult::Value(()))
             }
@@ -358,6 +371,32 @@ impl PlatformNetwork for WasmNetwork {
                             )
                             .await
                             .wrap_err("connect failure")?,
+                            // WebTransport dials and closes its own session per exchange
+                            #[cfg(feature = "enable-protocol-webtransport")]
+                            ProtocolType::WTS | ProtocolType::WTD => {
+                                let send_recv_res =
+                                    webtransport::WebTransportProtocolHandler::send_recv(
+                                        self.registry(),
+                                        dial_info,
+                                        data,
+                                        mtu,
+                                        timeout_ms,
+                                    )
+                                    .await?;
+                                if let Some(outcome) =
+                                    TransportSendOutcome::from_network_result(&send_recv_res)
+                                {
+                                    network_manager
+                                        .transport_stats()
+                                        .record_unbound_send(&stats_dial_info, outcome);
+                                }
+                                let out = network_result_try!(send_recv_res);
+                                network_manager
+                                    .stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
+                                network_manager
+                                    .stats_packet_rcvd(ip_addr, ByteCount::new(out.len() as u64));
+                                return Ok(NetworkResult::Value(out));
+                            }
                         };
                         // Attribute connect+send only; a missing reply is the peer's silence
                         let pnc = match connect_res {
@@ -620,6 +659,8 @@ impl WasmNetwork {
             let inbound = ProtocolTypeSet::new();
             let mut outbound = ProtocolTypeSet::new();
 
+            let secure = is_secure_context();
+
             if config.network.protocol.ws.connect {
                 outbound.insert(ProtocolType::WS);
             }
@@ -627,6 +668,14 @@ impl WasmNetwork {
             if config.network.protocol.wss.connect {
                 outbound.insert(ProtocolType::WSS);
             }
+            #[cfg(feature = "enable-protocol-webtransport")]
+            if config.network.protocol.webtransport.connect && (!is_browser() || secure) {
+                outbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
+            }
+
+            veilid_log!(self debug
+                "wasm outbound transports ({} context): {:?}",
+                if secure { "secure" } else { "insecure" }, outbound);
 
             // Start optimistic (all config-allowed families) but unconfirmed; the routing
             // domain sits in NeedsDialInfoConfirmation until confirm_address_families()
