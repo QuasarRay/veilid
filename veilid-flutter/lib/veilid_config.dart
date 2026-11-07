@@ -603,6 +603,10 @@ sealed class VeilidConfigAppLifecycle with _$VeilidConfigAppLifecycle {
     /// While attached, keep a hidden desktop app from being throttled; no
     /// effect on mobile.
     @Default(true) bool preferForeground,
+
+    /// Follow the platform's own lifecycle reports where it has them; when
+    /// false, only [Veilid.reportAppLifecycleState] counts.
+    @Default(true) bool autoDetectState,
   }) = _VeilidConfigAppLifecycle;
 
   factory VeilidConfigAppLifecycle.fromJson(dynamic json) =>

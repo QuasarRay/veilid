@@ -1005,7 +1005,10 @@ impl NetworkManager {
                 };
 
                 match opt_dial_info {
-                    #[cfg(feature = "enable-protocol-webtransport")]
+                    #[cfg(all(
+                        feature = "enable-protocol-webtransport",
+                        not(target_arch = "wasm32")
+                    ))]
                     Some(hole_punch_di) if hole_punch_is_webtransport(&hole_punch_di) => {
                         self.handle_hole_punch_webtransport(peer_nr, receipt, hole_punch_di)
                             .await
@@ -1077,7 +1080,7 @@ impl NetworkManager {
         .wrap_err("rpc failure")
     }
 
-    #[cfg(feature = "enable-protocol-webtransport")]
+    #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1091,18 +1094,36 @@ impl NetworkManager {
         let routing_table = self.routing_table();
         let rpc = self.rpc_processor();
 
-        let receipt_returns_over_punched_udp_flow = routing_table
+        // The receipt returns over the session opened through the hole
+        let receipt_returns_over_punched_session = routing_table
             .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
-            .with_protocol_type(ProtocolType::UDP)
+            .with_protocol_type(hole_punch_di.protocol_type())
             .with_address_type(hole_punch_di.address_type());
-        peer_nr.set_filter(receipt_returns_over_punched_udp_flow);
+        peer_nr.set_filter(receipt_returns_over_punched_session);
 
-        let unique_flow = network_result_try!(self.net().send_hole_punch(hole_punch_di).await?);
+        network_result_try!(self.net().send_hole_punch(hole_punch_di.clone()).await?);
 
         sleep(HOLE_PUNCH_DELAY_MS).await;
 
+        // From the listening socket, whose port the peer's hole admits, to the signal's dial info
+        let connect_timeout_ms = self.webtransport_hole_punch_connect_timeout_ms();
+        let prot_conn = network_result_try!(
+            pin_future!(self
+                .platform_net()
+                .connect_via_shared_webtransport_endpoint(
+                    hole_punch_di.clone(),
+                    connect_timeout_ms
+                ))
+            .await?
+        );
+        let handle = network_result_try!(
+            self.connection_manager()
+                .register_outbound_protocol_connection(prot_conn, hole_punch_di)
+                .await?
+        );
+
         rpc.rpc_call_return_receipt(
-            Destination::direct(peer_nr.with_reply_flow(unique_flow.flow), None),
+            Destination::direct(peer_nr.with_reply_flow(handle.unique_flow().flow), None),
             receipt,
         )
         .await

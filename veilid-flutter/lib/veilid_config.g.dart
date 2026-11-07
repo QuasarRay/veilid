@@ -597,11 +597,15 @@ _VeilidConfigAppLifecycle _$VeilidConfigAppLifecycleFromJson(
   Map<String, dynamic> json,
 ) => _VeilidConfigAppLifecycle(
   preferForeground: json['preferForeground'] as bool? ?? true,
+  autoDetectState: json['autoDetectState'] as bool? ?? true,
 );
 
 Map<String, dynamic> _$VeilidConfigAppLifecycleToJson(
   _VeilidConfigAppLifecycle instance,
-) => <String, dynamic>{'preferForeground': instance.preferForeground};
+) => <String, dynamic>{
+  'preferForeground': instance.preferForeground,
+  'autoDetectState': instance.autoDetectState,
+};
 
 _VeilidConfigAttachment _$VeilidConfigAttachmentFromJson(
   Map<String, dynamic> json,

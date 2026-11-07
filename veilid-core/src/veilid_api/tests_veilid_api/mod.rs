@@ -23,4 +23,6 @@ pub async fn test_all() {
     test_value_seq_num::value_seq_num_parse();
     test_config::test_internal_footgun_gate();
     test_config::test_bind_retry_ms_defaults_when_absent();
+    test_config::test_config_ignores_unknown_sections();
+    test_config::test_feature_sections_default_when_absent();
 }

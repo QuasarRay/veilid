@@ -3009,7 +3009,9 @@ pub fn veilid_core::VeilidConfigProtectedStore::default() -> Self
 pub struct veilid_core::VeilidConfigProtocol
 pub veilid_core::VeilidConfigProtocol::tcp: veilid_core::VeilidConfigTCP
 pub veilid_core::VeilidConfigProtocol::udp: veilid_core::VeilidConfigUDP
+pub veilid_core::VeilidConfigProtocol::webtransport: veilid_core::VeilidConfigWebTransport
 pub veilid_core::VeilidConfigProtocol::ws: veilid_core::VeilidConfigWS
+pub veilid_core::VeilidConfigProtocol::wss: veilid_core::VeilidConfigWSS
 pub struct veilid_core::VeilidConfigRPC
 pub veilid_core::VeilidConfigRPC::default_route_hop_count: u8
 impl core::default::Default for veilid_core::VeilidConfigRPC
@@ -3057,6 +3059,22 @@ pub veilid_core::VeilidConfigWS::path: alloc::string::String
 pub veilid_core::VeilidConfigWS::url: core::option::Option<alloc::string::String>
 impl core::default::Default for veilid_core::VeilidConfigWS
 pub fn veilid_core::VeilidConfigWS::default() -> Self
+pub struct veilid_core::VeilidConfigWSS
+pub veilid_core::VeilidConfigWSS::connect: bool
+pub veilid_core::VeilidConfigWSS::listen: bool
+pub veilid_core::VeilidConfigWSS::listen_address: alloc::string::String
+pub veilid_core::VeilidConfigWSS::path: alloc::string::String
+pub veilid_core::VeilidConfigWSS::url: core::option::Option<alloc::string::String>
+impl core::default::Default for veilid_core::VeilidConfigWSS
+pub fn veilid_core::VeilidConfigWSS::default() -> Self
+pub struct veilid_core::VeilidConfigWebTransport
+pub veilid_core::VeilidConfigWebTransport::connect: bool
+pub veilid_core::VeilidConfigWebTransport::listen: bool
+pub veilid_core::VeilidConfigWebTransport::listen_address: alloc::string::String
+pub veilid_core::VeilidConfigWebTransport::path: alloc::string::String
+pub veilid_core::VeilidConfigWebTransport::url: core::option::Option<alloc::string::String>
+impl core::default::Default for veilid_core::VeilidConfigWebTransport
+pub fn veilid_core::VeilidConfigWebTransport::default() -> Self
 pub struct veilid_core::VeilidLayerFilter
 impl veilid_core::VeilidLayerFilter
 pub fn veilid_core::VeilidLayerFilter::add_facilities<'a, L, N, T>(L, N, T) -> veilid_core::VeilidAPIResult<()> where L: core::iter::traits::collect::IntoIterator<Item = &'a str>, N: core::iter::traits::collect::IntoIterator<Item = &'a str>, T: core::iter::traits::collect::IntoIterator<Item = &'a str>

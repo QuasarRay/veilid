@@ -620,7 +620,7 @@ impl NativeNetwork {
             inbound.insert(ProtocolType::WSS);
         }
         #[cfg(feature = "enable-protocol-webtransport")]
-        if config.network.protocol.webtransport.listen && config.network.protocol.udp.enabled {
+        if config.network.protocol.webtransport.listen {
             inbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
         }
 

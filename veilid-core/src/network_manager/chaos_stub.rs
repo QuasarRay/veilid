@@ -65,7 +65,7 @@ impl Chaos {
     pub fn wrap_connection(
         &self,
         inner: ProtocolNetworkConnection,
-        _segment_size: Option<u32>,
+        _packet_size: Option<u32>,
     ) -> ProtocolNetworkConnection {
         inner
     }

@@ -44,11 +44,8 @@ function webTransportOnlyConfig() {
   config.namespace = 'webtransport-network';
 
   config.network.protocol.ws.connect = false;
-  // Only a build with the WebTransport feature, which this spec needs, types this section
-  const protocol = config.network.protocol as typeof config.network.protocol & {
-    webtransport?: { connect: boolean };
-  };
-  protocol.webtransport!.connect = true;
+  config.network.protocol.wss!.connect = false;
+  config.network.protocol.webtransport!.connect = true;
 
   return config;
 }

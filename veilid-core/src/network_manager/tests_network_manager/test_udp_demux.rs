@@ -226,7 +226,7 @@ pub fn test_raw_demux_channel_is_bounded() {
             .unwrap()
             .unwrap(),
     );
-    let (_socket, rx) = DemuxerUdpSocket::try_new(io).unwrap();
+    let (_socket, rx) = DemuxerUdpSocket::try_new(io, None).unwrap();
     assert_eq!(rx.capacity(), Some(RAW_DEMUX_CHANNEL_DEPTH));
 }
 
@@ -257,7 +257,7 @@ pub async fn test_poll_recv_yields_under_raw_flood() {
             .unwrap(),
     );
     let server_addr = server.local_addr().unwrap();
-    let (socket, rx) = DemuxerUdpSocket::try_new(server).unwrap();
+    let (socket, rx) = DemuxerUdpSocket::try_new(server, None).unwrap();
 
     let cap_drain = MAX_DRAIN_BATCHES_PER_POLL * BUFS * socket.max_receive_segments();
     let flood = cap_drain * 4;
@@ -332,7 +332,7 @@ pub async fn test_coalesced_slot_is_split_per_datagram() {
             .unwrap(),
     );
     let server_addr = server.local_addr().unwrap();
-    let (socket, rx) = DemuxerUdpSocket::try_new(server).unwrap();
+    let (socket, rx) = DemuxerUdpSocket::try_new(server, None).unwrap();
     let segments = socket.max_receive_segments();
     if segments < SEGMENTS {
         return;

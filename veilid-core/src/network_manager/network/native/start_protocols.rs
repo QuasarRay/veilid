@@ -223,7 +223,7 @@ impl NativeNetwork {
         }
 
         #[cfg(feature = "enable-protocol-webtransport")]
-        let plan = self.webtransport_bind_plan(&bind_set)?;
+        let plan = self.webtransport_bind_plan(Some(&bind_set))?;
         #[cfg(feature = "enable-protocol-webtransport")]
         {
             self.inner.lock().webtransport.shared_bind_mode =
@@ -279,6 +279,28 @@ impl NativeNetwork {
         // Now create tasks for udp listeners
         self.create_udp_listener_tasks()?;
 
+        Ok(StartupDisposition::Success)
+    }
+
+    /// WebTransport listeners on QUIC sockets of their own, for a node without RawUDP
+    #[cfg(feature = "enable-protocol-webtransport")]
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
+    pub(in crate::network_manager) fn bind_webtransport_without_udp(
+        &self,
+    ) -> EyreResult<StartupDisposition> {
+        let plan = self.webtransport_bind_plan(None)?;
+        self.inner.lock().webtransport.shared_bind_mode = false;
+        let WebTransportBindPlan::Dedicated(wt_bind_set, server_configs) = plan else {
+            return Ok(StartupDisposition::Success);
+        };
+        if !self.create_inbound_webtransport_dedicated_handlers(
+            wt_bind_set,
+            server_configs,
+            &BTreeSet::new(),
+        )? {
+            return Ok(StartupDisposition::BindRetry);
+        }
+        self.seed_webtransport_tls_mtimes();
         Ok(StartupDisposition::Success)
     }
 

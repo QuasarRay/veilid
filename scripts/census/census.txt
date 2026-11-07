@@ -18,7 +18,7 @@
 2 panic-census-sites veilid-tools/src/must_join_handle.rs
 1 panic-census-sites veilid-tools/src/network_interfaces/apple.rs
 2 panic-census-sites veilid-tools/src/network_interfaces/openbsd.rs
-1 unsafe-safety-sites veilid-core/src/network_manager/tests_network_manager/test_shared_socket_fragmentation.rs
+2 unsafe-safety-sites veilid-core/src/network_manager/tests_network_manager/test_shared_socket_fragmentation.rs
 3 unsafe-safety-sites veilid-core/src/table_store/native.rs
 1 unsafe-safety-sites veilid-core/src/veilid_api/debug.rs
 1 unsafe-safety-sites veilid-flutter/rust/src/dart_ffi.rs
@@ -40,6 +40,6 @@
 2 unsafe-safety-sites veilid-tools/src/resolver/native/windows.rs
 10 unsafe-safety-sites veilid-tools/src/socket_tools.rs
 5 unsafe-safety-sites veilid-tools/src/system_info.rs
-1 unsafe-safety-sites veilid-tools/src/tests/native/test_socket_tools.rs
+3 unsafe-safety-sites veilid-tools/src/tests/native/test_socket_tools.rs
 2 unsafe-safety-sites veilid-tools/src/tests/native/test_udp_ttl_send.rs
 2 unsafe-safety-sites veilid-tools/src/tools.rs

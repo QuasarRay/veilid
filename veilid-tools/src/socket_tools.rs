@@ -746,12 +746,14 @@ fn allow_ipv4_fragmentation(socket: &Socket) -> io::Result<()> {
 /// Run `wrap`, which may set its own fragmentation options on `socket`, then put back the ones
 /// this module's builder chose, so raw datagrams on a socket shared with QUIC keep that policy.
 ///
-/// Errors with `wrap`'s error, or with the io error from writing back a saved option.
+/// Errors with `wrap`'s error, or with the io error from writing back a saved option of the
+/// socket's own address family.
 pub fn keep_udp_fragmentation_options<R>(
     socket: &UdpSocketIo,
     wrap: impl FnOnce() -> io::Result<R>,
 ) -> io::Result<R> {
-    // An option the socket's family does not have fails to read, and is left alone
+    let socket_is_ipv6 = socket.local_addr()?.is_ipv6();
+    // An option that fails to read is left alone
     let saved: Vec<_> = UDP_FRAGMENTATION_OPTIONS
         .iter()
         .filter_map(|&(level, name)| {
@@ -762,10 +764,21 @@ pub fn keep_udp_fragmentation_options<R>(
         .collect();
     let out = wrap()?;
     for (level, name, value) in saved {
-        set_udp_int_option(socket, level, name, value)?;
+        match set_udp_int_option(socket, level, name, value) {
+            Ok(()) => {}
+            // Windows reads an IPv4 option on a v6-only socket but refuses to set it
+            Err(_) if (level == IPV6_OPTION_LEVEL) != socket_is_ipv6 => {}
+            Err(e) => return Err(e),
+        }
     }
     Ok(out)
 }
+
+#[cfg(unix)]
+const IPV6_OPTION_LEVEL: core::ffi::c_int = libc::IPPROTO_IPV6;
+#[cfg(windows)]
+const IPV6_OPTION_LEVEL: core::ffi::c_int =
+    winapi::shared::ws2def::IPPROTO_IPV6 as core::ffi::c_int;
 
 /// The options that decide whether a UDP socket's datagrams may be fragmented
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1143,6 +1156,109 @@ pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
     match routed_local_ip(&remote)? {
         IpAddr::V6(ip) => Some(ip),
         IpAddr::V4(_) => None,
+    }
+}
+
+/// A don't-fragment sending twin of one wildcard-bound shared UDP socket. QUIC packets leave
+/// through it with DF set, so quinn can discover the path MTU, while the shared socket keeps
+/// this module's fragmentation policy for RawUDP. Keep it beside the shared socket and drop it
+/// with that socket: a twin left open after its socket closes takes the port's inbound traffic
+/// on macOS and Windows.
+///
+/// Inbound stays on the shared socket by platform rule: xnu and Windows deliver unicast to the
+/// socket bound first; Linux and Android spread a reuseport group by hash, so there the twin is
+/// connected to a documentation address, which takes it out of the group and matches no packet.
+#[derive(Debug)]
+pub struct UdpDfSender {
+    io: UdpSocketIo,
+}
+
+impl UdpDfSender {
+    /// Bind the twin to the wildcard address and port of `shared`, after it. `Ok(None)` when
+    /// `shared` is bound to a specific address or the platform has no rule keeping inbound on
+    /// the older socket.
+    pub fn try_new(shared: &UdpSocketIo) -> io::Result<Option<Self>> {
+        let local_address = shared.local_addr()?;
+        if !local_address.ip().is_unspecified() {
+            return Ok(None);
+        }
+        cfg_if! {
+            if #[cfg(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            ))] {
+                let socket = new_shared_socket2_udp(domain_for_address(local_address))?;
+                socket.set_nonblocking(true)?;
+                // It never reads
+                socket.set_recv_buffer_size(1)?;
+                socket.bind(&SockAddr::from(local_address))?;
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                socket.connect(&SockAddr::from(df_twin_steering_address(local_address)))?;
+                let io = UdpSocketIo::from_std(socket.into())?;
+                set_udp_dont_fragment(&io, local_address.is_ipv4())?;
+                Ok(Some(Self { io }))
+            } else {
+                let _ = local_address;
+                Ok(None)
+            }
+        }
+    }
+
+    /// The twin, for sends and writable polling only
+    #[must_use]
+    pub fn io(&self) -> &UdpSocketIo {
+        &self.io
+    }
+}
+
+/// RFC 5737 and RFC 3849 documentation addresses: routed through the normal egress, never a
+/// packet's source, so a socket connected to one matches no inbound packet
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn df_twin_steering_address(local_address: SocketAddr) -> SocketAddr {
+    match local_address {
+        SocketAddr::V4(_) => SocketAddr::new(std::net::Ipv4Addr::new(192, 0, 2, 1).into(), 9),
+        SocketAddr::V6(_) => SocketAddr::new(
+            std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1).into(),
+            9,
+        ),
+    }
+}
+
+/// Set DF on every datagram the socket sends
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    windows
+))]
+fn set_udp_dont_fragment(socket: &UdpSocketIo, ipv4: bool) -> io::Result<()> {
+    cfg_if! {
+        if #[cfg(any(target_os = "linux", target_os = "android"))] {
+            if ipv4 {
+                set_udp_int_option(socket, libc::IPPROTO_IP, libc::IP_MTU_DISCOVER, libc::IP_PMTUDISC_PROBE)
+            } else {
+                set_udp_int_option(socket, libc::IPPROTO_IPV6, libc::IPV6_MTU_DISCOVER, libc::IPV6_PMTUDISC_PROBE)?;
+                set_udp_int_option(socket, libc::IPPROTO_IPV6, libc::IPV6_DONTFRAG, 1)
+            }
+        } else if #[cfg(any(target_os = "macos", target_os = "ios"))] {
+            if ipv4 {
+                set_udp_int_option(socket, libc::IPPROTO_IP, libc::IP_DONTFRAG, 1)
+            } else {
+                set_udp_int_option(socket, libc::IPPROTO_IPV6, libc::IPV6_DONTFRAG, 1)
+            }
+        } else if #[cfg(windows)] {
+            use winapi::shared::ws2def::{IPPROTO_IP, IPPROTO_IPV6};
+            use winapi::shared::ws2ipdef::{IPV6_DONTFRAG, IP_DONTFRAGMENT};
+            if ipv4 {
+                set_udp_int_option(socket, IPPROTO_IP, IP_DONTFRAGMENT, 1)
+            } else {
+                set_udp_int_option(socket, IPPROTO_IPV6 as core::ffi::c_int, IPV6_DONTFRAG, 1)
+            }
+        }
     }
 }
 

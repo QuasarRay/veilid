@@ -12,21 +12,28 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 pub fn test_sibling_ip_path() {
+    // The sibling joins the base's directory with the platform's separator
+    let sibling = |dir: &str, name: &str| {
+        std::path::Path::new(dir)
+            .join(name)
+            .to_str()
+            .map(str::to_owned)
+    };
     assert_eq!(
-        sibling_ip_path("/etc/veilid-server/ssl/certs/server.crt", "ipv4").as_deref(),
-        Some("/etc/veilid-server/ssl/certs/ipv4.crt")
+        sibling_ip_path("/etc/veilid-server/ssl/certs/server.crt", "ipv4"),
+        sibling("/etc/veilid-server/ssl/certs", "ipv4.crt")
     );
     assert_eq!(
-        sibling_ip_path("/etc/veilid-server/ssl/keys/server.key", "ipv6").as_deref(),
-        Some("/etc/veilid-server/ssl/keys/ipv6.key")
+        sibling_ip_path("/etc/veilid-server/ssl/keys/server.key", "ipv6"),
+        sibling("/etc/veilid-server/ssl/keys", "ipv6.key")
     );
     assert_eq!(
-        sibling_ip_path("/srv/tls/fullchain.pem", "ipv4").as_deref(),
-        Some("/srv/tls/ipv4.pem")
+        sibling_ip_path("/srv/tls/fullchain.pem", "ipv4"),
+        sibling("/srv/tls", "ipv4.pem")
     );
     assert_eq!(
-        sibling_ip_path("/srv/tls/server", "ipv6").as_deref(),
-        Some("/srv/tls/ipv6")
+        sibling_ip_path("/srv/tls/server", "ipv6"),
+        sibling("/srv/tls", "ipv6")
     );
     assert_eq!(sibling_ip_path("", "ipv4"), None);
 }
@@ -248,7 +255,7 @@ async fn bind_plan_network(
 fn plan_against_udp(net: &NativeNetwork, udp_listen_address: &str) -> WebTransportBindPlan {
     let udp_bind_set =
         NetworkBindSet::from_str(udp_listen_address).expect("should parse the udp listen address");
-    net.webtransport_bind_plan(&udp_bind_set)
+    net.webtransport_bind_plan(Some(&udp_bind_set))
         .expect("should plan a webtransport bind")
 }
 

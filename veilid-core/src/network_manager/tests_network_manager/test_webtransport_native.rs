@@ -89,7 +89,7 @@ fn spawn_echo_server(
     registry: VeilidComponentRegistry,
     cert: &ManagedCertificate,
 ) -> io::Result<(SocketAddr, quinn::Endpoint)> {
-    let server_config = build_server_config(cert)?;
+    let server_config = build_server_config(cert, QuicMtuSeed::default())?;
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -165,7 +165,7 @@ pub async fn serve_wt_echo_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).expect("server config");
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -244,7 +244,7 @@ pub async fn serve_wt_stress_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).expect("server config");
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -439,20 +439,25 @@ pub async fn test_webtransport_datagram_fragmentation() {
     }
 
     let large = xorshift_fill(MAX_MESSAGE_SIZE, 0xDEAD_BEEF);
-    match dconn
-        .send(large, SAFE_TRANSPORT_MTU)
-        .await
-        .expect("large send io")
-    {
-        NetworkResult::InvalidMessage(s) => assert!(
-            s.contains("too large"),
-            "expected the WTD oversize-cap InvalidMessage, got: {s}"
-        ),
-        other => panic!(
-            "MAX_MESSAGE_SIZE WTD send must be refused by the fragment cap, got: {:?}",
-            other
-        ),
+    assert!(matches!(
+        dconn
+            .send(large.clone(), SAFE_TRANSPORT_MTU)
+            .await
+            .expect("large send io"),
+        NetworkResult::Value(())
+    ));
+    match dconn.recv().await.expect("large recv io") {
+        NetworkResult::Value(echo) => {
+            assert_eq!(echo, large, "a full-size WTD message round-trips")
+        }
+        other => panic!("large WTD recv failed: {:?}", other),
     }
+
+    let over = xorshift_fill(MAX_MESSAGE_SIZE + 1, 0xDEAD_BEEF);
+    assert!(
+        dconn.send(over, SAFE_TRANSPORT_MTU).await.is_err(),
+        "one byte over the message size is refused"
+    );
 
     let inter_a = xorshift_fill(4096, 0xFEED_FACE);
     let inter_b = xorshift_fill(2500, 0x1234_5678);
@@ -500,67 +505,8 @@ pub async fn test_webtransport_datagram_fragmentation() {
     mock_registry::terminate(registry).await;
 }
 
-pub async fn test_wtd_oversize_message_returns_invalid_message() {
-    let registry = mock_registry::init("wtd_oversize_cap").await;
-
-    let cert = CertificateManager::generate_certificate(
-        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
-        Timestamp::now(),
-    )
-    .expect("should generate cert");
-
-    let (server_addr, _endpoint) =
-        spawn_echo_server(registry.clone(), &cert).expect("should start echo server");
-    let socket_address = SocketAddress::from_socket_addr(server_addr);
-    let url = format!("https://{}/", server_addr);
-
-    let di = DialInfo::try_webtransport_datagram(socket_address, url, vec![cert.hash], None)
-        .expect("wtd dialinfo");
-    let dconn = match connect(registry.clone(), None, di, 10_000, None)
-        .await
-        .expect("wtd connect io")
-    {
-        NetworkResult::Value(c) => c,
-        other => panic!("WTD connect failed: {:?}", other),
-    };
-
-    let oversize = xorshift_fill(MAX_MESSAGE_SIZE, 0x0BAD_F00D);
-    match dconn
-        .send(oversize, SAFE_TRANSPORT_MTU)
-        .await
-        .expect("oversize send io")
-    {
-        NetworkResult::InvalidMessage(s) => assert!(
-            s.contains("too large"),
-            "expected the WTD oversize-cap InvalidMessage, got: {s}"
-        ),
-        NetworkResult::Value(()) => panic!(
-            "REGRESSION: oversize WTD message was accepted/fragmented (Value) instead of \
-             refused by the fragment cap"
-        ),
-        NetworkResult::NoConnection(e) => panic!(
-            "oversize WTD message tore the connection down (NoConnection) instead of \
-             dropping-and-keeping via InvalidMessage: {e}"
-        ),
-        other => panic!("expected InvalidMessage from the WTD cap, got: {:?}", other),
-    }
-
-    let small = Bytes::from_static(b"still alive after the cap refusal");
-    assert!(matches!(
-        dconn
-            .send(small.clone(), SAFE_TRANSPORT_MTU)
-            .await
-            .expect("small send io"),
-        NetworkResult::Value(())
-    ));
-    match dconn.recv().await.expect("small recv io") {
-        NetworkResult::Value(echo) => assert_eq!(echo, small),
-        other => panic!("small WTD recv after cap refusal failed: {:?}", other),
-    }
-
-    mock_registry::terminate(registry).await;
-}
-
+/// A WTD message is sized like a RawUDP one: the full message size in as many fragments as it
+/// takes, and one byte over is refused
 pub async fn test_shared_port_demux_coexistence() {
     use crate::network_manager::network::native::udp_demux::DemuxerUdpSocket;
 
@@ -575,11 +521,11 @@ pub async fn test_shared_port_demux_coexistence() {
         std::net::UdpSocket::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)).unwrap();
     let shared = Arc::new(UdpSocketIo::from_std(std_sock).unwrap());
     let server_addr = shared.local_addr().unwrap();
-    let (demux, raw_rx) = DemuxerUdpSocket::try_new(shared).expect("demux socket");
+    let (demux, raw_rx) = DemuxerUdpSocket::try_new(shared, None).expect("demux socket");
 
     let endpoint = quinn::Endpoint::new_with_abstract_socket(
         webtransport_endpoint_config(),
-        Some(build_server_config(&cert).unwrap()),
+        Some(build_server_config(&cert, QuicMtuSeed::default()).unwrap()),
         demux,
         veilid_quinn_runtime(),
     )
@@ -658,7 +604,7 @@ pub async fn test_accept_session_classifies_and_roundtrips() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -749,7 +695,7 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -778,7 +724,8 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
         *server_classified.lock().unwrap() = Some(conn.flow().protocol_type());
     });
 
-    let client_config = build_client_config(vec![cert.hash]).expect("client config");
+    let client_config =
+        build_client_config(vec![cert.hash], QuicMtuSeed::default()).expect("client config");
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
     let client = web_transport_quinn::Client::new(client_ep, client_config);
@@ -823,7 +770,7 @@ pub async fn test_connect_reuses_supplied_client_endpoint() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -913,7 +860,7 @@ pub async fn test_accept_wildcard_bind_resolves_local_ip() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
@@ -1003,7 +950,7 @@ pub async fn test_flush_and_close_delivers_before_drop() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -1099,7 +1046,8 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
     ];
     let leaf_key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
     let server_config =
-        build_server_config_from_chain(cert_chain, leaf_key_der).expect("server config");
+        build_server_config_from_chain(cert_chain, leaf_key_der, QuicMtuSeed::default())
+            .expect("server config");
 
     let endpoint = test_server_endpoint(
         server_config,
@@ -1134,7 +1082,8 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
     root_store
         .add(CertificateDer::from(ca_cert.der().to_vec()))
         .expect("add ca root");
-    let client_config = build_client_config_with_root_store(root_store).expect("ca client config");
+    let client_config = build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+        .expect("ca client config");
 
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
@@ -1232,7 +1181,8 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
             let mut root_store = RootCertStore::empty();
             root_store.add(ca_root).expect("add ca root");
             let client_config =
-                build_client_config_with_root_store(root_store).expect("ca client config");
+                build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+                    .expect("ca client config");
             let client_ep =
                 veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
                     .expect("client endpoint");
@@ -1243,13 +1193,15 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
         }
     };
 
-    let with_ip = build_ca_server_config(hostname_ck.clone(), Some(ip_ck)).expect("config with ip");
+    let with_ip = build_ca_server_config(hostname_ck.clone(), Some(ip_ck), QuicMtuSeed::default())
+        .expect("config with ip");
     assert!(
         connect_ip_literal(with_ip).await,
         "IP-literal handshake should succeed when the IP-SAN cert is served for no-SNI"
     );
 
-    let without_ip = build_ca_server_config(hostname_ck, None).expect("config hostname only");
+    let without_ip = build_ca_server_config(hostname_ck, None, QuicMtuSeed::default())
+        .expect("config hostname only");
     assert!(
         !connect_ip_literal(without_ip).await,
         "IP-literal handshake should fail when only the DNS-SAN hostname cert is served"
@@ -1295,7 +1247,9 @@ pub async fn test_webtransport_live_cert_swap() {
     )
     .expect("cert B");
     assert_ne!(cert_a.hash, cert_b.hash, "test needs distinct certs");
-    endpoint.set_server_config(Some(build_server_config(&cert_b).expect("server config B")));
+    endpoint.set_server_config(Some(
+        build_server_config(&cert_b, QuicMtuSeed::default()).expect("server config B"),
+    ));
 
     let di_b =
         DialInfo::try_webtransport_stream(socket_address, url.clone(), vec![cert_b.hash], None)
@@ -1382,7 +1336,7 @@ pub async fn test_webtransport_ca_cert_file_reload() {
         let cert_chain = NativeNetwork::load_certs(cert_path).expect("read cert chain");
         let mut keys = NativeNetwork::load_keys(key_path).expect("read keys");
         assert!(!keys.is_empty(), "no private key in {}", key_path.display());
-        build_server_config_from_chain(cert_chain, keys.remove(0))
+        build_server_config_from_chain(cert_chain, keys.remove(0), QuicMtuSeed::default())
             .expect("server config from files")
     }
 
@@ -1440,7 +1394,9 @@ pub async fn test_webtransport_ca_cert_file_reload() {
         {
             return false;
         }
-        let Ok(client_config) = build_client_config_with_root_store(root_store) else {
+        let Ok(client_config) =
+            build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+        else {
             return false;
         };
         let Ok(client_ep) =
@@ -1540,7 +1496,7 @@ pub async fn test_webtransport_shared_server_endpoint_connects_out() {
     )
     .expect("cert A");
     let a_endpoint = test_server_endpoint(
-        build_server_config(&cert_a).expect("server config A"),
+        build_server_config(&cert_a, QuicMtuSeed::default()).expect("server config A"),
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
     )
     .expect("server endpoint A");
@@ -1579,7 +1535,7 @@ fn spawn_parking_server(
     cert: &ManagedCertificate,
     transport: quinn::TransportConfig,
 ) -> io::Result<SocketAddr> {
-    let mut server_config = build_server_config(cert)?;
+    let mut server_config = build_server_config(cert, QuicMtuSeed::default())?;
     server_config.transport_config(Arc::new(transport));
     let endpoint = test_server_endpoint(
         server_config,
@@ -1732,12 +1688,357 @@ pub async fn test_wtd_max_datagram_size_no_panic_when_peer_disables_datagrams() 
     mock_registry::terminate(registry).await;
 }
 
+fn udp_v4_llt() -> LowLevelTransportType {
+    LowLevelTransportType {
+        low_level_protocol_type: LowLevelProtocolType::UDP,
+        address_type: AddressType::IPV4,
+    }
+}
+
+fn wts_di(addr: SocketAddr, cert: &ManagedCertificate) -> DialInfo {
+    DialInfo::try_webtransport_stream(
+        SocketAddress::from_socket_addr(addr),
+        format!("https://{addr}/"),
+        vec![cert.hash],
+        None,
+    )
+    .expect("wts dialinfo")
+}
+
+async fn connect_value(
+    registry: VeilidComponentRegistry,
+    di: DialInfo,
+) -> ProtocolNetworkConnection {
+    match connect(registry, None, di, 10_000, None)
+        .await
+        .expect("connect io")
+    {
+        NetworkResult::Value(c) => c,
+        other => panic!("WebTransport connect failed: {other:?}"),
+    }
+}
+
+/// A WTS echo server on a demux socket bound to `0.0.0.0:0`, with or without the DF twin, so a
+/// test can watch path MTU on the shared server endpoint. Returns the loopback address to dial
+/// and a cell holding the server session's latest QUIC path MTU. `Err` where the platform has
+/// no twin and one was asked for: discovery on a shared socket cannot be shown there.
+fn spawn_demux_echo(
+    registry: VeilidComponentRegistry,
+    cert: &ManagedCertificate,
+    with_twin: bool,
+) -> io::Result<(SocketAddr, Arc<Mutex<Option<u16>>>)> {
+    use crate::network_manager::network::native::udp_demux::DemuxerUdpSocket;
+
+    let std_sock = std::net::UdpSocket::bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))?;
+    let shared = Arc::new(UdpSocketIo::from_std(std_sock)?);
+    let bound = shared.local_addr()?;
+    let df = if with_twin {
+        UdpDfSender::try_new(&shared)?
+    } else {
+        None
+    };
+    if with_twin && df.is_none() {
+        return Err(io::Error::other("no DF twin on this platform"));
+    }
+    let (demux, _raw_rx) =
+        DemuxerUdpSocket::try_new(shared, df).map_err(|e| io::Error::other(format!("{e}")))?;
+
+    let server_config = build_server_config(
+        cert,
+        QuicMtuSeed::for_address_type(&registry, AddressType::IPV4),
+    )?;
+    let endpoint = quinn::Endpoint::new_with_abstract_socket(
+        webtransport_endpoint_config(),
+        Some(server_config),
+        demux,
+        veilid_quinn_runtime(),
+    )?;
+
+    let dial_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), bound.port());
+    let server_mtu: Arc<Mutex<Option<u16>>> = Arc::new(Mutex::new(None));
+    let accept_mtu = server_mtu.clone();
+    let mut server = web_transport_quinn::Server::new(endpoint);
+    spawn_detached("wt twin echo accept", async move {
+        while let Some(request) = server.accept().await {
+            let registry = registry.clone();
+            let session_mtu = accept_mtu.clone();
+            spawn_detached("wt twin echo session", async move {
+                let Ok(session) = request.ok().await else {
+                    return;
+                };
+                let Ok((send, recv)) = session.accept_bi().await else {
+                    return;
+                };
+                let flow = echo_flow(session.remote_address(), dial_addr, ProtocolType::WTS);
+                let conn = accepted_stream_connection(registry, flow, session.clone(), send, recv);
+                *session_mtu.lock() = Some(conn.path_mtu());
+                while let Ok(NetworkResult::Value(b)) = conn.recv().await {
+                    if conn.send(b).await.is_err() {
+                        break;
+                    }
+                    *session_mtu.lock() = Some(conn.path_mtu());
+                }
+            });
+        }
+    });
+    Ok((dial_addr, server_mtu))
+}
+
+/// With the DF twin, a shared server endpoint sets don't-fragment and quinn discovers the path
+/// MTU above the 1200 floor, both the client and the server climbing to the family limit.
+pub async fn test_shared_endpoint_discovers_with_the_df_twin() {
+    let registry = mock_registry::init("wt_twin_discovery").await;
+    registry
+        .network_manager()
+        .own_mtus()
+        .set(udp_v4_llt(), SAFE_TRANSPORT_MTU, 1472);
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+
+    let Ok((server_addr, server_mtu)) = spawn_demux_echo(registry.clone(), &cert, true) else {
+        mock_registry::terminate(registry).await;
+        return;
+    };
+    let conn = connect_value(registry.clone(), wts_di(server_addr, &cert)).await;
+
+    let mut client_mtu = 0u16;
+    let mut server_seen = 0u16;
+    for _ in 0..120 {
+        let msg = xorshift_fill(1300, 0xD15C_0FFE);
+        if matches!(
+            conn.send(msg.clone(), SAFE_TRANSPORT_MTU)
+                .await
+                .expect("send io"),
+            NetworkResult::Value(())
+        ) {
+            if let NetworkResult::Value(echo) = conn.recv().await.expect("recv io") {
+                assert_eq!(echo, msg);
+            }
+        }
+        client_mtu = conn.path_mtu().unwrap_or(0);
+        server_seen = (*server_mtu.lock()).unwrap_or(0);
+        if client_mtu > SAFE_TRANSPORT_MTU && server_seen > SAFE_TRANSPORT_MTU {
+            break;
+        }
+        sleep(50).await;
+    }
+    assert!(
+        client_mtu > SAFE_TRANSPORT_MTU && client_mtu <= 1472,
+        "client path MTU discovers above the 1200 floor up to the family limit, got {client_mtu}"
+    );
+    assert!(
+        server_seen > SAFE_TRANSPORT_MTU && server_seen <= 1472,
+        "the DF twin lets the shared server endpoint discover too, got {server_seen}"
+    );
+    mock_registry::terminate(registry).await;
+}
+
+/// A seed that equals its bound (RawUDP already settled the family size) needs no probe: both
+/// ends report that size from the first message and the server side never changes.
+pub async fn test_shared_endpoint_seed_needs_no_probe() {
+    let registry = mock_registry::init("wt_seed_no_probe").await;
+    registry
+        .network_manager()
+        .own_mtus()
+        .set(udp_v4_llt(), 1300, 1300);
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+
+    let Ok((server_addr, server_mtu)) = spawn_demux_echo(registry.clone(), &cert, true) else {
+        mock_registry::terminate(registry).await;
+        return;
+    };
+    let conn = connect_value(registry.clone(), wts_di(server_addr, &cert)).await;
+
+    for _ in 0..10 {
+        let msg = Bytes::from_static(b"seeded, no probe");
+        assert!(matches!(
+            conn.send(msg.clone(), SAFE_TRANSPORT_MTU)
+                .await
+                .expect("send io"),
+            NetworkResult::Value(())
+        ));
+        match conn.recv().await.expect("recv io") {
+            NetworkResult::Value(echo) => assert_eq!(echo, msg),
+            other => panic!("echo failed: {other:?}"),
+        }
+        assert_eq!(
+            conn.path_mtu(),
+            Some(1300),
+            "a seed that equals its bound needs no probe"
+        );
+        sleep(30).await;
+    }
+    assert_eq!(
+        *server_mtu.lock(),
+        Some(1300),
+        "the server side also holds the seed with no probe"
+    );
+    mock_registry::terminate(registry).await;
+}
+
+/// A client endpoint with RawUDP absent (seed 1200) discovers its own path MTU, and the
+/// interface limit stops it, never climbing past the family's limit.
+pub async fn test_client_endpoint_discovery_stops_at_the_udp_limit() {
+    let registry = mock_registry::init("wt_client_limit").await;
+    registry
+        .network_manager()
+        .own_mtus()
+        .set(udp_v4_llt(), SAFE_TRANSPORT_MTU, 1300);
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+
+    let (server_addr, _endpoint) = spawn_echo_server(registry.clone(), &cert).expect("echo server");
+    let conn = connect_value(registry.clone(), wts_di(server_addr, &cert)).await;
+
+    let mut mtu = 0u16;
+    for _ in 0..120 {
+        let msg = xorshift_fill(1280, 0xC0DE_1234);
+        if matches!(
+            conn.send(msg.clone(), SAFE_TRANSPORT_MTU)
+                .await
+                .expect("send io"),
+            NetworkResult::Value(())
+        ) {
+            let _ = conn.recv().await.expect("recv io");
+        }
+        mtu = conn.path_mtu().unwrap_or(0);
+        if mtu > SAFE_TRANSPORT_MTU {
+            break;
+        }
+        sleep(50).await;
+    }
+    assert!(
+        mtu > SAFE_TRANSPORT_MTU && mtu <= 1300,
+        "client discovery climbs above 1200 but stops at the interface limit 1300, got {mtu}"
+    );
+    mock_registry::terminate(registry).await;
+}
+
+/// A WebTransport-only node with RawUDP disabled still binds a listening endpoint and punches a
+/// hole from its own socket: the empty TTL-limited datagram leaves for the signalled dial info.
+pub async fn test_webtransport_listens_and_punches_without_raw_udp() {
+    let registry = mock_registry::init_with_config("wt_dedicated_punch", |config| {
+        config.network.protocol.udp.enabled = false;
+        config.network.protocol.webtransport.listen = true;
+        config.network.protocol.webtransport.url = None;
+        config.network.protocol.webtransport.listen_address = "127.0.0.1:0".to_owned();
+    })
+    .await;
+    let net = NativeNetwork::new(registry.clone());
+    net.startup_certificate_manager()
+        .await
+        .expect("cert manager");
+    assert!(
+        matches!(
+            net.bind_webtransport_without_udp().expect("bind"),
+            StartupDisposition::Success
+        ),
+        "a WebTransport-only node binds its listening endpoint"
+    );
+    assert!(
+        net.webtransport_bound_addresses().is_some(),
+        "the WebTransport-only node registered a bound WTS/WTD address"
+    );
+
+    let receiver = bind_udp_socket_io(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        .unwrap()
+        .unwrap();
+    let peer = receiver.local_addr().unwrap();
+    let di = DialInfo::try_webtransport_datagram(
+        SocketAddress::from_socket_addr(peer),
+        format!("https://{peer}/"),
+        vec![[9u8; 32]],
+        None,
+    )
+    .expect("wtd dialinfo");
+
+    let flow = match net.send_quic_hole_punch(&di).expect("punch io") {
+        NetworkResult::Value(uf) => uf.flow,
+        other => panic!("a dedicated WebTransport socket must punch without RawUDP, got {other:?}"),
+    };
+    assert_eq!(
+        flow.protocol_type(),
+        ProtocolType::WTD,
+        "the punch flow carries the signal's protocol"
+    );
+
+    let mut buf = [0u8; 16];
+    let (n, from) = timeout(5_000, receiver.recv_from(&mut buf))
+        .await
+        .expect("the TTL-limited punch must arrive on loopback")
+        .expect("recv_from io");
+    assert_eq!(n, 0, "a hole punch is an empty datagram");
+    assert!(
+        from.ip().is_loopback(),
+        "the punch left the node's own socket"
+    );
+
+    mock_registry::terminate(registry).await;
+}
+
+/// The chaos `mtu-blackhole` preset caps packets at 1380. After the chaos fix a WebTransport
+/// session judged by its QUIC packet size (1200 here) passes a 2000-byte message as several
+/// small packets; before the fix the whole 2000 bytes was judged and the stream stalled.
+#[cfg(feature = "debug-api")]
+pub async fn test_webtransport_frames_pass_the_mtu_blackhole_preset() {
+    let registry = mock_registry::init("wt_blackhole_preset").await;
+    registry
+        .network_manager()
+        .own_mtus()
+        .set(udp_v4_llt(), SAFE_TRANSPORT_MTU, SAFE_TRANSPORT_MTU);
+    registry
+        .network_manager()
+        .chaos()
+        .command(&["preset".to_owned(), "mtu-blackhole".to_owned()])
+        .expect("apply the mtu-blackhole preset");
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+
+    let (server_addr, _endpoint) = spawn_echo_server(registry.clone(), &cert).expect("echo server");
+    let conn = connect_value(registry.clone(), wts_di(server_addr, &cert)).await;
+
+    let msg = xorshift_fill(2000, 0xBAD0_0001);
+    assert!(matches!(
+        conn.send(msg.clone(), SAFE_TRANSPORT_MTU)
+            .await
+            .expect("send io"),
+        NetworkResult::Value(())
+    ));
+    match timeout(5_000, conn.recv())
+        .await
+        .expect("recv within the bounded wait")
+        .expect("recv io")
+    {
+        NetworkResult::Value(echo) => assert_eq!(echo, msg),
+        other => panic!("the WTS echo must round-trip under mtu-blackhole, got {other:?}"),
+    }
+    mock_registry::terminate(registry).await;
+}
+
 pub async fn test_all() {
     test_cert_hash_mismatch_is_distinct_from_ca_failure();
     test_webtransport_endpoint_config_disables_quic_bit_greasing();
     Box::pin(test_webtransport_loopback()).await;
     Box::pin(test_webtransport_datagram_fragmentation()).await;
-    Box::pin(test_wtd_oversize_message_returns_invalid_message()).await;
+    Box::pin(test_shared_endpoint_discovers_with_the_df_twin()).await;
+    Box::pin(test_shared_endpoint_seed_needs_no_probe()).await;
+    Box::pin(test_client_endpoint_discovery_stops_at_the_udp_limit()).await;
+    Box::pin(test_webtransport_listens_and_punches_without_raw_udp()).await;
+    #[cfg(feature = "debug-api")]
+    Box::pin(test_webtransport_frames_pass_the_mtu_blackhole_preset()).await;
     Box::pin(test_shared_port_demux_coexistence()).await;
     Box::pin(test_accept_session_classifies_and_roundtrips()).await;
     Box::pin(test_accept_session_prefers_stream_over_queued_datagram()).await;

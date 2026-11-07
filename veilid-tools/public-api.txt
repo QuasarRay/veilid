@@ -944,6 +944,10 @@ pub struct veilid_tools::socket_tools::TcpSegmentLimit(_)
 impl veilid_tools::TcpSegmentLimit
 pub fn veilid_tools::TcpSegmentLimit::get(&self) -> core::option::Option<u32>
 pub fn veilid_tools::TcpSegmentLimit::lower(&self, u32)
+pub struct veilid_tools::socket_tools::UdpDfSender
+impl veilid_tools::UdpDfSender
+pub fn veilid_tools::UdpDfSender::io(&self) -> &veilid_tools::UdpSocketIo
+pub fn veilid_tools::UdpDfSender::try_new(&veilid_tools::UdpSocketIo) -> core::io::error::Result<core::option::Option<Self>>
 pub struct veilid_tools::socket_tools::UdpSocketIo(_)
 impl veilid_tools::UdpSocketIo
 pub fn veilid_tools::UdpSocketIo::from_std(std::net::udp::UdpSocket) -> core::io::error::Result<Self>
@@ -2035,6 +2039,10 @@ impl veilid_tools::TimeoutError
 pub fn veilid_tools::TimeoutError::to_io(self) -> core::io::error::Error
 impl core::convert::From<tokio::time::error::Elapsed> for veilid_tools::TimeoutError
 pub fn veilid_tools::TimeoutError::from(tokio::time::error::Elapsed) -> Self
+pub struct veilid_tools::UdpDfSender
+impl veilid_tools::UdpDfSender
+pub fn veilid_tools::UdpDfSender::io(&self) -> &veilid_tools::UdpSocketIo
+pub fn veilid_tools::UdpDfSender::try_new(&veilid_tools::UdpSocketIo) -> core::io::error::Result<core::option::Option<Self>>
 pub struct veilid_tools::UdpSocketIo(_)
 impl veilid_tools::UdpSocketIo
 pub fn veilid_tools::UdpSocketIo::from_std(std::net::udp::UdpSocket) -> core::io::error::Result<Self>

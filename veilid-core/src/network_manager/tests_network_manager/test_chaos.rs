@@ -391,7 +391,7 @@ impl PlatformProtocolNetworkConnection for FakeConnection {
 fn wrapped_fake(
     chaos: &Chaos,
     inbox: &[&'static [u8]],
-    segment_size: Option<u32>,
+    packet_size: Option<u32>,
     hang_when_empty: bool,
 ) -> (ProtocolNetworkConnection, Arc<Mutex<Vec<Bytes>>>) {
     let sent = Arc::new(Mutex::new(Vec::new()));
@@ -407,7 +407,7 @@ fn wrapped_fake(
         inbox: Mutex::new(inbox.iter().map(|m| Bytes::from_static(m)).collect()),
         hang_when_empty,
     };
-    (chaos.wrap_connection(Box::new(fake), segment_size), sent)
+    (chaos.wrap_connection(Box::new(fake), packet_size), sent)
 }
 
 /// A wrapped connection's dropped sends report success without reaching the socket, and its

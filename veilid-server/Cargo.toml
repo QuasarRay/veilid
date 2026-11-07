@@ -17,12 +17,21 @@ name = "veilid-server"
 path = "src/main.rs"
 
 [features]
-default = ["rt-tokio", "veilid-core/default", "veilid-remote-api/default"]
+# The settings gate on enable-protocol-*, so every set that takes veilid-core's defaults names them
+default = [
+    "rt-tokio",
+    "veilid-core/default",
+    "veilid-remote-api/default",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
+]
 
 default-async-std = [
     "rt-async-std",
     "veilid-core/default-async-std",
     "veilid-remote-api/default-async-std",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
 ]
 
 stats = ["veilid-core/stats"]
@@ -48,6 +57,8 @@ mock-api = [
     "rt-tokio",
     "veilid-core/mock-api",
     "veilid-remote-api/default-tokio",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
 ]
 
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]

@@ -2957,7 +2957,7 @@
       "type": "string"
     },
     "VeilidConfig": {
-      "description": "Top level of the Veilid configuration tree",
+      "description": "Top level of the Veilid configuration tree\n\nA section or field that exists only with a cargo feature takes its default when a config\nleaves it out, and a core built without the feature ignores it, so one config serves every\nbuild. Bindings model such sections as optional and leave them out when unset.",
       "type": "object",
       "properties": {
         "attachment": {
@@ -3711,9 +3711,31 @@
           "description": "UDP protocol configuration.",
           "$ref": "#/$defs/VeilidConfigUDP"
         },
+        "webtransport": {
+          "description": "WebTransport protocol configuration (requires `enable-protocol-webtransport`).",
+          "$ref": "#/$defs/VeilidConfigWebTransport",
+          "default": {
+            "connect": true,
+            "listen": true,
+            "listen_address": "",
+            "path": "wt",
+            "url": null
+          }
+        },
         "ws": {
           "description": "WebSocket protocol configuration.",
           "$ref": "#/$defs/VeilidConfigWS"
+        },
+        "wss": {
+          "description": "Secure WebSocket protocol configuration (requires `enable-protocol-wss`).",
+          "$ref": "#/$defs/VeilidConfigWSS",
+          "default": {
+            "connect": true,
+            "listen": false,
+            "listen_address": "",
+            "path": "ws",
+            "url": null
+          }
         }
       },
       "required": [
@@ -3934,6 +3956,76 @@
         "listen",
         "listen_address",
         "path"
+      ]
+    },
+    "VeilidConfigWSS": {
+      "description": "Enable and configure Secure Web Sockets.\n\n```yaml\nwss:\n    connect: true\n    listen: false\n    listen_address: ':5150'\n    path: 'ws'\n    url: ''",
+      "type": "object",
+      "properties": {
+        "connect": {
+          "description": "Allow outbound secure WebSocket connections.",
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "Accept inbound secure WebSocket connections.",
+          "type": "boolean"
+        },
+        "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
+          "type": "string"
+        },
+        "path": {
+          "description": "URL path served by the secure WebSocket listener.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Externally-reachable URL to advertise (required and validated for TLS protocols).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connect",
+        "listen",
+        "listen_address",
+        "path"
+      ]
+    },
+    "VeilidConfigWebTransport": {
+      "description": "Enable and configure WebTransport (HTTP/3 over QUIC).\n\n`listen_address` means the same thing here as it does for the other protocols. When it\nresolves to the same bind target as `udp.listen_address`, WebTransport shares the node's\nUDP listener socket and port, with the QUIC traffic demultiplexed from raw UDP. When it\nresolves to a different bind target, WebTransport binds a dedicated QUIC-only UDP socket\ninstead. `listen` defaults to false in the browser, which cannot accept inbound\nconnections.\n\nBy default the listener generates and rotates its own ECDSA-P256 certificate and\nadvertises it by SHA-256 hash, so no CA certificate or hostname is required. Setting\n`url` switches it into CA-signed mode for bootstrap servers reachable by domain name:\nthe certificate comes from `network.tls` and clients validate it against the system\nCA roots.\n\n```yaml\nwebtransport:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    path: 'wt'\n    url: ''",
+      "type": "object",
+      "properties": {
+        "connect": {
+          "description": "Allow outbound WebTransport connections.",
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "Accept inbound WebTransport connections.",
+          "type": "boolean"
+        },
+        "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port). A bind target\nequal to `udp.listen_address`'s shares the node's UDP socket rather than binding a\ndedicated one.",
+          "type": "string",
+          "default": ""
+        },
+        "path": {
+          "description": "URL path segment served by the WebTransport listener. Advertised self-signed URLs\nbecome `https://{addr}:{port}/{path}`, and inbound requests with a different path\nare rejected.",
+          "type": "string",
+          "default": "wt"
+        },
+        "url": {
+          "description": "Externally-reachable `https://host:port/` URL to advertise, which selects CA-signed\nmode.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connect",
+        "listen"
       ]
     },
     "VeilidStateAttachmentCondition": {

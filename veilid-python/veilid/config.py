@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, fields
 from enum import StrEnum
-from typing import Optional, Self
+from typing import Optional, Self, get_args
 
 from .types import PublicKey, SecretKey, VeilidCapability
 
@@ -25,9 +25,25 @@ class VeilidConfigAddressType(StrEnum):
     IPV6 = "IPV6"
 
 
+def _loaded_type(field_type):
+    """The type a field's JSON value loads as: `T` for an `Optional[T]` field."""
+    args = get_args(field_type)
+    if type(None) in args:
+        rest = [arg for arg in args if arg is not type(None)]
+        if len(rest) == 1:
+            return rest[0]
+    return field_type
+
+
 @dataclass
 class ConfigBase:
-    """Base for config dataclasses providing recursive JSON load/dump."""
+    """Base for config dataclasses providing recursive JSON load/dump.
+
+    A section veilid-core has only when built with a cargo feature is `Optional`
+    with a `None` default: it loads as `None` from a core built without the
+    feature, and a `None` field is left out of the JSON, so the core applies its
+    own default. Keys this binding does not know are ignored when loading.
+    """
 
     @classmethod
     def from_json(cls, json_data: dict) -> Self:
@@ -41,19 +57,19 @@ class ConfigBase:
             value = json_data[key]
             try:
                 # See if this field's type knows how to load itself from JSON input.
-                loader = field.type.from_json  # type: ignore
+                loader = _loaded_type(field.type).from_json  # type: ignore
             except AttributeError:
                 # No, it doesn't. Use the raw value.
                 args[key] = value
             else:
                 # Yes, it does. Use the loading function's output.
-                args[key] = loader(value)
+                args[key] = None if value is None else loader(value)
 
         return cls(**args)
 
     def to_json(self) -> dict:
-        """Return this config as a JSON-serializable dict."""
-        return self.__dict__
+        """Return this config as a JSON-serializable dict, leaving out `None` fields."""
+        return {key: value for key, value in self.__dict__.items() if value is not None}
 
 
 @dataclass
@@ -183,37 +199,67 @@ class VeilidConfigWS(ConfigBase):
     url: Optional[str]
 
 
-# @dataclass
-# class VeilidConfigWSS(ConfigBase):
-#     connect: bool
-#     listen: bool
-#     listen_address: str
-#     path: str
-#     url: Optional[str]
+@dataclass
+class VeilidConfigWSS(ConfigBase):
+    """Enable and configure secure Web Sockets."""
+
+    connect: bool
+    listen: bool
+    listen_address: str
+    path: str
+    url: Optional[str]
+
+
+@dataclass
+class VeilidConfigWebTransport(ConfigBase):
+    """Enable and configure WebTransport (HTTP/3 over QUIC)."""
+
+    connect: bool
+    listen: bool
+    listen_address: str
+    path: str
+    url: Optional[str]
 
 
 @dataclass
 class VeilidConfigProtocol(ConfigBase):
-    """Per-protocol (UDP/TCP/WS) transport configuration."""
+    """Per-protocol (UDP/TCP/WS/WSS/WebTransport) transport configuration.
+
+    `wss` and `webtransport` are `None` when veilid-core is built without that protocol.
+    """
 
     udp: VeilidConfigUDP
     tcp: VeilidConfigTCP
     ws: VeilidConfigWS
-
-
-#    wss: VeilidConfigWSS
+    wss: Optional[VeilidConfigWSS] = None
+    webtransport: Optional[VeilidConfigWebTransport] = None
 
 
 @dataclass
 class VeilidConfigPrivacy(ConfigBase):
-    """Privacy and relay preferences for routes."""
+    """Privacy and relay preferences for routes.
+
+    `country_code_denylist` is `None` when veilid-core is built without `geolocation`.
+    """
 
     require_inbound_relay: bool
+    country_code_denylist: Optional[list[str]] = None
+
+
+@dataclass
+class VeilidConfigVirtualNetwork(ConfigBase):
+    """Virtual network client for testing and simulation."""
+
+    enabled: bool
+    server_address: str
 
 
 @dataclass
 class VeilidConfigNetwork(ConfigBase):
-    """Network subsystem: connections, routing table, RPC, DHT, transports, and privacy."""
+    """Network subsystem: connections, routing table, RPC, DHT, transports, and privacy.
+
+    `virtual_network` is `None` when veilid-core is built without `virtual-network`.
+    """
 
     max_connections: int
     network_key_password: Optional[str]
@@ -227,6 +273,7 @@ class VeilidConfigNetwork(ConfigBase):
     tls: VeilidConfigTLS
     protocol: VeilidConfigProtocol
     privacy: VeilidConfigPrivacy
+    virtual_network: Optional[VeilidConfigVirtualNetwork] = None
 
 
 # "Footgun" internal tuning tree, parallel to the main config. Only honored when
@@ -335,18 +382,22 @@ class VeilidConfigInternal(ConfigBase):
     network: VeilidConfigInternalNetwork
 
 
-# @dataclass
-# class VeilidConfigAppLifecycle(ConfigBase):
-#     prefer_foreground: bool
-#     auto_detect_state: bool
+@dataclass
+class VeilidConfigAppLifecycle(ConfigBase):
+    """How the node lives through its host application moving between foreground and background."""
+
+    prefer_foreground: bool
+    auto_detect_state: bool
 
 
 @dataclass
 class VeilidConfigAttachment(ConfigBase):
-    """Attachment configuration, owned by the attachment manager."""
+    """Attachment configuration, owned by the attachment manager.
 
+    `app_lifecycle` is `None` when veilid-core is built without `app-lifecycle`.
+    """
 
-#    app_lifecycle: VeilidConfigAppLifecycle
+    app_lifecycle: Optional[VeilidConfigAppLifecycle] = None
 
 
 @dataclass

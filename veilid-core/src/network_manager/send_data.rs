@@ -55,7 +55,7 @@ impl NetworkManager {
         feature = "enable-protocol-webtransport",
         not(all(target_arch = "wasm32", target_os = "unknown"))
     ))]
-    fn webtransport_hole_punch_connect_timeout_ms(&self) -> u32 {
+    pub(super) fn webtransport_hole_punch_connect_timeout_ms(&self) -> u32 {
         self.hole_punch_receipt_wait_ms()
             .max(QUIC_HOLE_PUNCH_MIN_CONNECT_TIMEOUT_MS)
     }
@@ -883,7 +883,7 @@ impl NetworkManager {
         target_nr: NodeRef,
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
-        network_result_try!(
+        let inbound_flow = network_result_try!(
             self.punch_and_wait_receipt(
                 relay_di,
                 hole_punch_di.clone(),
@@ -897,6 +897,29 @@ impl NetworkManager {
             .await?
         );
 
+        // A responder that opened the session through the hole returned the receipt on it
+        if WEBTRANSPORT_PROTOCOL_TYPES.contains(inbound_flow.protocol_type()) {
+            let mtu = self.hop_mtu(
+                &target_nr,
+                inbound_flow.transport_type(),
+                inbound_flow.remote_address().ip_addr(),
+            );
+            let net = self.net();
+            return match pin_future!(net.send_data_to_existing_flow(inbound_flow, data, mtu))
+                .await?
+            {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    Ok(NetworkResult::value(unique_flow))
+                }
+                NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+                _ => Ok(NetworkResult::no_connection_other(format!(
+                    "unable to send data over the QUIC hole punch session from {}",
+                    target_nr
+                ))),
+            };
+        }
+
+        // An older responder returned the receipt over RawUDP, so the session is ours to open
         let connect_timeout_ms = self.webtransport_hole_punch_connect_timeout_ms();
         let net = self.platform_net();
         let prot_conn = network_result_try!(

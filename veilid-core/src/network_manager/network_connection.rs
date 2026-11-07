@@ -80,8 +80,29 @@ enum RecvLoopAction {
 
 #[derive(Debug, Clone)]
 pub struct NetworkConnectionStats {
+    /// When the last message went out on this connection
     last_message_sent_time: Option<Timestamp>,
+    /// When the last message arrived on this connection
     last_message_recv_time: Option<Timestamp>,
+    /// The QUIC path MTU last seen on a WebTransport session, None for other transports
+    path_mtu: Option<u16>,
+}
+
+impl NetworkConnectionStats {
+    /// Records a QUIC session's path MTU, logging each move after the first
+    fn note_path_mtu(
+        &mut self,
+        registry: &VeilidComponentRegistry,
+        protocol_connection: &ProtocolNetworkConnection,
+    ) {
+        let Some(path_mtu) = protocol_connection.path_mtu() else {
+            return;
+        };
+        if let Some(prev) = self.path_mtu.filter(|prev| *prev != path_mtu) {
+            veilid_log!(registry debug "path mtu {} -> {} on {:?}", prev, path_mtu, protocol_connection.flow());
+        }
+        self.path_mtu = Some(path_mtu);
+    }
 }
 
 /// Represents a connection in the connection table for connection-oriented protocols
@@ -165,6 +186,7 @@ impl NetworkConnection {
             stats: Arc::new(Mutex::new(NetworkConnectionStats {
                 last_message_sent_time: None,
                 last_message_recv_time: None,
+                path_mtu: None,
             })),
             sender,
             stop_source: None,
@@ -193,6 +215,7 @@ impl NetworkConnection {
         let stats = Arc::new(Mutex::new(NetworkConnectionStats {
             last_message_sent_time: None,
             last_message_recv_time: None,
+            path_mtu: None,
         }));
 
         let stop_source = StopSource::new();
@@ -308,6 +331,7 @@ impl NetworkConnection {
     }
 
     async fn send_internal(
+        registry: VeilidComponentRegistry,
         protocol_connection: &ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
         message: Bytes,
@@ -318,11 +342,13 @@ impl NetworkConnection {
 
         let mut stats = stats.lock();
         stats.last_message_sent_time.max_assign(Some(ts));
+        stats.note_path_mtu(&registry, protocol_connection);
 
         Ok(NetworkResult::Value(()))
     }
 
     async fn recv_internal(
+        registry: VeilidComponentRegistry,
         protocol_connection: &ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
     ) -> io::Result<NetworkResult<Bytes>> {
@@ -331,6 +357,7 @@ impl NetworkConnection {
 
         let mut stats = stats.lock();
         stats.last_message_recv_time.max_assign(Some(ts));
+        stats.note_path_mtu(&registry, protocol_connection);
 
         #[cfg(feature = "verbose-tracing")]
         tracing::Span::current().record("ret.len", out.len());
@@ -419,6 +446,7 @@ impl NetworkConnection {
 
                                 // send the packet
                                 match Self::send_internal(
+                                    registry.clone(),
                                     &protocol_connection,
                                     stats.clone(),
                                     message,
@@ -459,7 +487,7 @@ impl NetworkConnection {
                 if need_receiver {
                     need_receiver = false;
                     let registry = registry.clone();
-                    let receiver_fut = Self::recv_internal(&protocol_connection, stats.clone())
+                    let receiver_fut = Self::recv_internal(registry.clone(), &protocol_connection, stats.clone())
                         .then(|res| async {
                             let registry = registry;
                             let network_manager = registry.network_manager();
@@ -599,8 +627,9 @@ impl NetworkConnection {
     }
 
     pub fn debug_print(&self, cur_ts: Timestamp) -> String {
+        let stats = self.stats();
         format!(
-            "{} | {} | est {} sent {} rcvd {} refcount {}{}",
+            "{} | {} | est {} sent {} rcvd {} refcount {}{}{}",
             self.flow,
             self.connection_id.as_u64(),
             human_duration(
@@ -608,15 +637,19 @@ impl NetworkConnection {
                     .as_u64()
                     .saturating_sub(self.established_time.as_u64())
             ),
-            self.stats()
+            stats
                 .last_message_sent_time
                 .map(|ts| human_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
                 .unwrap_or("---".to_owned()),
-            self.stats()
+            stats
                 .last_message_recv_time
                 .map(|ts| human_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
                 .unwrap_or("---".to_owned()),
             self.ref_count,
+            stats
+                .path_mtu
+                .map(|mtu| format!(" mtu {}", mtu))
+                .unwrap_or_default(),
             if let Some(pnr) = &self.protected_nr {
                 format!(" PROTECTED:{}", pnr)
             } else {

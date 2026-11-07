@@ -40,7 +40,6 @@ esac
 parse_integration_test_flags "$@"
 set -- ${INTEGRATION_TEST_ARGS[@]+"${INTEGRATION_TEST_ARGS[@]}"}
 select_veilid_build "$LIVE"
-add_veilid_protocol_features "$LIVE"
 set_integration_test_device_args "$HEADLESS" "$@" || exit 1
 
 # Default to the #common=debug log tag group unless the caller overrides LOG_DIRECTIVES

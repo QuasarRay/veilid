@@ -1,0 +1,6 @@
+[semgrep]
+[[semgrep.ruleset]]
+disable = true
+[semgrep.ruleset.identifier]
+type = "semgrep_id"
+value = "javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket"

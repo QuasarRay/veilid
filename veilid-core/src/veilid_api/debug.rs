@@ -131,8 +131,10 @@ enum DebugCommand {
         /// `net.self`. Loss is a percentage, 0 to 100.
         ///
         /// `max_size`, in `net.self` or a range, loses packets larger than that many bytes. A TCP
-        /// or WS frame crosses it in the connection's segments, and one over it stalls the
-        /// connection, as a path MTU black hole does, until `net.stall_close_ms` closes it.
+        /// or WS frame crosses it in the connection's segments, a WebTransport frame in the
+        /// session's QUIC packets, and one over it stalls the connection, as a path MTU black hole
+        /// does, until `net.stall_close_ms` closes it. quinn's own black-hole fallback is not
+        /// modeled, so a cap below a session's packet size stalls it for good.
         ///
         /// `net.self.send.rate=250000 net.self.send.queue_ms=800` makes this node's link carry
         /// 250000 bytes a second (`pps` caps packets a second) behind a queue holding 800 ms of

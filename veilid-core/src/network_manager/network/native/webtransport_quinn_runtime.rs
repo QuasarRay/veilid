@@ -66,18 +66,20 @@ impl AsyncTimer for VeilidQuinnTimer {
 }
 
 #[derive(Debug)]
-struct VeilidQuinnUdpSocket {
-    io: UdpSocketIo,
+pub(in crate::network_manager) struct VeilidQuinnUdpSocket {
+    io: Arc<UdpSocketIo>,
     state: UdpSocketState,
 }
 
 impl VeilidQuinnUdpSocket {
     fn try_new(socket: std::net::UdpSocket) -> io::Result<Self> {
-        let state = UdpSocketState::new((&socket).into())?;
-        Ok(Self {
-            io: UdpSocketIo::from_std(socket)?,
-            state,
-        })
+        Self::try_from_io(Arc::new(UdpSocketIo::from_std(socket)?))
+    }
+
+    /// Wraps a socket the caller keeps a handle to, for sends beside quinn's
+    pub(in crate::network_manager) fn try_from_io(io: Arc<UdpSocketIo>) -> io::Result<Self> {
+        let state = UdpSocketState::new((&*io).into())?;
+        Ok(Self { io, state })
     }
 }
 
@@ -91,7 +93,7 @@ impl AsyncUdpSocket for VeilidQuinnUdpSocket {
 
     fn try_send(&self, transmit: &Transmit) -> io::Result<()> {
         self.io.try_io(Interest::WRITABLE, || {
-            self.state.send((&self.io).into(), transmit)
+            self.state.send((&*self.io).into(), transmit)
         })
     }
 
@@ -104,7 +106,7 @@ impl AsyncUdpSocket for VeilidQuinnUdpSocket {
         loop {
             ready!(self.io.poll_recv_ready(cx))?;
             match self.io.try_io(Interest::READABLE, || {
-                self.state.recv((&self.io).into(), bufs, meta)
+                self.state.recv((&*self.io).into(), bufs, meta)
             }) {
                 Ok(res) => return Poll::Ready(Ok(res)),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,

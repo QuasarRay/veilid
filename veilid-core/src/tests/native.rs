@@ -153,7 +153,7 @@ cfg_if! {
         #[cfg(not(feature = "mock-api"))]
         run_test!(component attachment_manager);
 
-        #[cfg(feature = "enable-protocol-webtransport")]
+        #[cfg(all(feature = "enable-protocol-webtransport", not(feature = "mock-api")))]
         #[test]
         #[ignore]
         fn serve_wt_echo_for_browser() {
@@ -163,7 +163,7 @@ cfg_if! {
             })
         }
 
-        #[cfg(feature = "enable-protocol-webtransport")]
+        #[cfg(all(feature = "enable-protocol-webtransport", not(feature = "mock-api")))]
         #[test]
         #[ignore]
         fn serve_wt_stress_for_browser() {

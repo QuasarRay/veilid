@@ -569,17 +569,17 @@ impl Chaos {
         dropped
     }
 
-    /// Puts a connection's frames through the chaos settings; `segment_size` is the TCP segment
-    /// size it sends, where the platform reports it
+    /// Puts a connection's frames through the chaos settings; `packet_size` is the TCP segment
+    /// size it sends, where the platform reports it, and a QUIC session reports its path MTU itself
     pub fn wrap_connection(
         &self,
         inner: ProtocolNetworkConnection,
-        segment_size: Option<u32>,
+        packet_size: Option<u32>,
     ) -> ProtocolNetworkConnection {
         Box::new(ChaosProtocolNetworkConnection {
             inner,
             chaos: self.clone(),
-            segment_size,
+            packet_size,
             send_stalled: AtomicBool::new(false),
             recv_stalled: AtomicBool::new(false),
             stalled_ts: AtomicOptionTimestamp::none(),
@@ -891,7 +891,7 @@ struct ChaosProtocolNetworkConnection {
     /// The node's settings and counters
     chaos: Chaos,
     /// The TCP segment size this end sends, where the platform reports it
-    segment_size: Option<u32>,
+    packet_size: Option<u32>,
     /// Set by a frame sent over a size cap; every later send is lost
     send_stalled: AtomicBool,
     /// Set by a frame received over a size cap; every later receive is lost
@@ -905,11 +905,13 @@ impl ChaosProtocolNetworkConnection {
         self.inner.flow().remote().socket_addr().ip()
     }
 
-    /// The largest packet a frame of `len` bytes puts on the path, taking the far end to send
-    /// segments as large as ours
+    /// The largest packet a frame of `len` bytes puts on the path: the TCP segment or QUIC
+    /// packet size where the transport bounds it, taking the far end to send packets as large
+    /// as ours
     fn largest_packet(&self, len: usize) -> usize {
-        self.segment_size
-            .map_or(len, |segment_size| len.min(segment_size as usize))
+        self.packet_size
+            .or_else(|| self.inner.path_mtu().map(u32::from))
+            .map_or(len, |packet_size| len.min(packet_size as usize))
     }
 
     fn stall(&self, stalled: &AtomicBool) {
@@ -952,6 +954,10 @@ impl PlatformProtocolNetworkConnection for ChaosProtocolNetworkConnection {
 
     fn close(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
         self.inner.close()
+    }
+
+    fn path_mtu(&self) -> Option<u16> {
+        self.inner.path_mtu()
     }
 
     fn send(

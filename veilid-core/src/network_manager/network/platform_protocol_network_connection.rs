@@ -18,4 +18,8 @@ pub trait PlatformProtocolNetworkConnection: fmt::Debug + Send + Sync {
     ) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>>;
     /// Receive one message frame
     fn recv(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<Bytes>>>;
+    /// The QUIC path MTU of a WebTransport session, in UDP payload bytes; None for other transports
+    fn path_mtu(&self) -> Option<u16> {
+        None
+    }
 }

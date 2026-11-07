@@ -28,16 +28,22 @@ default-tokio = [
     "rt-tokio",
     "debug-api",
     "backtrace",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
 ]
 default-async-std = [
     "enable-crypto-vld0",
     "rt-async-std",
     "debug-api",
     "backtrace",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
 ]
 default-wasm = [
     "enable-crypto-vld0",
     "rt-wasm-bindgen",
+    "enable-protocol-wss",
+    "enable-protocol-webtransport",
 ]
 
 # Capture backtraces in diagnostics (error logs, guard tracking); off for wasm product builds
@@ -302,6 +308,9 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
 wasm-bindgen-test = "0.3.56"
 console_error_panic_hook = "0.1.7"
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+winapi = { version = "0.3.9", features = ["winsock2", "ws2def", "ws2ipdef"] }
 
 ### BUILD OPTIONS
 

@@ -15,21 +15,6 @@ const kIsWeb = bool.fromEnvironment('dart.library.js_util');
 /// Every protocol name PROTOCOLS accepts.
 const _protocolNames = ['udp', 'tcp', 'ws', 'wss', 'webtransport'];
 
-/// Stand-ins for the sections a core built without the matching feature leaves
-/// out of its default config, carrying core's listen address and path.
-const _defaultWSS = VeilidConfigWSS(
-  connect: true,
-  listen: false,
-  listenAddress: '',
-  path: 'ws',
-);
-const _defaultWebTransport = VeilidConfigWebTransport(
-  connect: true,
-  listen: false,
-  listenAddress: '',
-  path: 'wt',
-);
-
 /// PROTOCOLS=ws,wss narrows the node to an outbound-only client over exactly
 /// the protocols named, so a suite can exercise one transport at a time.
 VeilidConfig _selectProtocols(VeilidConfig config) {
@@ -60,11 +45,12 @@ VeilidConfig _selectProtocols(VeilidConfig config) {
           connect: selected.contains('ws'),
           listen: false,
         ),
-        wss: (protocol.wss ?? _defaultWSS).copyWith(
+        // A core built without wss or webtransport has no section to narrow
+        wss: protocol.wss?.copyWith(
           connect: selected.contains('wss'),
           listen: false,
         ),
-        webtransport: (protocol.webtransport ?? _defaultWebTransport).copyWith(
+        webtransport: protocol.webtransport?.copyWith(
           connect: selected.contains('webtransport'),
           listen: false,
         ),

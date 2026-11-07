@@ -55,22 +55,6 @@ select_veilid_build() {
     return 0
 }
 
-# Add the cargo features the protocols named by --protocols need to the hook's
-# selection. Call it after select_veilid_build, whose clearing pass would
-# otherwise drop them. A mock run never touches the network, so it keeps the
-# feature set select_veilid_build gave it.
-# $1  true for the real network, false for the in-process mock
-add_veilid_protocol_features() {
-    local live="$1" features var
-    [ "$live" = true ] || return 0
-    features="$(integration_test_protocol_features)"
-    [ -n "$features" ] || return 0
-    for var in "${VEILID_BUILD_FEATURE_VARS[@]}"; do
-        export "$var=$features"
-    done
-    return 0
-}
-
 ###########################################################################
 # Common flags
 
@@ -108,19 +92,6 @@ set_integration_test_protocol_defines() {
     return 0
 }
 
-# The cargo features the named protocols need, comma-separated and empty when
-# none of them is behind one. udp, tcp and ws are always compiled in.
-integration_test_protocol_features() {
-    local name features=""
-    for name in ${PROTOCOLS//,/ }; do
-        case "$name" in
-            wss)          features="${features:+$features,}enable-protocol-wss" ;;
-            webtransport) features="${features:+$features,}enable-protocol-webtransport" ;;
-        esac
-    done
-    printf '%s' "$features"
-}
-
 # The `--live`/`--headless` block every runner's --help prints, so the wording
 # stays identical across repos.
 print_common_integration_test_options() {
@@ -132,8 +103,7 @@ print_common_integration_test_options() {
                        test UI.
   --protocols=LIST     Restrict the node to a comma-separated subset of
                        udp,tcp,ws,wss,webtransport, as an outbound-only client
-                       that listens on none of them. A --live run also builds
-                       the cargo features the named protocols need.
+                       that listens on none of them.
 EOF
 }
 

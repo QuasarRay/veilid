@@ -1395,6 +1395,14 @@ impl NativeNetwork {
             if !matches!(res, Ok(StartupDisposition::Success)) {
                 return res;
             }
+        } else {
+            #[cfg(feature = "enable-protocol-webtransport")]
+            if config.network.protocol.webtransport.listen {
+                let res = self.bind_webtransport_without_udp();
+                if !matches!(res, Ok(StartupDisposition::Success)) {
+                    return res;
+                }
+            }
         }
         if config.network.protocol.ws.listen {
             let res = self.start_ws_listeners();

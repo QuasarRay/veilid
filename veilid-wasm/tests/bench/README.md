@@ -24,13 +24,13 @@ WebTransport relay, and public-internet readiness.
 
 ## Run
 
-1. Build the WebTransport-enabled wasm (writes `../../pkg`):
+1. Build the wasm (writes `../../pkg`):
 
    ```
    npm run build:wasm
    ```
 
-   (equivalently: `cd ../.. && ./wasm_build_js.sh release --features=enable-protocol-webtransport`)
+   (equivalently: `cd ../.. && ./wasm_build_js.sh release`)
 
 2. Set the staging network's WebTransport bootstrap configuration as environment variables
    (there is no default, and the dev server will refuse to serve a working page without them):

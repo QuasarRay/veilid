@@ -5,6 +5,7 @@ import 'test_native_asset.dart';
 import 'test_prebuilt.dart';
 import 'test_timestamp.dart';
 import 'test_value_subkey_range.dart';
+import 'test_veilid_config.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +15,14 @@ void main() {
 
   group('native asset', () {
     test('test FFI entry points resolve', testNativeAssetResolves);
+  });
+
+  group('config', () {
+    test(
+      "core's default config survives a Dart round trip",
+      testDefaultConfigRoundTrip,
+    );
+    test('autoDetectState round trips', testAutoDetectStateRoundTrip);
   });
 
   group('prebuilt', () {

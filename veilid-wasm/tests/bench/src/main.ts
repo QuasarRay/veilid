@@ -69,6 +69,7 @@ function stagingWebTransportConfig(
   config.network.routingTable.bootstrap = bootstrap;
   config.network.routingTable.bootstrapKeys = bootstrapKeys;
   config.network.protocol.ws.connect = false;
+  config.network.protocol.wss!.connect = false;
   config.network.protocol.webtransport!.connect = true;
   config.tableStore.delete = true;
   config.protectedStore.delete = true;

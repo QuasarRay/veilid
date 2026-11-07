@@ -1,26 +1,44 @@
 **UNRELEASED**
 
 - veilid-core:
-  - WebTransport (HTTP/3 over QUIC) is a transport behind the `enable-protocol-webtransport` cargo feature, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching when it shares the node's UDP socket.
+  - WebTransport (HTTP/3 over QUIC) is a transport, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching.
+  - **Breaking** The `default`, `default-async-std` and `default-wasm` feature sets include `enable-protocol-wss` and `enable-protocol-webtransport`, so a node connects out over WSS and listens and connects over WebTransport. A `wasm32` build needs `--cfg=web_sys_unstable_apis` in its rustflags, which the veilid workspace's `.cargo/config.toml` sets.
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
+  - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
+  - WebTransport packets start at the RawUDP size proven for the address family, and discovery stops at the UDP interface limit; a WebTransport-only node discovers on its own from 1200.
+  - WebTransport listens and hole-punches without RawUDP: a WebTransport-only node punches from its own socket and returns the hole-punch receipt over the QUIC session it opens through the hole.
+  - WebTransport datagram messages are sized like RawUDP ones, up to the maximum message size, instead of an 8-fragment cap.
+  - WebTransport session logs and the `nodeinfo` connection table show each QUIC session's path MTU.
+  - The chaos `max_size` cap judges WebTransport frames by the session's QUIC packet size, not the whole message.
   - Published node info carries an expiration, the earliest of its dial infos', and peer info past its expiration is treated as dead.
   - `TimestampDuration::new_hours()` and `new_days()`.
   - TLS dependency updates: rustls 0.23.46 (RUSTSEC-2026-0346 through 0349), rustls-webpki 0.103.16 (RUSTSEC-2026-0382) and webpki-roots 1.0.11 (RUSTSEC-2026-0381).
+  - `network.privacy.country_code_denylist` and `network.virtual_network` take their defaults when a config leaves them out, like every other section a cargo feature adds.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
 - veilid-flutter:
   - `VeilidConfigWebTransport` under the protocol config.
+  - `VeilidConfigAppLifecycle.autoDetectState`, so a Dart app can turn off the platform's own lifecycle reports and drive the node with `reportAppLifecycleState`.
+- veilid-python:
+  - **Breaking** A config's `to_json()` leaves out `None` fields, so `change_config` lets veilid-core apply its own defaults.
+  - `VeilidConfigWSS`, `VeilidConfigWebTransport`, `VeilidConfigVirtualNetwork`, `VeilidConfigAppLifecycle` and `VeilidConfigPrivacy.country_code_denylist` model the sections a cargo feature adds to the config, each `None` when veilid-core is built without that feature, so a `change_config` round trip keeps them.
+  - An optional config section loads as its config class rather than a dict.
 - veilid-server:
   - WebTransport settings under `core.network.protocol.webtransport`.
+  - Built with WSS and WebTransport, so a node listens for WebTransport on its UDP port and advertises WTS and WTD dial info.
+  - `--port` moves the WebTransport listen address along with the others, and the packaged `veilid-server.conf` names it.
 - veilid-tools:
   - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
+  - `UdpDfSender`: a don't-fragment sending socket beside a shared UDP socket, the way `UdpTtlSender` sends hole punches; on Linux and Android it is connected to a documentation address so it never receives.
   - **Breaking** `VeilidRng` implements the `rand` 0.10 traits `TryRng` and `TryCryptoRng`; the `rand` 0.8 `RngCore` and `CryptoRng` impls are gone.
   - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
 - veilid-wasm:
   - Browser WebTransport client, outbound only.
+  - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
+- Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 
 **Changed in Veilid 0.5.8**
 

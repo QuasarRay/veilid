@@ -25,8 +25,6 @@ const STREAM_LEN_PREFIX: usize = size_of::<u32>();
 
 const MIN_WTD_DATAGRAM_SIZE: usize = 256;
 
-const WTD_MAX_FRAGMENTS: usize = 8;
-
 const WT_UNBOUND_FLUSH_GRACE_MS: u32 = 1000;
 
 const WT_DATAGRAM_FLUSH_POLL_INTERVAL_MS: u32 = 5;
@@ -58,10 +56,59 @@ const WT_STREAM_RECEIVE_WINDOW: u64 = 4 * MAX_MESSAGE_SIZE as u64;
 const WT_CONNECTION_RECEIVE_WINDOW: u64 =
     WT_PEER_BIDI_STREAMS_NEEDED as u64 * WT_STREAM_RECEIVE_WINDOW;
 
+/// The QUIC packet sizes an endpoint starts from and may discover up to, in UDP payload bytes
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::network_manager) struct QuicMtuSeed {
+    /// RawUDP's settled size for the address family, 1200 until a probe proves more
+    pub initial: u16,
+    /// The family's UDP interface limit, where discovery stops
+    pub limit: u16,
+}
+
+impl Default for QuicMtuSeed {
+    /// quinn's floor for both, as before any probe
+    fn default() -> Self {
+        Self {
+            initial: SAFE_TRANSPORT_MTU,
+            limit: SAFE_TRANSPORT_MTU,
+        }
+    }
+}
+
+impl QuicMtuSeed {
+    /// The seed for `address_type` from the sizes RawUDP has settled
+    pub fn for_address_type(registry: &VeilidComponentRegistry, address_type: AddressType) -> Self {
+        let network_manager = registry.network_manager();
+        let own_mtus = network_manager.own_mtus();
+        let llt = LowLevelTransportType {
+            low_level_protocol_type: LowLevelProtocolType::UDP,
+            address_type,
+        };
+        Self {
+            initial: own_mtus.get(llt),
+            limit: own_mtus.limit(llt),
+        }
+    }
+
+    pub fn for_remote(registry: &VeilidComponentRegistry, remote: &SocketAddr) -> Self {
+        let address_type = if remote.is_ipv4() {
+            AddressType::IPV4
+        } else {
+            AddressType::IPV6
+        };
+        Self::for_address_type(registry, address_type)
+    }
+}
+
 /// Bound what one WebTransport peer can pin, on both the sessions we accept and the ones we
 /// dial. quinn's defaults allow 100 peer-initiated streams of each kind against an unbounded
 /// connection receive window, and the accept path reads at most one stream per session.
-fn webtransport_transport_config() -> Arc<quinn::TransportConfig> {
+///
+/// Packets start at RawUDP's proven size for the family, so a seed at the limit needs no probe,
+/// and discovery stops at the interface limit; quinn floors both at 1200.
+fn webtransport_transport_config(seed: QuicMtuSeed) -> Arc<quinn::TransportConfig> {
+    let mut mtu_discovery = quinn::MtuDiscoveryConfig::default();
+    mtu_discovery.upper_bound(seed.limit.max(seed.initial));
     let mut transport = quinn::TransportConfig::default();
     transport
         .max_concurrent_bidi_streams(WT_MAX_PEER_BIDI_STREAMS.into())
@@ -71,7 +118,9 @@ fn webtransport_transport_config() -> Arc<quinn::TransportConfig> {
         )
         .receive_window(
             quinn::VarInt::from_u64(WT_CONNECTION_RECEIVE_WINDOW).unwrap_or(quinn::VarInt::MAX),
-        );
+        )
+        .initial_mtu(seed.initial)
+        .mtu_discovery_config(Some(mtu_discovery));
     Arc::new(transport)
 }
 
@@ -209,6 +258,7 @@ pub(in crate::network_manager) fn webtransport_endpoint_config() -> quinn::Endpo
 
 pub(in crate::network_manager) fn build_client_config(
     allowed_hashes: Vec<[u8; 32]>,
+    seed: QuicMtuSeed,
 ) -> io::Result<quinn::ClientConfig> {
     let provider = crypto_provider();
     let verifier = CertificateHashVerifier::new(allowed_hashes, provider.clone());
@@ -222,29 +272,33 @@ pub(in crate::network_manager) fn build_client_config(
 
     let quic_crypto = QuicClientConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config());
+    config.transport_config(webtransport_transport_config(seed));
     Ok(config)
 }
 
-pub(in crate::network_manager) fn build_client_config_ca() -> io::Result<quinn::ClientConfig> {
+/// The CA-signed crypto config, built once from the webpki roots; the transport config is
+/// added per dial, since the family's sizes move
+fn ca_quic_crypto() -> io::Result<Arc<QuicClientConfig>> {
+    static CA_CRYPTO: std::sync::OnceLock<Arc<QuicClientConfig>> = std::sync::OnceLock::new();
+    if let Some(crypto) = CA_CRYPTO.get() {
+        return Ok(crypto.clone());
+    }
     let root_store = RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
-    build_client_config_with_root_store(root_store)
+    let crypto = Arc::new(quic_client_crypto_with_root_store(root_store)?);
+    Ok(CA_CRYPTO.get_or_init(|| crypto).clone())
 }
 
-pub(in crate::network_manager) fn cached_client_config_ca() -> io::Result<quinn::ClientConfig> {
-    static CA_CONFIG: std::sync::OnceLock<quinn::ClientConfig> = std::sync::OnceLock::new();
-    if let Some(config) = CA_CONFIG.get() {
-        return Ok(config.clone());
-    }
-    let config = build_client_config_ca()?;
-    Ok(CA_CONFIG.get_or_init(|| config).clone())
-}
-
-pub(in crate::network_manager) fn build_client_config_with_root_store(
-    root_store: RootCertStore,
+pub(in crate::network_manager) fn cached_client_config_ca(
+    seed: QuicMtuSeed,
 ) -> io::Result<quinn::ClientConfig> {
+    let mut config = quinn::ClientConfig::new(ca_quic_crypto()?);
+    config.transport_config(webtransport_transport_config(seed));
+    Ok(config)
+}
+
+fn quic_client_crypto_with_root_store(root_store: RootCertStore) -> io::Result<QuicClientConfig> {
     let provider = crypto_provider();
     let mut crypto = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -252,16 +306,24 @@ pub(in crate::network_manager) fn build_client_config_with_root_store(
         .with_root_certificates(root_store)
         .with_no_client_auth();
     crypto.alpn_protocols = vec![ALPN.as_bytes().to_vec()];
+    QuicClientConfig::try_from(crypto).map_err(to_io_error_other)
+}
 
-    let quic_crypto = QuicClientConfig::try_from(crypto).map_err(to_io_error_other)?;
+#[cfg(any(test, feature = "test-util"))]
+pub(in crate::network_manager) fn build_client_config_with_root_store(
+    root_store: RootCertStore,
+    seed: QuicMtuSeed,
+) -> io::Result<quinn::ClientConfig> {
+    let quic_crypto = quic_client_crypto_with_root_store(root_store)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config());
+    config.transport_config(webtransport_transport_config(seed));
     Ok(config)
 }
 
 pub(in crate::network_manager) fn build_server_config_from_chain(
     cert_chain: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
+    seed: QuicMtuSeed,
 ) -> io::Result<quinn::ServerConfig> {
     let provider = crypto_provider();
     let mut crypto = rustls::ServerConfig::builder_with_provider(provider)
@@ -274,16 +336,17 @@ pub(in crate::network_manager) fn build_server_config_from_chain(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config());
+    config.transport_config(webtransport_transport_config(seed));
     Ok(config)
 }
 
 pub(in crate::network_manager) fn build_server_config(
     cert: &ManagedCertificate,
+    seed: QuicMtuSeed,
 ) -> io::Result<quinn::ServerConfig> {
     let cert_chain = vec![CertificateDer::from(cert.certificate_der.clone())];
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.private_key_der.clone()));
-    build_server_config_from_chain(cert_chain, key)
+    build_server_config_from_chain(cert_chain, key, seed)
 }
 
 /// A rustls server-certificate resolver for CA-signed (bootstrap) WebTransport. It serves the
@@ -327,6 +390,7 @@ pub(in crate::network_manager) fn certified_key_from_chain(
 pub(in crate::network_manager) fn build_ca_server_config(
     hostname: Arc<CertifiedKey>,
     ip: Option<Arc<CertifiedKey>>,
+    seed: QuicMtuSeed,
 ) -> io::Result<quinn::ServerConfig> {
     let resolver = Arc::new(WebTransportCaCertResolver { hostname, ip });
     let provider = crypto_provider();
@@ -339,7 +403,7 @@ pub(in crate::network_manager) fn build_ca_server_config(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config());
+    config.transport_config(webtransport_transport_config(seed));
     Ok(config)
 }
 
@@ -394,6 +458,17 @@ impl VeilidComponentRegistryAccessor for WebTransportNetworkConnection {
 }
 
 impl WebTransportNetworkConnection {
+    /// quinn's current path MTU for the session, in UDP payload bytes; `Session::stats` hides
+    /// the connection's, so the deref target is named
+    pub(in crate::network_manager) fn path_mtu(&self) -> u16 {
+        quinn::Connection::stats(&self.session).path.current_mtu
+    }
+
+    /// Bytes one datagram on the session may carry
+    pub(in crate::network_manager) fn datagram_budget(&self) -> usize {
+        self.session.max_datagram_size()
+    }
+
     pub(in crate::network_manager) fn new_stream(
         registry: VeilidComponentRegistry,
         flow: Flow,
@@ -522,24 +597,6 @@ impl WebTransportNetworkConnection {
                     return Ok(NetworkResult::invalid_message(
                         "WebTransport datagram budget too small",
                     ));
-                }
-                let Some(fragment_len) = max.checked_sub(FRAME_HEADER_LEN) else {
-                    veilid_log!(self debug
-                        "WebTransport: datagram budget below the fragment header ({} < {}) {:?}",
-                        max, FRAME_HEADER_LEN, self.flow);
-                    return Ok(NetworkResult::invalid_message(
-                        "WebTransport datagram budget too small",
-                    ));
-                };
-                let wtd_message_cap = WTD_MAX_FRAGMENTS.saturating_mul(fragment_len);
-                if message.len() > wtd_message_cap {
-                    veilid_log!(self debug
-                        "WebTransport: refusing oversize WTD message ({} bytes > cap {} = {} fragments) {:?}",
-                        message.len(), wtd_message_cap, WTD_MAX_FRAGMENTS, self.flow);
-                    return Ok(NetworkResult::invalid_message(format!(
-                        "WebTransport datagram message too large for unreliable delivery: {} bytes exceeds the {}-fragment cap ({} bytes); use a reliable transport",
-                        message.len(), WTD_MAX_FRAGMENTS, wtd_message_cap
-                    )));
                 }
                 let remote_addr = self.flow.remote_address().socket_addr();
                 let session = self.session.clone();
@@ -710,7 +767,7 @@ pub async fn connect(
     )
     .await?
     .map(|conn| {
-        // QUIC sizes its own packets, so there is no segment size to report
+        // QUIC sizes its own packets; chaos reads the session's path MTU
         registry.network_manager().chaos().wrap_connection(
             Box::new(NativeProtocolNetworkConnection::WebTransport(Box::new(
                 conn,
@@ -747,9 +804,12 @@ pub(in crate::network_manager) async fn connect_connection(
     let url = url::Url::parse(&request).map_err(to_io_error_other)?;
     let remote = dial_info.to_socket_addr();
 
+    let seed = QuicMtuSeed::for_remote(&registry, &remote);
     let client_config = match dial_mode {
-        WebTransportDialMode::CaSigned => cached_client_config_ca()?,
-        WebTransportDialMode::PinnedSelfSigned(cert_hashes) => build_client_config(cert_hashes)?,
+        WebTransportDialMode::CaSigned => cached_client_config_ca(seed)?,
+        WebTransportDialMode::PinnedSelfSigned(cert_hashes) => {
+            build_client_config(cert_hashes, seed)?
+        }
     };
     let endpoint = match opt_client_endpoint {
         Some(ep) => ep,
@@ -808,7 +868,9 @@ pub(in crate::network_manager) async fn connect_connection(
         WebTransportNetworkConnection::new_datagram(registry, flow, Direction::Out, session, None)
     };
 
-    veilid_log!(conn trace "WebTransport::connect: {:?}", conn);
+    veilid_log!(conn debug
+        "WebTransport: {} session to {} path mtu {} datagram budget {}",
+        if is_stream { "WTS" } else { "WTD" }, remote, conn.path_mtu(), conn.datagram_budget());
 
     Ok(NetworkResult::Value(conn))
 }

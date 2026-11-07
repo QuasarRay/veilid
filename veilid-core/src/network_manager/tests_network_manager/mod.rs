@@ -27,7 +27,13 @@ mod test_protected_reconnect;
 mod test_protocol_type;
 #[cfg(all(
     feature = "enable-protocol-webtransport",
-    any(target_os = "linux", target_os = "android")
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    )
 ))]
 mod test_shared_socket_fragmentation;
 #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
@@ -43,6 +49,8 @@ mod test_webtransport;
 mod test_webtransport_listener;
 #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
 pub mod test_webtransport_native;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+mod test_ws_mixed_content;
 
 use super::*;
 pub use mocks::*;
@@ -94,6 +102,10 @@ pub async fn test_all() {
     test_address_family_confirm::test_all();
     #[cfg(not(target_arch = "wasm32"))]
     test_udp_protocol::test_demuxed_recv_reassembles_from_channel().await;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    test_ws_mixed_content::test_ws_target_is_local();
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    test_ws_mixed_content::test_ws_allowed_from_a_secure_http_page();
     #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
     Box::pin(test_all_webtransport()).await;
 }
@@ -144,7 +156,13 @@ async fn test_all_webtransport() {
     test_udp_demux::test_poll_recv_yields_under_raw_flood().await;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     test_udp_demux::test_coalesced_slot_is_split_per_datagram().await;
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    ))]
     test_shared_socket_fragmentation::test_shared_socket_keeps_fragmentation_policy();
     test_tracked_flush::test_tracked_flush_is_cancelled_and_joined_at_shutdown().await;
     test_tracked_flush::test_tracked_flush_dropped_when_not_started();

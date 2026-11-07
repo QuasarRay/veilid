@@ -5881,6 +5881,7 @@ dependencies = [
  "web-transport-quinn",
  "web-transport-wasm",
  "webpki-roots",
+ "winapi",
  "ws_stream_wasm",
  "zeroize",
 ]

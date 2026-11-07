@@ -97,6 +97,7 @@ impl NativeNetwork {
         let family_mtus = self.inner.lock().family_mtus.clone();
         let network_manager = self.network_manager();
         let own_mtus = network_manager.own_mtus();
+        let mut udp_changed = false;
         for address_type in AddressTypeSet::all() {
             let safe = (SAFE_TRANSPORT_MTU, SAFE_TRANSPORT_MTU);
             let ((udp, tcp), (udp_limit, tcp_limit)) = family_mtus
@@ -108,14 +109,12 @@ impl NativeNetwork {
                     )
                 })
                 .unwrap_or((safe, safe));
-            own_mtus.set(
-                LowLevelTransportType {
-                    low_level_protocol_type: LowLevelProtocolType::UDP,
-                    address_type,
-                },
-                udp,
-                udp_limit,
-            );
+            let udp_llt = LowLevelTransportType {
+                low_level_protocol_type: LowLevelProtocolType::UDP,
+                address_type,
+            };
+            udp_changed |= (own_mtus.get(udp_llt), own_mtus.limit(udp_llt)) != (udp, udp_limit);
+            own_mtus.set(udp_llt, udp, udp_limit);
             own_mtus.set(
                 LowLevelTransportType {
                     low_level_protocol_type: LowLevelProtocolType::TCP,
@@ -126,10 +125,26 @@ impl NativeNetwork {
             );
         }
 
-        let inner = self.inner.lock();
-        for (addr, listener_mss_handle) in &inner.listener_mss_handles {
-            listener_mss_handle.set_mss(own_tcp_mss(&self.registry(), *addr));
+        {
+            let inner = self.inner.lock();
+            for (addr, listener_mss_handle) in &inner.listener_mss_handles {
+                listener_mss_handle.set_mss(own_tcp_mss(&self.registry(), *addr));
+            }
         }
+
+        // QUIC sessions start from the family's size, applied to later handshakes only
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if udp_changed {
+            match self.webtransport_server_configs() {
+                Ok(Some(configs)) => self.swap_webtransport_server_configs(configs),
+                Ok(None) => {}
+                Err(e) => {
+                    veilid_log!(self debug "WebTransport server configs not rebuilt for the new sizes: {}", e);
+                }
+            }
+        }
+        #[cfg(not(feature = "enable-protocol-webtransport"))]
+        let _ = udp_changed;
     }
 
     /// What our peer info says we take; None while any family is still detecting

@@ -26,6 +26,9 @@
 //! * `default-async-std` - Uses `async-std` as the async runtime.
 //! * `default-wasm` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime.
 //!
+//! Each of them includes the `enable-protocol-wss` and `enable-protocol-webtransport` protocol features.
+//! A `wasm32` build with WebTransport needs `--cfg=web_sys_unstable_apis` in its rustflags, which the veilid workspace's `.cargo/config.toml` sets.
+//!
 
 #![warn(missing_docs)]
 #![deny(warnings)]

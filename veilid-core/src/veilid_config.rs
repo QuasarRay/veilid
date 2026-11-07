@@ -288,17 +288,11 @@ pub struct VeilidConfigProtocol {
     pub tcp: VeilidConfigTCP,
     /// WebSocket protocol configuration.
     pub ws: VeilidConfigWS,
-    /// Secure WebSocket protocol configuration.
-    ///
-    /// `#[serde(default)]` keeps configs that leave this section out deserializing
-    /// against a feature-enabled core.
+    /// Secure WebSocket protocol configuration (requires `enable-protocol-wss`).
     #[cfg(feature = "enable-protocol-wss")]
     #[serde(default)]
     pub wss: VeilidConfigWSS,
-    /// WebTransport protocol configuration.
-    ///
-    /// `#[serde(default)]` keeps externally-supplied configs that predate this field
-    /// deserializing against a feature-enabled core.
+    /// WebTransport protocol configuration (requires `enable-protocol-webtransport`).
     #[cfg(feature = "enable-protocol-webtransport")]
     #[serde(default)]
     pub webtransport: VeilidConfigWebTransport,
@@ -319,6 +313,7 @@ pub struct VeilidConfigPrivacy {
     pub require_inbound_relay: bool,
     /// Two-letter country codes to refuse routing through (requires `geolocation`).
     #[cfg(feature = "geolocation")]
+    #[serde(default)]
     pub country_code_denylist: Vec<CountryCode>,
 }
 
@@ -625,8 +620,9 @@ pub struct VeilidConfigNetwork {
     pub protocol: VeilidConfigProtocol,
     /// Privacy and relay preferences.
     pub privacy: VeilidConfigPrivacy,
-    /// Virtual network client configuration (testing/simulation).
+    /// Virtual network client configuration for testing and simulation (requires `virtual-network`).
     #[cfg(feature = "virtual-network")]
+    #[serde(default)]
     pub virtual_network: VeilidConfigVirtualNetwork,
 }
 
@@ -1231,6 +1227,10 @@ pub struct VeilidConfigInternal {
 }
 
 /// Top level of the Veilid configuration tree
+///
+/// A section or field that exists only with a cargo feature takes its default when a config
+/// leaves it out, and a core built without the feature ignores it, so one config serves every
+/// build. Bindings model such sections as optional and leave them out when unset.
 #[apply(api_data_struct!)]
 #[api(eq, default, ts)]
 pub struct VeilidConfig {
@@ -1555,11 +1555,8 @@ impl VeilidConfig {
         }
         #[cfg(feature = "enable-protocol-webtransport")]
         if self.network.protocol.webtransport.listen {
-            if !self.network.protocol.udp.enabled {
-                apibail_generic!(
-                    "'network.protocol.webtransport.listen' requires 'network.protocol.udp.enabled', because the WebTransport listener is only bound alongside the UDP protocol handlers"
-                );
-            }
+            // WebTransport listens on its own QUIC socket when RawUDP is off, or shares the UDP
+            // socket when it is on; either way its listen flag stands alone
             if self
                 .network
                 .protocol

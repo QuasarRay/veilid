@@ -17,12 +17,13 @@ pub fn test_webtransport_listen_address_and_path_defaults() {
     assert_eq!(d.path, "wt");
 }
 
-pub fn test_webtransport_listen_default_on_when_feature_enabled() {
+pub fn test_webtransport_listen_default_follows_platform() {
     let d = VeilidConfigWebTransport::default();
     assert!(d.connect, "default: outbound connect enabled");
-    assert!(
+    assert_eq!(
         d.listen,
-        "default: inbound listen is on when the WebTransport feature is compiled in"
+        !cfg!(all(target_arch = "wasm32", target_os = "unknown")),
+        "default: inbound listen is on wherever the platform can accept connections"
     );
 }
 
@@ -152,13 +153,13 @@ pub fn test_validate_rejects_normalization_unstable_webtransport_paths() {
     }
 }
 
-pub fn test_validate_rejects_webtransport_listen_without_udp() {
+pub fn test_validate_accepts_webtransport_listen_without_udp() {
     let mut cfg = valid_test_config();
     cfg.network.protocol.webtransport.listen = true;
     cfg.network.protocol.udp.enabled = false;
     assert!(
-        cfg.validate().is_err(),
-        "the webtransport listener is only bound alongside the udp protocol handlers"
+        cfg.validate().is_ok(),
+        "a webtransport-only node listens on a dedicated socket"
     );
 }
 
@@ -172,7 +173,7 @@ pub fn test_validate_accepts_webtransport_off_without_udp() {
 pub fn test_all() {
     test_protocol_config_without_webtransport_deserializes();
     test_webtransport_listen_address_and_path_defaults();
-    test_webtransport_listen_default_on_when_feature_enabled();
+    test_webtransport_listen_default_follows_platform();
     test_webtransport_listen_address_and_path_roundtrip();
     test_webtransport_without_listen_address_or_path_deserializes_with_defaults();
     test_validate_rejects_webtransport_url_path_mismatch();
@@ -183,6 +184,6 @@ pub fn test_all() {
     test_validate_accepts_staging_bootstrap_webtransport_config();
     test_validate_accepts_normalization_stable_webtransport_paths();
     test_validate_rejects_normalization_unstable_webtransport_paths();
-    test_validate_rejects_webtransport_listen_without_udp();
+    test_validate_accepts_webtransport_listen_without_udp();
     test_validate_accepts_webtransport_off_without_udp();
 }

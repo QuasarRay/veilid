@@ -9,6 +9,17 @@ pub(super) struct WebTransportState {
     pub(super) client_endpoints: BTreeMap<AddressType, web_transport_quinn::quinn::Endpoint>,
     pub(super) tls_mtimes: Option<Vec<Option<std::time::SystemTime>>>,
     pub(super) shared_bind_mode: bool,
+    /// The sockets of dedicated endpoints, keyed by bound address, with the sender their hole
+    /// punches leave through
+    pub(super) punch_sockets: BTreeMap<SocketAddr, DedicatedPunchSocket>,
+}
+
+/// A dedicated WebTransport socket and its hole-punch sender; the sender is declared first so
+/// its twins drop before the socket
+#[derive(Clone)]
+pub(super) struct DedicatedPunchSocket {
+    pub(super) ttl_sender: Arc<UdpTtlSender>,
+    pub(super) socket: Arc<UdpSocketIo>,
 }
 
 /// Follow-up work owed to a certificate rotation, latched until each step is carried out.
@@ -59,6 +70,7 @@ impl WebTransportState {
         for (_at, endpoint) in std::mem::take(&mut self.client_endpoints) {
             endpoint.close(0u32.into(), b"network shutdown");
         }
+        self.punch_sockets.clear();
     }
 }
 
@@ -90,7 +102,9 @@ impl NativeNetwork {
 
     /// The addresses bound for WebTransport, keyed on WTS. Every binding path registers WTS
     /// and WTD at the same address in one call, so either key answers for both.
-    pub(super) fn webtransport_bound_addresses(&self) -> Option<Vec<SocketAddr>> {
+    pub(in crate::network_manager) fn webtransport_bound_addresses(
+        &self,
+    ) -> Option<Vec<SocketAddr>> {
         let inner = self.inner.lock();
         let wts = inner.bound_address_per_protocol.get(&ProtocolType::WTS);
         debug_assert_eq!(
@@ -166,7 +180,7 @@ impl NativeNetwork {
         Ok(NetworkResult::value(()))
     }
 
-    pub(super) fn send_quic_hole_punch(
+    pub(in crate::network_manager) fn send_quic_hole_punch(
         &self,
         dial_info: &DialInfo,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
@@ -176,47 +190,94 @@ impl NativeNetwork {
             ));
         }
         let peer_socket_addr = dial_info.to_socket_addr();
-        let shared_local = self.webtransport_bound_addresses().and_then(|addrs| {
+        let Some(local) = self.webtransport_bound_addresses().and_then(|addrs| {
             addrs
                 .iter()
                 .find(|a| a.is_ipv4() == peer_socket_addr.is_ipv4())
                 .copied()
-        });
-        let has_raw_handler = shared_local
-            .map(|a| self.inner.lock().udp_protocol_handlers.contains_key(&a))
-            .unwrap_or(false);
-        let Some(shared_local) = shared_local else {
+        }) else {
             return Ok(NetworkResult::no_connection_other(
-                "no shared WebTransport-bound UDP socket for the peer's address family",
+                "no WebTransport-bound UDP socket for the peer's address family",
             ));
-        };
-        if !has_raw_handler {
-            veilid_log!(self debug "QUIC hole punch to {} skipped: this node uses dedicated WebTransport bind, which shares no raw UDP socket for NAT traversal", peer_socket_addr);
-            return Ok(NetworkResult::no_connection_other(
-                "QUIC hole punch requires shared WebTransport mode",
-            ));
-        }
-        let ph = match self.find_best_udp_protocol_handler(&peer_socket_addr, &Some(shared_local)) {
-            Some(ph) => ph,
-            None => {
-                return Ok(NetworkResult::no_connection_other(
-                    "no shared UDP handler for QUIC hole punch",
-                ));
-            }
         };
         let ttl = hole_punch_ttl(
             &self.config().internal().network,
             &self.interfaces.interface_address_state(),
             dial_info.address_type(),
         );
-        let flow = network_result_try!(ph
-            .send_hole_punch(peer_socket_addr, ttl)
-            .wrap_err("failed to send QUIC hole punch to dial info")?);
+        // A shared socket punches through its RawUDP handler, a dedicated one through its own sender
+        let raw_handler = self.inner.lock().udp_protocol_handlers.get(&local).cloned();
+        let flow = match raw_handler {
+            Some(ph) => network_result_try!(ph
+                .send_hole_punch(peer_socket_addr, ttl)
+                .wrap_err("failed to send QUIC hole punch to dial info")?),
+            None => network_result_try!(self.send_dedicated_hole_punch(
+                local,
+                peer_socket_addr,
+                dial_info.protocol_type(),
+                ttl
+            )?),
+        };
         Ok(NetworkResult::value(UniqueFlow {
             flow,
             connection_id: None,
             dialed: true,
         }))
+    }
+
+    /// The empty TTL-limited datagram a dedicated WebTransport socket punches with
+    fn send_dedicated_hole_punch(
+        &self,
+        local: SocketAddr,
+        peer_socket_addr: SocketAddr,
+        protocol_type: ProtocolType,
+        ttl: u32,
+    ) -> EyreResult<NetworkResult<Flow>> {
+        let Some(punch_socket) = self
+            .inner
+            .lock()
+            .webtransport
+            .punch_sockets
+            .get(&local)
+            .cloned()
+        else {
+            return Ok(NetworkResult::no_connection_other(
+                "no WebTransport socket bound for QUIC hole punch",
+            ));
+        };
+        if self
+            .network_manager()
+            .address_filter()
+            .is_ip_addr_punished(peer_socket_addr.ip())
+        {
+            return Ok(NetworkResult::no_connection_other("punished"));
+        }
+        // Debug chaos can lose the punch, never hold it
+        let verdict = self
+            .network_manager()
+            .chaos()
+            .send_verdict(peer_socket_addr.ip(), 0);
+        if !matches!(verdict, ChaosVerdict::Drop | ChaosVerdict::Oversize) {
+            match punch_socket.ttl_sender.send_to(
+                punch_socket.socket.as_ref(),
+                &[],
+                peer_socket_addr,
+                ttl,
+            ) {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    return Ok(NetworkResult::timeout());
+                }
+                Err(e) => return Ok(NetworkResult::no_connection(e)),
+            }
+        }
+        Ok(NetworkResult::value(Flow::new(
+            PeerAddress::new(
+                SocketAddress::from_socket_addr(peer_socket_addr),
+                protocol_type,
+            ),
+            SocketAddress::from_socket_addr(local),
+        )))
     }
 }
 

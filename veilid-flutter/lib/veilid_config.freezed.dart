@@ -8603,7 +8603,9 @@ mixin _$VeilidConfigAppLifecycle implements DiagnosticableTreeMixin {
 
 /// While attached, keep a hidden desktop app from being throttled; no
 /// effect on mobile.
- bool get preferForeground;
+ bool get preferForeground;/// Follow the platform's own lifecycle reports where it has them; when
+/// false, only [Veilid.reportAppLifecycleState] counts.
+ bool get autoDetectState;
 /// Create a copy of VeilidConfigAppLifecycle
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -8617,21 +8619,21 @@ $VeilidConfigAppLifecycleCopyWith<VeilidConfigAppLifecycle> get copyWith => _$Ve
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigAppLifecycle'))
-    ..add(DiagnosticsProperty('preferForeground', preferForeground));
+    ..add(DiagnosticsProperty('preferForeground', preferForeground))..add(DiagnosticsProperty('autoDetectState', autoDetectState));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigAppLifecycle&&(identical(other.preferForeground, preferForeground) || other.preferForeground == preferForeground));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigAppLifecycle&&(identical(other.preferForeground, preferForeground) || other.preferForeground == preferForeground)&&(identical(other.autoDetectState, autoDetectState) || other.autoDetectState == autoDetectState));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,preferForeground);
+int get hashCode => Object.hash(runtimeType,preferForeground,autoDetectState);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigAppLifecycle(preferForeground: $preferForeground)';
+  return 'VeilidConfigAppLifecycle(preferForeground: $preferForeground, autoDetectState: $autoDetectState)';
 }
 
 
@@ -8642,7 +8644,7 @@ abstract mixin class $VeilidConfigAppLifecycleCopyWith<$Res>  {
   factory $VeilidConfigAppLifecycleCopyWith(VeilidConfigAppLifecycle value, $Res Function(VeilidConfigAppLifecycle) _then) = _$VeilidConfigAppLifecycleCopyWithImpl;
 @useResult
 $Res call({
- bool preferForeground
+ bool preferForeground, bool autoDetectState
 });
 
 
@@ -8659,9 +8661,10 @@ class _$VeilidConfigAppLifecycleCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigAppLifecycle
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? preferForeground = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? preferForeground = null,Object? autoDetectState = null,}) {
   return _then(_self.copyWith(
 preferForeground: null == preferForeground ? _self.preferForeground : preferForeground // ignore: cast_nullable_to_non_nullable
+as bool,autoDetectState: null == autoDetectState ? _self.autoDetectState : autoDetectState // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -8744,10 +8747,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool preferForeground)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool preferForeground,  bool autoDetectState)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigAppLifecycle() when $default != null:
-return $default(_that.preferForeground);case _:
+return $default(_that.preferForeground,_that.autoDetectState);case _:
   return orElse();
 
 }
@@ -8765,10 +8768,10 @@ return $default(_that.preferForeground);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool preferForeground)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool preferForeground,  bool autoDetectState)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigAppLifecycle():
-return $default(_that.preferForeground);}
+return $default(_that.preferForeground,_that.autoDetectState);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -8782,10 +8785,10 @@ return $default(_that.preferForeground);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool preferForeground)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool preferForeground,  bool autoDetectState)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigAppLifecycle() when $default != null:
-return $default(_that.preferForeground);case _:
+return $default(_that.preferForeground,_that.autoDetectState);case _:
   return null;
 
 }
@@ -8797,12 +8800,15 @@ return $default(_that.preferForeground);case _:
 @JsonSerializable()
 
 class _VeilidConfigAppLifecycle with DiagnosticableTreeMixin implements VeilidConfigAppLifecycle {
-  const _VeilidConfigAppLifecycle({this.preferForeground = true});
+  const _VeilidConfigAppLifecycle({this.preferForeground = true, this.autoDetectState = true});
   factory _VeilidConfigAppLifecycle.fromJson(Map<String, dynamic> json) => _$VeilidConfigAppLifecycleFromJson(json);
 
 /// While attached, keep a hidden desktop app from being throttled; no
 /// effect on mobile.
 @override@JsonKey() final  bool preferForeground;
+/// Follow the platform's own lifecycle reports where it has them; when
+/// false, only [Veilid.reportAppLifecycleState] counts.
+@override@JsonKey() final  bool autoDetectState;
 
 /// Create a copy of VeilidConfigAppLifecycle
 /// with the given fields replaced by the non-null parameter values.
@@ -8818,21 +8824,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigAppLifecycle'))
-    ..add(DiagnosticsProperty('preferForeground', preferForeground));
+    ..add(DiagnosticsProperty('preferForeground', preferForeground))..add(DiagnosticsProperty('autoDetectState', autoDetectState));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigAppLifecycle&&(identical(other.preferForeground, preferForeground) || other.preferForeground == preferForeground));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigAppLifecycle&&(identical(other.preferForeground, preferForeground) || other.preferForeground == preferForeground)&&(identical(other.autoDetectState, autoDetectState) || other.autoDetectState == autoDetectState));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,preferForeground);
+int get hashCode => Object.hash(runtimeType,preferForeground,autoDetectState);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigAppLifecycle(preferForeground: $preferForeground)';
+  return 'VeilidConfigAppLifecycle(preferForeground: $preferForeground, autoDetectState: $autoDetectState)';
 }
 
 
@@ -8843,7 +8849,7 @@ abstract mixin class _$VeilidConfigAppLifecycleCopyWith<$Res> implements $Veilid
   factory _$VeilidConfigAppLifecycleCopyWith(_VeilidConfigAppLifecycle value, $Res Function(_VeilidConfigAppLifecycle) _then) = __$VeilidConfigAppLifecycleCopyWithImpl;
 @override @useResult
 $Res call({
- bool preferForeground
+ bool preferForeground, bool autoDetectState
 });
 
 
@@ -8860,9 +8866,10 @@ class __$VeilidConfigAppLifecycleCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigAppLifecycle
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? preferForeground = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? preferForeground = null,Object? autoDetectState = null,}) {
   return _then(_VeilidConfigAppLifecycle(
 preferForeground: null == preferForeground ? _self.preferForeground : preferForeground // ignore: cast_nullable_to_non_nullable
+as bool,autoDetectState: null == autoDetectState ? _self.autoDetectState : autoDetectState // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }

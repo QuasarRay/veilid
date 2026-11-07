@@ -4,7 +4,8 @@ use super::udp_demux::DemuxerUdpSocket;
 use super::webtransport_certificate_profile::{
     webtransport_certificate_profile, WEBTRANSPORT_CERT_DEFAULT_VALIDITY,
 };
-use super::webtransport_quinn_runtime::veilid_quinn_runtime;
+use super::webtransport_quinn_runtime::{veilid_quinn_runtime, VeilidQuinnUdpSocket};
+use super::webtransport_state::DedicatedPunchSocket;
 use super::*;
 use futures_rustls::rustls::sign::CertifiedKey;
 use web_transport_quinn::{quinn, Server};
@@ -229,6 +230,10 @@ impl NativeNetwork {
         if !self.config().network.protocol.webtransport.listen {
             return Ok(None);
         }
+        let seed_v4 =
+            webtransport::QuicMtuSeed::for_address_type(&self.registry(), AddressType::IPV4);
+        let seed_v6 =
+            webtransport::QuicMtuSeed::for_address_type(&self.registry(), AddressType::IPV6);
         if let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() {
             let cfg = self.config();
             let certs = Self::load_certs(std::path::Path::new(&cfg.network.tls.certificate_path))
@@ -246,9 +251,9 @@ impl NativeNetwork {
 
             let v4_ip = self.load_webtransport_ip_certified_key("ipv4");
             let v6_ip = self.load_webtransport_ip_certified_key("ipv6");
-            let v4 = webtransport::build_ca_server_config(hostname_ck.clone(), v4_ip)
+            let v4 = webtransport::build_ca_server_config(hostname_ck.clone(), v4_ip, seed_v4)
                 .wrap_err("failed to build CA-signed webtransport server config (ipv4)")?;
-            let v6 = webtransport::build_ca_server_config(hostname_ck, v6_ip)
+            let v6 = webtransport::build_ca_server_config(hostname_ck, v6_ip, seed_v6)
                 .wrap_err("failed to build CA-signed webtransport server config (ipv6)")?;
             return Ok(Some(WebTransportServerConfigs { v4, v6 }));
         }
@@ -259,17 +264,18 @@ impl NativeNetwork {
         let Some(cert) = cert else {
             return Ok(None);
         };
-        let server_config = webtransport::build_server_config(&cert)
-            .wrap_err("failed to build self-signed webtransport server config")?;
-        Ok(Some(WebTransportServerConfigs {
-            v4: server_config.clone(),
-            v6: server_config,
-        }))
+        // One certificate, but each family starts from its own size
+        let v4 = webtransport::build_server_config(&cert, seed_v4)
+            .wrap_err("failed to build self-signed webtransport server config (ipv4)")?;
+        let v6 = webtransport::build_server_config(&cert, seed_v6)
+            .wrap_err("failed to build self-signed webtransport server config (ipv6)")?;
+        Ok(Some(WebTransportServerConfigs { v4, v6 }))
     }
 
+    /// `udp_bind_set` is None when RawUDP is off, which leaves only a dedicated bind
     pub(in crate::network_manager) fn webtransport_bind_plan(
         &self,
-        udp_bind_set: &NetworkBindSet,
+        udp_bind_set: Option<&NetworkBindSet>,
     ) -> EyreResult<WebTransportBindPlan> {
         let server_configs = match self.webtransport_server_configs() {
             Ok(server_configs) => server_configs,
@@ -291,7 +297,7 @@ impl NativeNetwork {
             .listen_address
             .clone();
         let wt_bind_set = self.make_bind_set(&listen_address)?;
-        if same_bind_target(&wt_bind_set, udp_bind_set) {
+        if udp_bind_set.is_some_and(|udp_bind_set| same_bind_target(&wt_bind_set, udp_bind_set)) {
             return Ok(WebTransportBindPlan::Shared(server_configs));
         }
         Ok(WebTransportBindPlan::Dedicated(wt_bind_set, server_configs))
@@ -719,7 +725,7 @@ impl NativeNetwork {
                         addr,
                         &[ProtocolType::WTS, ProtocolType::WTD],
                     );
-                    veilid_log!(self warn "WebTransport dedicated bind on {}: QUIC hole punching (NAT traversal) is disabled on this socket; share the node's UDP socket if WebTransport NAT traversal is required", addr);
+                    veilid_log!(self debug "WebTransport dedicated bind on {}", addr);
                     break;
                 }
 
@@ -753,21 +759,29 @@ impl NativeNetwork {
         let Some(udp_socket) = bind_udp_socket_io_probed(addr)? else {
             return Ok(false);
         };
-        let std_socket = udp_socket.into_std()?;
+        let socket = Arc::new(udp_socket);
+        let quinn_socket = VeilidQuinnUdpSocket::try_from_io(socket.clone())
+            .wrap_err("failed to wrap dedicated webtransport socket")?;
 
-        let endpoint = quinn::Endpoint::new(
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
             webtransport::webtransport_endpoint_config(),
             Some(server_config.clone()),
-            std_socket,
+            Arc::new(quinn_socket),
             veilid_quinn_runtime(),
         )
         .wrap_err("failed to create dedicated webtransport endpoint")?;
 
-        self.inner
-            .lock()
-            .webtransport
-            .endpoints
-            .push(endpoint.clone());
+        {
+            let mut inner = self.inner.lock();
+            inner.webtransport.endpoints.push(endpoint.clone());
+            inner.webtransport.punch_sockets.insert(
+                addr,
+                DedicatedPunchSocket {
+                    ttl_sender: Arc::new(UdpTtlSender::new()),
+                    socket,
+                },
+            );
+        }
 
         self.spawn_webtransport_accept_loop(endpoint, addr);
         Ok(true)
@@ -785,7 +799,16 @@ impl NativeNetwork {
         };
         let socket_arc = Arc::new(udp_socket);
 
-        let (demux, raw_rx) = DemuxerUdpSocket::try_new(socket_arc.clone())
+        // Only a wildcard socket gets the twin; without one quinn stays at its initial MTU here
+        let df_sender = match UdpDfSender::try_new(&socket_arc) {
+            Ok(df_sender) => df_sender,
+            Err(e) => {
+                veilid_log!(self debug "WebTransport: no DF twin beside {}, path MTU discovery stays off there: {}", addr, e);
+                None
+            }
+        };
+        veilid_log!(self debug "WebTransport: DF twin beside {}: {}", addr, df_sender.is_some());
+        let (demux, raw_rx) = DemuxerUdpSocket::try_new(socket_arc.clone(), df_sender)
             .wrap_err("failed to create demux socket")?;
 
         let server_config = server_config.clone();
@@ -821,6 +844,7 @@ impl NativeNetwork {
             }
         }
         inner.webtransport.endpoints = kept;
+        inner.webtransport.punch_sockets.remove(&addr);
     }
 
     fn record_bound_address_for_protocols(&self, addr: SocketAddr, pts: &[ProtocolType]) {
@@ -939,7 +963,10 @@ impl NativeNetwork {
                                 return;
                             }
                         };
-                        // QUIC sizes its own packets, so there is no segment size to report
+                        veilid_log!(log debug
+                            "WebTransport: {} session from {} path mtu {} datagram budget {}",
+                            conn.flow().protocol_type(), peer_addr, conn.path_mtu(), conn.datagram_budget());
+                        // QUIC sizes its own packets; chaos reads the session's path MTU
                         let prot_conn = log.network_manager().chaos().wrap_connection(
                             Box::new(NativeProtocolNetworkConnection::WebTransport(Box::new(
                                 conn,

@@ -476,7 +476,11 @@ fn main() -> EyreResult<()> {
         settingsrw.core.network.protocol.ws.listen_address = listen_address.clone();
         #[cfg(feature = "enable-protocol-wss")]
         {
-            settingsrw.core.network.protocol.wss.listen_address = listen_address;
+            settingsrw.core.network.protocol.wss.listen_address = listen_address.clone();
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        {
+            settingsrw.core.network.protocol.webtransport.listen_address = listen_address;
         }
     }
 

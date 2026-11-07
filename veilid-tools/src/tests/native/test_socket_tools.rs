@@ -153,6 +153,174 @@ pub fn test_routed_local_ip_resolves_v4_loopback() {
     assert!(!ip.is_unspecified(), "a routed source ip must be specified");
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    windows
+))]
+mod df_sender {
+    use super::*;
+
+    /// The shared socket and its twin, or None where the host has no route for the twin's
+    /// steering address, as in a container without one
+    fn shared_with_twin() -> Option<(UdpSocketIo, UdpDfSender)> {
+        let shared =
+            bind_udp_socket_io(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
+                .expect("bind should not error")
+                .expect("bind should succeed");
+        match UdpDfSender::try_new(&shared) {
+            Ok(Some(twin)) => Some((shared, twin)),
+            Ok(None) => panic!("a wildcard-bound socket gets a twin on this platform"),
+            Err(e) if e.kind() == std::io::ErrorKind::NetworkUnreachable => {
+                info!("skipped, no route for the twin's steering address: {}", e);
+                None
+            }
+            Err(e) => panic!("twin: {}", e),
+        }
+    }
+
+    #[cfg(unix)]
+    fn int_option(socket: &UdpSocketIo, level: libc::c_int, name: libc::c_int) -> libc::c_int {
+        use std::os::fd::AsRawFd;
+
+        let mut value: libc::c_int = -1;
+        let mut len = core::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: the socket is open, and `value` and `len` outlive this synchronous call
+        let res = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                level,
+                name,
+                (&mut value as *mut libc::c_int).cast(),
+                &mut len,
+            )
+        };
+        assert_eq!(res, 0, "getsockopt: {}", std::io::Error::last_os_error());
+        value
+    }
+
+    #[cfg(windows)]
+    fn int_option(socket: &UdpSocketIo, level: i32, name: i32) -> i32 {
+        use std::os::windows::io::AsRawSocket;
+        use winapi::um::winsock2::{getsockopt, SOCKET, SOCKET_ERROR};
+
+        let mut value: i32 = -1;
+        let mut len = core::mem::size_of::<i32>() as i32;
+        // SAFETY: the socket is open, and `value` and `len` outlive this synchronous call
+        let res = unsafe {
+            getsockopt(
+                socket.as_raw_socket() as SOCKET,
+                level,
+                name,
+                (&mut value as *mut i32).cast(),
+                &mut len,
+            )
+        };
+        assert_ne!(
+            res,
+            SOCKET_ERROR,
+            "getsockopt: {}",
+            std::io::Error::last_os_error()
+        );
+        value
+    }
+
+    /// Every datagram to the port reaches the shared socket, none the twin, from many source
+    /// ports so a hash-spread group would show
+    pub async fn test_udp_df_sender_keeps_receives_on_the_main_socket() {
+        info!("-- test_udp_df_sender_keeps_receives_on_the_main_socket");
+        let Some((shared, twin)) = shared_with_twin() else {
+            return;
+        };
+        let port = shared.local_addr().expect("local addr").port();
+        // The twin's own address too, where connecting pinned one, so the specific slot is tried
+        let mut targets = vec![SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)];
+        if let Ok(twin_addr) = twin.io().local_addr() {
+            if !twin_addr.ip().is_unspecified() {
+                targets.push(SocketAddr::new(twin_addr.ip(), port));
+            }
+        }
+        const SENDERS: usize = 40;
+        const PER_SENDER: usize = 5;
+        let mut senders = Vec::with_capacity(SENDERS);
+        for _ in 0..SENDERS {
+            senders.push(
+                bind_udp_socket_io(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
+                    .expect("sender bind should not error")
+                    .expect("sender bind should succeed"),
+            );
+        }
+        for (i, sender) in senders.iter().enumerate() {
+            for _ in 0..PER_SENDER {
+                sender
+                    .send_to(b"df", targets[i % targets.len()])
+                    .await
+                    .expect("send");
+            }
+        }
+        let expected = SENDERS * PER_SENDER;
+        let mut received = 0;
+        let mut buf = [0u8; 16];
+        while received < expected {
+            match timeout(2000, shared.recv_from(&mut buf)).await {
+                Ok(Ok(_)) => received += 1,
+                Ok(Err(e)) => panic!("recv: {}", e),
+                Err(_) => break,
+            }
+        }
+        assert_eq!(
+            received, expected,
+            "the shared socket must receive every datagram, the twin none"
+        );
+    }
+
+    /// A datagram sent through the twin carries the shared port as its source port
+    pub async fn test_udp_df_sender_sends_with_the_shared_port() {
+        info!("-- test_udp_df_sender_sends_with_the_shared_port");
+        let Some((shared, twin)) = shared_with_twin() else {
+            return;
+        };
+        let port = shared.local_addr().expect("local addr").port();
+        let receiver =
+            bind_udp_socket_io(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
+                .expect("receiver bind should not error")
+                .expect("receiver bind should succeed");
+        let receiver_addr = receiver.local_addr().expect("receiver addr");
+        twin.io().send_to(b"df", receiver_addr).await.expect("send");
+        let mut buf = [0u8; 16];
+        let (n, from) = timeout(2000, receiver.recv_from(&mut buf))
+            .await
+            .expect("the twin's datagram must arrive")
+            .expect("recv");
+        assert_eq!(&buf[..n], b"df");
+        assert_eq!(from.port(), port, "the twin sends from the shared port");
+    }
+
+    /// DF is set on the twin and left as the builder chose on the shared socket
+    pub fn test_udp_df_sender_sets_df_only_on_the_twin() {
+        info!("-- test_udp_df_sender_sets_df_only_on_the_twin");
+        let Some((shared, twin)) = shared_with_twin() else {
+            return;
+        };
+        cfg_if! {
+            if #[cfg(any(target_os = "linux", target_os = "android"))] {
+                assert_eq!(int_option(&shared, libc::IPPROTO_IP, libc::IP_MTU_DISCOVER), libc::IP_PMTUDISC_DONT);
+                assert_eq!(int_option(twin.io(), libc::IPPROTO_IP, libc::IP_MTU_DISCOVER), libc::IP_PMTUDISC_PROBE);
+            } else if #[cfg(any(target_os = "macos", target_os = "ios"))] {
+                assert_eq!(int_option(&shared, libc::IPPROTO_IP, libc::IP_DONTFRAG), 0);
+                assert_eq!(int_option(twin.io(), libc::IPPROTO_IP, libc::IP_DONTFRAG), 1);
+            } else if #[cfg(windows)] {
+                use winapi::shared::ws2def::IPPROTO_IP;
+                use winapi::shared::ws2ipdef::IP_DONTFRAGMENT;
+                assert_eq!(int_option(&shared, IPPROTO_IP, IP_DONTFRAGMENT), 0);
+                assert_eq!(int_option(twin.io(), IPPROTO_IP, IP_DONTFRAGMENT), 1);
+            }
+        }
+    }
+}
+
 pub async fn test_all() {
     test_borrowed_socket_operations().await;
     test_tcp_mss_clamp().await;
@@ -162,4 +330,16 @@ pub async fn test_all() {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     test_udp_ipv4_fragmentation_allowed();
     test_routed_local_ip_resolves_v4_loopback();
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        windows
+    ))]
+    {
+        df_sender::test_udp_df_sender_keeps_receives_on_the_main_socket().await;
+        df_sender::test_udp_df_sender_sends_with_the_shared_port().await;
+        df_sender::test_udp_df_sender_sets_df_only_on_the_twin();
+    }
 }

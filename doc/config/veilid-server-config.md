@@ -356,9 +356,9 @@ protocol:
 
 WebTransport (HTTP/3 over QUIC) supports both self-signed certificate mode (default) and CA-signed bootstrap mode.
 
-Both inbound `listen` and outbound `connect` are on by default. The opt-in gate is the `enable-protocol-webtransport` cargo feature. It stays out of the default feature set, so a build without it carries no WebTransport, and a build that compiles it in has already opted in. Set `listen: false` to dial WebTransport peers without accepting or advertising inbound WebTransport.
+Both inbound `listen` and outbound `connect` are on by default, and the `enable-protocol-webtransport` cargo feature is in the default feature set. A build without that feature carries no WebTransport. Set `listen: false` to dial WebTransport peers without accepting or advertising inbound WebTransport.
 
-`listen_address` is parsed the same way as it is for the other protocols, and an empty value binds the default port. When it resolves to the same address/port as `udp.listen_address`, WebTransport shares the node's UDP socket via QUIC demultiplexing. When it resolves to a different address/port, WebTransport gets a dedicated QUIC-only UDP socket. A dedicated socket carries QUIC only and shares no raw UDP handler, which disables QUIC hole punching (NAT traversal) for WebTransport. A NAT'd peer that relies on hole punching cannot be reached over WebTransport while this node uses a dedicated bind. Set `listen_address` equal to `udp.listen_address` if WebTransport NAT traversal is required.
+`listen_address` is parsed the same way as it is for the other protocols, and an empty value binds the default port. When it resolves to the same address/port as `udp.listen_address`, WebTransport shares the node's UDP socket via QUIC demultiplexing. When it resolves to a different address/port, or when `udp.enabled` is false, WebTransport gets a dedicated QUIC-only UDP socket. Hole punching (NAT traversal) works through either kind of socket.
 
 The `path` parameter sets the URL path for the WebTransport endpoint (default `'wt'`). Self-signed dial-info URLs are advertised as `https://{address}:{port}/wt`. Inbound sessions requesting a different path are rejected with 404.
 

@@ -38,7 +38,7 @@ pub(in crate::network_manager) mod demuxer {
     use std::pin::Pin;
     use std::sync::Arc;
     use std::task::{ready, Context, Poll};
-    use veilid_tools::{keep_udp_fragmentation_options, Interest, UdpSocketIo};
+    use veilid_tools::{keep_udp_fragmentation_options, Interest, UdpDfSender, UdpSocketIo};
     use web_transport_quinn::quinn::{
         udp::{RecvMeta, Transmit, UdpSocketState, BATCH_SIZE},
         AsyncUdpSocket, UdpPoller,
@@ -113,9 +113,16 @@ pub(in crate::network_manager) mod demuxer {
         KeptQuicBytes(kept)
     }
 
+    /// The don't-fragment twin QUIC packets leave through, with its own quinn-udp state
+    struct DfTwin {
+        sender: UdpDfSender,
+        state: UdpSocketState,
+    }
+
     pub(in crate::network_manager) struct DemuxerUdpSocket {
         io: Arc<UdpSocketIo>,
         state: UdpSocketState,
+        df: Option<DfTwin>,
         raw_tx: flume::Sender<DemuxedDatagram>,
     }
 
@@ -123,19 +130,41 @@ pub(in crate::network_manager) mod demuxer {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("DemuxerUdpSocket")
                 .field("local_addr", &self.io.local_addr().ok())
+                .field("df_twin", &self.df.is_some())
                 .finish_non_exhaustive()
         }
     }
 
     impl DemuxerUdpSocket {
+        /// `df_sender` is the twin QUIC packets leave through; without one every send goes out on
+        /// the shared socket and quinn keeps the endpoint at its initial MTU
         pub fn try_new(
             io: Arc<UdpSocketIo>,
+            df_sender: Option<UdpDfSender>,
         ) -> io::Result<(Arc<Self>, flume::Receiver<DemuxedDatagram>)> {
             // quinn-udp forbids fragmentation, so put back the builder's policy for raw veilid UDP
             let state = keep_udp_fragmentation_options(&io, || UdpSocketState::new((&*io).into()))?;
+            let df = df_sender
+                .map(|sender| {
+                    let state = UdpSocketState::new(sender.io().into())?;
+                    Ok::<_, io::Error>(DfTwin { sender, state })
+                })
+                .transpose()?;
             let (raw_tx, rx) = flume::bounded(RAW_DEMUX_CHANNEL_DEPTH);
-            let socket = Arc::new(Self { io, state, raw_tx });
+            let socket = Arc::new(Self {
+                io,
+                state,
+                df,
+                raw_tx,
+            });
             Ok((socket, rx))
+        }
+
+        fn send_socket(&self) -> (&UdpSocketIo, &UdpSocketState) {
+            match &self.df {
+                Some(df) => (df.sender.io(), &df.state),
+                None => (&self.io, &self.state),
+            }
         }
     }
 
@@ -143,14 +172,13 @@ pub(in crate::network_manager) mod demuxer {
         fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn UdpPoller>> {
             Box::pin(UdpWritablePoller::new(move || {
                 let socket = self.clone();
-                async move { socket.io.writable().await }
+                async move { socket.send_socket().0.writable().await }
             }))
         }
 
         fn try_send(&self, transmit: &Transmit) -> io::Result<()> {
-            self.io.try_io(Interest::WRITABLE, || {
-                self.state.send((&*self.io).into(), transmit)
-            })
+            let (io, state) = self.send_socket();
+            io.try_io(Interest::WRITABLE, || state.send(io.into(), transmit))
         }
 
         fn poll_recv(
@@ -204,7 +232,7 @@ pub(in crate::network_manager) mod demuxer {
         }
 
         fn max_transmit_segments(&self) -> usize {
-            self.state.max_gso_segments()
+            self.send_socket().1.max_gso_segments()
         }
 
         // quinn-udp turns UDP_GRO on when it wraps the socket and offers no way to turn it
@@ -214,10 +242,10 @@ pub(in crate::network_manager) mod demuxer {
             self.state.gro_segments()
         }
 
-        // Datagrams on this socket may fragment, so a path MTU probe could pass in pieces, and
-        // quinn keeps the shared endpoint at its initial MTU instead of probing
+        // QUIC packets leave through the DF twin, so its answer decides whether quinn probes the
+        // path MTU; the shared socket itself may fragment, which would pass a probe in pieces
         fn may_fragment(&self) -> bool {
-            true
+            self.df.as_ref().is_none_or(|df| df.state.may_fragment())
         }
     }
 }

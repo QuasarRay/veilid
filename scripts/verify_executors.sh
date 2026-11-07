@@ -8,7 +8,10 @@ FAIL=0
 
 echo ">>> Check 1: async-std build (no WebTransport) must contain no tokio crate ..."
 CHECK1_ERR_FILE="$(mktemp)"
-CHECK1_OUT="$(cargo tree -p veilid-core --no-default-features --features default-async-std -i tokio 2>"$CHECK1_ERR_FILE")"
+# default-async-std includes WebTransport, so this is its feature set without it
+CHECK1_OUT="$(cargo tree -p veilid-core --no-default-features \
+        --features enable-crypto-vld0,rt-async-std,debug-api,backtrace,enable-protocol-wss \
+        -i tokio 2>"$CHECK1_ERR_FILE")"
 CHECK1_STATUS=$?
 if [ "$CHECK1_STATUS" -ne 0 ]; then
     echo "!!! Check 1 FAILED: 'cargo tree' did not run successfully:"

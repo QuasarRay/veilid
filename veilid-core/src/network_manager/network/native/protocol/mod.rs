@@ -95,6 +95,14 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
             }
         })
     }
+
+    fn path_mtu(&self) -> Option<u16> {
+        match self {
+            #[cfg(feature = "enable-protocol-webtransport")]
+            Self::WebTransport(w) => Some(w.path_mtu()),
+            _ => None,
+        }
+    }
 }
 
 impl NativeProtocolNetworkConnection {
@@ -188,5 +196,8 @@ impl PlatformProtocolNetworkConnection for SegmentLimitedConnection {
     }
     fn recv(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<Bytes>>> {
         self.inner.recv()
+    }
+    fn path_mtu(&self) -> Option<u16> {
+        self.inner.path_mtu()
     }
 }

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build:wasm": "cd ../../ && ./wasm_build_js.sh release --features=enable-protocol-webtransport",
+    "build:wasm": "cd ../../ && ./wasm_build_js.sh release",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
