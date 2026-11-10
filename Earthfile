@@ -128,7 +128,8 @@ deps-base-build:
         '    sleep 10' \
         'done' \
         > /usr/local/bin/retry && chmod +x /usr/local/bin/retry
-    RUN apt-get -y update
+    # Without Error-Mode=any apt-get update exits 0 when an index fails to download
+    RUN retry apt-get -y -o APT::Update::Error-Mode=any update
     RUN apt-get install -y ca-certificates iproute2 curl gnupg build-essential libssl-dev openssl file git pkg-config libdbus-1-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev checkinstall unzip libncursesw5-dev libncurses5-dev jq selinux-policy-dev bzip2
     # Node for the wasm test harness lint (scripts/_lint_typescript.sh): the NodeSource major pinned
     # in versions.env, since the distribution's nodejs is too old for eslint 9
@@ -301,8 +302,10 @@ tool-flutter-build:
     END
     ENV DEBIAN_FRONTEND=noninteractive
     ENV FLUTTER_SDK_DIR=/usr/local/share/veilid-flutter-sdk
-    RUN apt-get -y update
-    RUN apt-get install -y ca-certificates curl git unzip xz-utils
+    # One step, retried. Without Error-Mode=any apt-get update exits 0 when an index fails to download
+    RUN i=0; until apt-get -y -o APT::Update::Error-Mode=any update && apt-get install -y ca-certificates curl git unzip xz-utils; do \
+            i=$((i+1)); [ "$i" -lt 12 ] || exit 1; sleep 10; \
+        done
     COPY --keep-ts .dagger/versions.env dev-setup/_flutter_install.sh /tmp/flutter-install/
     RUN . /tmp/flutter-install/versions.env && . /tmp/flutter-install/_flutter_install.sh && i_flutter
     SAVE IMAGE --push $TOOLS_IMAGE/tool-flutter:$TOOL_TAG_FLUTTER
@@ -403,8 +406,10 @@ deps-flutter-build:
     ENV CARGO_INCREMENTAL=0
     ENV CARGO_BUILD_JOBS=$CARGO_JOBS
     ENV RUST_BACKTRACE=1
-    RUN apt-get -y update
-    RUN apt-get install -y ca-certificates curl git unzip xz-utils file build-essential pkg-config libssl-dev
+    # One step, retried. Without Error-Mode=any apt-get update exits 0 when an index fails to download
+    RUN i=0; until apt-get -y -o APT::Update::Error-Mode=any update && apt-get install -y ca-certificates curl git unzip xz-utils file build-essential pkg-config libssl-dev; do \
+            i=$((i+1)); [ "$i" -lt 12 ] || exit 1; sleep 10; \
+        done
     COPY +tool-flutter/sdk $FLUTTER_SDK_DIR
     # flutter shells out to git against its own checkout, which this container did not clone
     RUN git config --global --add safe.directory "$FLUTTER_SDK_DIR/flutter"
@@ -737,8 +742,10 @@ test-all:
 # should not drift with whatever the compiler happens to run on. The RPM path builds its own.
 selinux-policy-deb:
     FROM $SELINUX_POLICY_IMAGE
-    RUN apt-get -y update
-    RUN DEBIAN_FRONTEND=noninteractive apt-get install -y selinux-policy-dev bzip2 make
+    # One step, retried: apt-get update exits 0 when an index fails to download, so only the install fails
+    RUN i=0; until apt-get -y update && DEBIAN_FRONTEND=noninteractive apt-get install -y selinux-policy-dev bzip2 make; do \
+            i=$((i+1)); [ "$i" -lt 12 ] || exit 1; sleep 10; \
+        done
     COPY --keep-ts --dir package/selinux /work/
     RUN cd /work/selinux && ./build_module.sh
     SAVE ARTIFACT /work/selinux/veilid_server.pp.bz2

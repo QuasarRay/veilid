@@ -152,8 +152,10 @@ class Veilid:
             "/usr/local/bin/retry", RETRY_SCRIPT, permissions=0o755
         )
 
-        # Update package lists
-        container = container.with_exec(["apt-get", "-y", "update"])
+        # Update package lists. Without Error-Mode=any a failed index download exits 0
+        container = container.with_exec(
+            ["retry", "apt-get", "-y", "-o", "APT::Update::Error-Mode=any", "update"]
+        )
 
         # Install base packages including Windows cross-compilation tools
         base_packages = [
@@ -482,21 +484,15 @@ class Veilid:
             .with_env_variable("CARGO_INCREMENTAL", CARGO_INCREMENTAL)
             .with_env_variable("CARGO_BUILD_JOBS", CARGO_BUILD_JOBS)
             .with_env_variable("RUST_BACKTRACE", "1")
-            .with_exec(["apt-get", "-y", "update"])
+            .with_new_file("/usr/local/bin/retry", RETRY_SCRIPT, permissions=0o755)
+            # One step, retried. Without Error-Mode=any a failed index download exits 0
             .with_exec(
                 [
-                    "apt-get",
-                    "install",
-                    "-y",
-                    "ca-certificates",
-                    "curl",
-                    "git",
-                    "unzip",
-                    "xz-utils",
-                    "file",
-                    "build-essential",
-                    "pkg-config",
-                    "libssl-dev",
+                    "retry",
+                    "sh",
+                    "-c",
+                    "apt-get -y -o APT::Update::Error-Mode=any update && apt-get install -y"
+                    " ca-certificates curl git unzip xz-utils file build-essential pkg-config libssl-dev",
                 ]
             )
         )
@@ -1354,8 +1350,16 @@ class Veilid:
             dag.container()
             .from_(SELINUX_POLICY_IMAGE)
             .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
-            .with_exec(["apt-get", "-y", "update"])
-            .with_exec(["apt-get", "install", "-y", "selinux-policy-dev", "bzip2", "make"])
+            .with_new_file("/usr/local/bin/retry", RETRY_SCRIPT, permissions=0o755)
+            # One step, retried: apt-get update exits 0 when an index fails to download
+            .with_exec(
+                [
+                    "retry",
+                    "sh",
+                    "-c",
+                    "apt-get -y update && apt-get install -y selinux-policy-dev bzip2 make",
+                ]
+            )
             .with_directory("/work/selinux", source.directory("package/selinux"))
             .with_workdir("/work/selinux")
             .with_exec(["./build_module.sh"])
