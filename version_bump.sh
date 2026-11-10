@@ -56,6 +56,8 @@ pushd veilid-wasm 2>/dev/null
 popd 2>/dev/null
 
 pushd veilid-wasm/tests 2>/dev/null
+# CI's npm ci rejects a lock written by another npm major
+source "$SCRIPTDIR/scripts/_node_pinned.sh"
 npm install --package-lock-only
 popd 2>/dev/null
 
