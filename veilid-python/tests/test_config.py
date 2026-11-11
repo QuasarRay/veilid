@@ -2,7 +2,13 @@
 
 import json
 
-from veilid import VeilidConfigAttachment, VeilidConfigProtocol, VeilidConfigWSS
+from veilid import (
+    VeilidConfigAttachment,
+    VeilidConfigBootstrapProtocol,
+    VeilidConfigProtocol,
+    VeilidConfigRoutingTable,
+    VeilidConfigWSS,
+)
 from veilid.types import VeilidJSONEncoder
 
 _UDP = {"enabled": True, "listen_address": "", "public_address": None}
@@ -34,6 +40,26 @@ def test_feature_section_is_none_and_unsent_without_the_feature():
     attachment = VeilidConfigAttachment.from_json({})
     assert attachment.app_lifecycle is None
     assert "app_lifecycle" not in json.loads(VeilidJSONEncoder.dumps(attachment))
+
+
+def test_bootstrap_protocols_default_when_absent():
+    routing_table = VeilidConfigRoutingTable.from_json(
+        {
+            "public_keys": [],
+            "secret_keys": [],
+            "bootstrap": [],
+            "bootstrap_keys": [],
+            "bootstrap_records": [],
+        }
+    )
+    assert routing_table.bootstrap_protocols == [
+        VeilidConfigBootstrapProtocol.WSS,
+        VeilidConfigBootstrapProtocol.WTS,
+    ]
+    assert json.loads(VeilidJSONEncoder.dumps(routing_table))["bootstrap_protocols"] == [
+        "WSS",
+        "WTS",
+    ]
 
 
 def test_unknown_keys_are_ignored():

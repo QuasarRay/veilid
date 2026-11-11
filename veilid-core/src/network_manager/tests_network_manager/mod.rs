@@ -1,4 +1,3 @@
-mod mocks;
 mod test_address_family_confirm;
 mod test_bootstrap;
 #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
@@ -38,6 +37,13 @@ mod test_protocol_type;
     )
 ))]
 mod test_shared_socket_fragmentation;
+// rcgen, which makes the test certificates, comes with WebTransport
+#[cfg(all(
+    feature = "enable-protocol-wss",
+    feature = "enable-protocol-webtransport",
+    not(target_arch = "wasm32")
+))]
+mod test_tls_acceptors;
 #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
 mod test_tracked_flush;
 mod test_transport_stats;
@@ -55,25 +61,36 @@ pub mod test_webtransport_native;
 mod test_ws_mixed_content;
 
 use super::*;
-pub use mocks::*;
 
 pub async fn test_all() {
-    test_bootstrap::test_bootstrap_v0().await;
-    test_bootstrap::test_bootstrap_v1().await;
-    test_bootstrap::test_boot_v1_response().await;
-    test_bootstrap::test_bootstrap_record_unresolved().await;
-    test_bootstrap::test_short_dial_info_multibyte().await;
-    test_bootstrap::test_bootstrap_peer_json_binding().await;
-    test_bootstrap::test_config_bootstrap_records().await;
-    test_bootstrap::test_bootstrap_cache_cap();
-    test_bootstrap::test_bootstrap_v0_omits_expired_peer_info().await;
-    test_bootstrap::test_bootstrap_v1_omits_expired_peer_info().await;
-    #[cfg(feature = "enable-protocol-webtransport")]
-    test_bootstrap::test_webtransport_short_form_slash_tolerant().await;
-    #[cfg(feature = "enable-protocol-webtransport")]
-    test_bootstrap::test_webtransport_ip_literal_record_single_hostname().await;
-    #[cfg(feature = "enable-protocol-webtransport")]
-    test_bootstrap::test_webtransport_datagram_shares_the_stream_short_form().await;
+    test_bootstrap::test_boot_v2_payload_round_trip().await;
+    test_bootstrap::test_boot_v2_request_forms().await;
+    test_bootstrap::test_boot_v2_response_round_trip().await;
+    test_bootstrap::test_boot_v2_accept_rules().await;
+    test_bootstrap::test_bootstrap_cache().await;
+    test_bootstrap::test_record_lifetime_parse();
+    test_bootstrap::test_bootstrap_entry_forms().await;
+    #[cfg(all(
+        feature = "enable-protocol-wss",
+        feature = "enable-protocol-webtransport",
+        not(target_arch = "wasm32")
+    ))]
+    {
+        test_tls_acceptors::test_serve_ip_certificate_by_family();
+        test_tls_acceptors::test_reload_after_renewal();
+        test_tls_acceptors::test_wss_server_name_for_ip_literal();
+    }
+    test_bootstrap::test_config_bootstrap_payload().await;
+    test_bootstrap::test_bootstrap_capability_needs_direct_dial_info().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_bootstrap::test_bootstrap_capability_reaches_published_node_info().await;
+    test_bootstrap::test_bootstrap_peers_omit_expired_peer_info().await;
+    #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+    test_bootstrap::test_legacy_short_dial_info();
+    #[cfg(feature = "enable-bootstrap-v1")]
+    test_bootstrap::test_legacy_record_lines().await;
+    #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+    test_bootstrap::test_legacy_json_shape().await;
     #[cfg(feature = "debug-api")]
     test_chaos::test_all().await;
     test_connection_table::test_add_get_remove().await;

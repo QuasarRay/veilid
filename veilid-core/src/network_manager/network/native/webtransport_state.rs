@@ -74,8 +74,6 @@ impl WebTransportState {
     }
 }
 
-const CERT_TASK_TICK_PERIOD_SECS: u32 = 60;
-
 pub(super) struct WebTransportTasks {
     pub(super) cert_task: TickTask<EyreReport>,
 }

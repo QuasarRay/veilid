@@ -1,5 +1,7 @@
 mod confirm_dial_info;
 mod network_interfaces_task;
+#[cfg(feature = "enable-protocol-wss")]
+mod tls_cert_task;
 mod upnp_task;
 #[cfg(feature = "enable-protocol-webtransport")]
 mod webtransport_cert_task;
@@ -53,6 +55,10 @@ impl NativeNetwork {
 
         // Set upnp tick task
         impl_setup_task_async_clone!(self, upnp_task, upnp_task_routine);
+
+        // Set tls certificate reload tick task
+        #[cfg(feature = "enable-protocol-wss")]
+        impl_setup_task_async_clone!(self, tls_cert_task, tls_cert_task_routine);
 
         #[cfg(feature = "enable-protocol-webtransport")]
         {
@@ -108,6 +114,11 @@ impl NativeNetwork {
             self.upnp_task.tick().await?;
         }
 
+        #[cfg(feature = "enable-protocol-wss")]
+        if self.config().network.protocol.wss.listen {
+            self.tls_cert_task.tick().await?;
+        }
+
         #[cfg(feature = "enable-protocol-webtransport")]
         if self.config().network.protocol.webtransport.listen {
             self.webtransport_tasks.cert_task.tick().await?;
@@ -117,6 +128,13 @@ impl NativeNetwork {
     }
 
     pub async fn cancel_tasks(&self) {
+        #[cfg(feature = "enable-protocol-wss")]
+        {
+            veilid_log!(self debug "stopping tls cert task");
+            if let Err(e) = self.tls_cert_task.stop().await {
+                veilid_log!(self warn "tls_cert_task not stopped: {}", e);
+            }
+        }
         #[cfg(feature = "enable-protocol-webtransport")]
         {
             veilid_log!(self debug "stopping webtransport cert task");

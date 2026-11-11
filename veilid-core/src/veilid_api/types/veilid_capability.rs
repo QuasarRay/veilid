@@ -17,6 +17,8 @@ pub const VEILID_CAPABILITY_VALIDATE_DIAL_INFO: VeilidCapability = VeilidCapabil
 pub const VEILID_CAPABILITY_DHT: VeilidCapability = VeilidCapability::new(*b"DHTV");
 /// Node accepts application messages and calls.
 pub const VEILID_CAPABILITY_APPMESSAGE: VeilidCapability = VeilidCapability::new(*b"APPM");
+/// Node answers bootstrap requests with the network's payload and its peers.
+pub const VEILID_CAPABILITY_BOOTSTRAP: VeilidCapability = VeilidCapability::new(*b"BOOT");
 /// Node offers block storage.
 #[cfg(feature = "unstable-blockstore")]
 pub const VEILID_CAPABILITY_BLOCKSTORE: VeilidCapability = VeilidCapability::new(*b"BLOC");

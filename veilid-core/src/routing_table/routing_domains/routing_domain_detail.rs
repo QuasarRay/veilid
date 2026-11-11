@@ -70,8 +70,13 @@ pub trait RoutingDomainDetail:
     fn get_bootstrap_cache(&self) -> Option<BootstrapCache>;
     /// Replace what the last bootstrap recorded for this domain
     fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>);
-    /// Record what a bootstrap produced, marking that one ran even if it produced nothing
-    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache);
+    /// Record what a bootstrap produced, marking that one ran even if it produced nothing; a
+    /// re-check round passes its time so the served copy starts a new cache period
+    fn record_bootstrap_cache(
+        &self,
+        bootstrap_cache: BootstrapCache,
+        rechecked_at: Option<Timestamp>,
+    );
     /// Set the bootstrap records supplied by config for this domain
     fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache);
     /// Everything this domain can serve to a B01T request

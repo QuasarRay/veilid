@@ -2,7 +2,7 @@ use super::*;
 use crate::network_manager::*;
 use crate::routing_table::*;
 
-const BOOTSTRAP_RECORDS_WAIT_MS: u32 = 90_000;
+const BOOTSTRAP_PAYLOAD_WAIT_MS: u32 = 90_000;
 const DIRECT_BOOTSTRAP_ATTEMPTS: u32 = 30;
 const POLL_MS: u32 = 1000;
 
@@ -10,17 +10,15 @@ fn registry(api: &VeilidAPI) -> VeilidComponentRegistry {
     api.core_context().expect("api not started").registry()
 }
 
-fn as_set(strings: &[String]) -> BTreeSet<String> {
-    strings.iter().cloned().collect()
-}
-
-async fn wait_for_bootstrap_records(api: &VeilidAPI) -> BootstrapCache {
+/// The payload a node serves, once it has one
+async fn wait_for_bootstrap_payload(api: &VeilidAPI) -> Option<SignedBootstrapPayload> {
     let routing_table = registry(api).routing_table();
     let mut waited_ms = 0;
     loop {
         let cache = routing_table.get_served_bootstrap_cache(RoutingDomain::PublicInternet);
-        if !cache.is_empty() || waited_ms >= BOOTSTRAP_RECORDS_WAIT_MS {
-            return cache;
+        let payload = cache.served_payload(Timestamp::now());
+        if payload.is_some() || waited_ms >= BOOTSTRAP_PAYLOAD_WAIT_MS {
+            return payload;
         }
         sleep(POLL_MS).await;
         waited_ms += POLL_MS;
@@ -46,13 +44,20 @@ fn local_udp_bootstrap_url(api: &VeilidAPI) -> String {
     format!("udp://{}", did.dial_info.to_socket_addr())
 }
 
-/// Node A bootstraps from DNS and keeps its verified v1 records.
-/// Node B lists only A as a bootstrap, so everything it learns arrives over B01T.
-async fn test_txt_then_direct() -> BTreeSet<String> {
-    info!("test_txt_then_direct: starting node A");
+/// Node A bootstraps from the configured network and keeps the payload it was handed.
+/// Node B lists only A, so everything it learns arrives over B02T. Needs bootstraps that
+/// answer B02T, so this runs against a 0.6.0 fleet, not in the unit-test script
+async fn test_direct_bootstrap() -> SignedBootstrapPayload {
+    info!("test_direct_bootstrap: starting node A");
     let (update_callback, mut config) = fixture_veilid_core();
-    // Serving direct bootstrap is opt-in, and A is not among its own bootstraps
+    // Serving bootstrap is opt-in, and A is not among its own bootstraps
     config.network.routing_table.serve_direct_bootstrap = true;
+    config.network.routing_table.bootstrap_protocols = vec![
+        VeilidConfigBootstrapProtocol::Wss,
+        VeilidConfigBootstrapProtocol::Wts,
+        VeilidConfigBootstrapProtocol::Udp,
+        VeilidConfigBootstrapProtocol::Tcp,
+    ];
     let api_a = api_startup(update_callback, config)
         .await
         .expect("startup failed");
@@ -62,17 +67,14 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
         .await
         .unwrap();
 
-    let cache_a = wait_for_bootstrap_records(&api_a).await;
-    assert!(!cache_a.is_empty(), "TXT bootstrap stored no records");
-    let strings_a = as_set(cache_a.record_strings());
-    let response = registry(&api_a)
+    let payload_a = wait_for_bootstrap_payload(&api_a)
+        .await
+        .expect("bootstrap handed node A no payload");
+    let reply = registry(&api_a)
         .network_manager()
-        .boot_v1_response()
-        .expect("node A should serve B01T");
-    assert_eq!(
-        response.records.iter().cloned().collect::<BTreeSet<_>>(),
-        strings_a
-    );
+        .boot_v2_response()
+        .expect("node A should build a B02T reply");
+    assert_eq!(&reply[..4], B02T_MAGIC);
 
     // A never bootstraps from itself, so a request to its own dial info is not sent
     let own_dial_info = BootstrapDialInfoConverter::default()
@@ -85,9 +87,9 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
         .direct_bootstrap(own_dial_info)
         .await
         .expect("direct bootstrap failed");
-    assert!(own_peers.peers.is_empty() && own_peers.record_strings.is_empty());
+    assert!(own_peers.peers.is_empty() && own_peers.payload.is_none());
 
-    info!("test_txt_then_direct: starting node B");
+    info!("test_direct_bootstrap: starting node B");
     let url = local_udp_bootstrap_url(&api_a);
     let (update_callback, mut config) = fixture_veilid_core();
     config.network.routing_table.bootstrap = vec![url.clone()];
@@ -97,31 +99,32 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
     api_b.attach().await.unwrap();
     wait_for_network_started(&api_b).await;
 
-    // One B01T round trip returns exactly what A stored
+    // One B02T round trip returns the payload A holds, as the bytes A holds it
     let dial_info = BootstrapDialInfoConverter::default()
         .try_vec_from_url(&url)
         .await
         .expect("bad bootstrap url")
         .remove(0);
     let network_manager_b = registry(&api_b).network_manager();
-    let mut strings_b = BTreeSet::new();
+    let mut payload_b = None;
     for _ in 0..DIRECT_BOOTSTRAP_ATTEMPTS {
         let peers = network_manager_b
             .direct_bootstrap(dial_info.clone())
             .await
             .expect("direct bootstrap failed");
-        strings_b = as_set(&peers.record_strings);
-        if !strings_b.is_empty() {
+        payload_b = peers.payload;
+        if payload_b.is_some() {
             break;
         }
         sleep(POLL_MS).await;
     }
-    assert_eq!(strings_b, strings_a);
+    assert_eq!(payload_b.as_ref(), Some(&payload_a));
 
     // B's own bootstrap task records what A handed it
-    let cache_b = wait_for_bootstrap_records(&api_b).await;
-    assert!(!cache_b.is_empty(), "direct bootstrap stored no records");
-    assert!(as_set(cache_b.record_strings()).is_subset(&strings_a));
+    let cache_b = wait_for_bootstrap_payload(&api_b)
+        .await
+        .expect("direct bootstrap stored no payload");
+    assert_eq!(cache_b, payload_a);
 
     // Having recorded a bootstrap, neither node's saved table is condemned on the next start
     registry(&api_a)
@@ -130,41 +133,34 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
         .await;
     assert!(!persisted_state_requires_reset(&api_a).await);
 
-    info!("test_txt_then_direct: shutting down");
+    info!("test_direct_bootstrap: shutting down");
     api_b.shutdown().await;
     api_a.shutdown().await;
 
-    strings_a
+    payload_a
 }
 
-/// Node C is told the records outright, so it bootstraps with no lookup of any kind.
-/// It is configured with both the v0 and v1 strings a TXT lookup yields, serves both, and
-/// bootstraps from the v1 ones because it has keys to check them with.
-async fn test_config_records_bootstrap(strings_a: &BTreeSet<String>) {
-    assert!(
-        strings_a.iter().any(|s| s.starts_with("0|")),
-        "expected v0 strings to configure"
-    );
-    assert!(
-        strings_a.iter().any(|s| s.starts_with("1|")),
-        "expected v1 strings to configure"
-    );
-
-    info!("test_config_records_bootstrap: starting node C");
+/// Node C is told the payload outright, so it joins by asking the payload's own nodes, with no
+/// bootstrap host configured at all; it serves the payload before it has bootstrapped
+async fn test_config_payload_bootstrap(payload_a: &SignedBootstrapPayload) {
+    info!("test_config_payload_bootstrap: starting node C");
     let (update_callback, mut config) = fixture_veilid_core();
     config.network.routing_table.bootstrap = vec![];
-    config.network.routing_table.bootstrap_records = strings_a.iter().cloned().collect();
+    config.network.routing_table.bootstrap_records = vec![payload_a.to_line()];
     let api_c = api_startup(update_callback, config)
         .await
         .expect("startup failed");
     api_c.attach().await.unwrap();
 
-    // Served before anything is bootstrapped, straight from the config, both versions
     wait_for_network_started(&api_c).await;
     let served = registry(&api_c)
         .routing_table()
         .get_served_bootstrap_cache(RoutingDomain::PublicInternet);
-    assert_eq!(as_set(served.record_strings()), *strings_a);
+    assert_eq!(
+        served.served_payload(Timestamp::now()).as_ref(),
+        Some(payload_a)
+    );
+    assert_eq!(served.received_at(), None);
 
     // And good enough to join with
     let _ = api_c
@@ -172,8 +168,26 @@ async fn test_config_records_bootstrap(strings_a: &BTreeSet<String>) {
         .await
         .unwrap();
 
-    info!("test_config_records_bootstrap: shutting down");
+    info!("test_config_payload_bootstrap: shutting down");
     api_c.shutdown().await;
+}
+
+/// Node D has no bootstrap keys, so it takes the payload and peers unsigned
+async fn test_keyless_bootstrap() {
+    info!("test_keyless_bootstrap: starting node D");
+    let (update_callback, mut config) = fixture_veilid_core();
+    config.network.routing_table.bootstrap_keys = vec![];
+    let api_d = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+    api_d.attach().await.unwrap();
+    let _ = api_d
+        .wait_for_attachment_condition(None, None)
+        .await
+        .unwrap();
+    assert!(wait_for_bootstrap_payload(&api_d).await.is_some());
+    info!("test_keyless_bootstrap: shutting down");
+    api_d.shutdown().await;
 }
 
 async fn persisted_state_requires_reset(api: &VeilidAPI) -> bool {
@@ -192,6 +206,7 @@ async fn persisted_state_requires_reset(api: &VeilidAPI) -> bool {
 }
 
 pub async fn test_all() {
-    let strings_a = test_txt_then_direct().await;
-    test_config_records_bootstrap(&strings_a).await;
+    let payload_a = test_direct_bootstrap().await;
+    test_config_payload_bootstrap(&payload_a).await;
+    test_keyless_bootstrap().await;
 }

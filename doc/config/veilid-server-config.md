@@ -219,6 +219,7 @@ routing_table:
     public_keys: null
     secret_keys: null
     bootstrap: ['bootstrap-v1.veilid.net']
+    bootstrap_protocols: ['WSS', 'WTS']
     bootstrap_keys: ['VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k','VLD0:QeQJorqbXtC7v3OlynCZ_W3m76wGNeB5NTF81ypqHAo','VLD0:QNdcl-0OiFfYVj9331XVR6IqZ49NG-E18d5P7lwi4TA']
     bootstrap_records: []
     serve_direct_bootstrap: true
@@ -229,24 +230,37 @@ routing_table:
     limit_attached_weak: 4
 ```
 
-`bootstrap_records` holds whole bootstrap records, verbatim, in the form
-`veilid-server --dump-txt-record` prints. A node answers direct (`B01T`) bootstrap requests from
-them straight away, with no DNS lookup of its own, and can join the network from them without
-resolving `bootstrap` at all. This is how the first bootstrap server on a new network can serve
-records before there is anything to look up. Both record versions are served; bootstrapping from
-them follows the same rule as a TXT bootstrap, so v0 records are only used when `bootstrap_keys`
-is empty. Leaving the list empty (the default) means records come from the bootstrap servers.
+A `bootstrap` entry is a dial info url, a bare `host`, or a `host:port` (port 5150 by default).
+A bare host resolves to every A and AAAA address it names, and each address is dialed over
+`bootstrap_protocols` in order. A host can also be an IP address (`203.0.113.5`, `2001:db8::1`,
+`[2001:db8::1]:5150`), which is dialed with no lookup; over WSS and WebTransport the bootstrap
+then needs a certificate for that address.
 
-Older veilid-server builds do not recognize this key. They log it as an unknown config key and
-start normally, so a config file carrying it is still usable on an older node.
+`bootstrap_protocols` lists the protocols a bootstrap request goes out on, in order of
+preference, from `UDP`, `TCP`, `WS`, `WSS` and `WTS` (WebTransport). The default is the
+encrypted pair, WSS first, because an insecure browser page can open WSS but not WebTransport.
+A node with bootstraps configured and no protocol in this list it can dial, given
+`network.protocol`, fails to start.
 
-`serve_direct_bootstrap` makes the node answer direct bootstrap requests (`BOOT` and `B01T`) with
-its last successful bootstrap set. The reply is large and the request is unauthenticated, so a
-node that is not a bootstrap server should not serve; each sender is held to
-`max_connection_frequency_per_min`. The server setting defaults to on, and the packaged
-`veilid-server.conf` sets it off, so a bootstrap operator turns it on in the config file. A node
-that finds itself among its own bootstraps (in `bootstrap_records` or the DNS records of a name
-in `bootstrap`) answers whatever the setting says.
+`bootstrap_records` holds bootstrap record lines, verbatim: the network's signed payload line
+(`2|...`) as `veilid-server --sign-bootstrap-payload` prints it, and, for nodes running 0.5.x,
+the legacy TXT lines as `veilid-server --dump-bootstrap-records` prints them. The payload names
+the nodes this node joins from, so a node holding it never resolves `bootstrap`, and a node
+that serves answers bootstrap requests with it as soon as it starts; the legacy lines answer
+0.5.x nodes. Leaving the list empty (the default) means the payload comes from the bootstrap
+servers. [BOOTSTRAP-SETUP.md](../../BOOTSTRAP-SETUP.md) walks through producing both.
+
+An older veilid-server logs a key it does not know and starts normally, so a config file
+carrying these keys is still usable on an older node.
+
+`serve_direct_bootstrap` makes the node answer bootstrap requests with the payload it holds
+and its peers. The reply is large and the request is unauthenticated, so a node that is not a
+bootstrap server should not serve; each sender is held to `max_connection_frequency_per_min`.
+The server setting defaults to on, and the packaged `veilid-server.conf` sets it off, so a
+bootstrap operator turns it on in the config file. A node that finds itself among its own
+bootstraps answers whatever the setting says. Either way a node answers only while it is
+directly reachable on every protocol it listens on and has no relay, which it advertises as
+the `BOOT` capability.
 
 #### core:network:rpc
 
@@ -298,6 +312,8 @@ tls:
     private_key_path: '%PRIVATE_KEY_PATH%'
     connection_initial_timeout_ms: 2000
 ```
+
+WSS and CA-signed WebTransport serve this certificate to a client that dials the node by name. A client that dials by IP literal is served the `ipv4` or `ipv6` certificate beside it, when one is present (the file naming is under [core:network:protocol:webtransport](#corenetworkprotocolwebtransport)). The node re-reads all of these files when they change, so a renewed certificate is served without a restart.
 
 #### core:network:application
 

@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![recursion_limit = "256"]
 // Startup and client-API failures fall either side of the node's log facilities being up
 #![expect(
@@ -11,6 +11,7 @@ compile_error!("async-std compilation for windows is currently unsupported");
 
 mod client_api;
 mod logs;
+mod ptr_lookup;
 mod server;
 mod settings;
 #[cfg(test)]
@@ -141,9 +142,29 @@ pub struct CmdlineArgs {
     #[arg(long)]
     dump_config: bool,
 
-    /// Prints the bootstrap TXT record for this node and then quits
-    #[arg(long)]
-    dump_txt_record: bool,
+    /// Prints this node's bootstrap record lines and then quits
+    ///
+    /// Signing keypairs are read from stdin, one per line, ended by an empty line; without any the signed legacy line is left out.
+    #[arg(long, alias = "dump-txt-record")]
+    dump_bootstrap_records: bool,
+
+    /// Hostname the legacy TXT record lines name this host by, instead of the reverse DNS name of its address
+    #[arg(long, value_name = "HOSTNAME", requires = "dump_bootstrap_records")]
+    bootstrap_hostname: Option<String>,
+
+    /// Signs bootstrap node lines into one payload line and then quits
+    ///
+    /// The node lines are the positional arguments, or '@FILE' for a file holding one per line. Signing keypairs are read from stdin, one per line, ended by an empty line; without any the payload is unsigned.
+    #[arg(long, requires = "bootstrap_record_lifetime")]
+    sign_bootstrap_payload: bool,
+
+    /// How long the signed payload stays valid: <N>y, <N>mo, <N>d, combinable like 1y6mo (a year is 365 days, a month 30), or 'none'
+    #[arg(long, value_name = "LIFETIME", requires = "sign_bootstrap_payload")]
+    bootstrap_record_lifetime: Option<String>,
+
+    /// Hours a node serves the payload it learned from the network before re-checking its source (default 24)
+    #[arg(long, value_name = "HOURS", requires = "sign_bootstrap_payload")]
+    bootstrap_cache_ttl_hours: Option<u32>,
 
     /// Emits a JSON-Schema for a named type
     #[arg(long, value_name = "SCHEMA_NAME")]
@@ -182,6 +203,10 @@ pub struct CmdlineArgs {
     /// Override all network listen addresses with ':port'
     #[arg(long)]
     port: Option<u16>,
+
+    /// Bootstrap node lines for --sign-bootstrap-payload, or '@FILE' holding one per line
+    #[arg(value_name = "NODE_LINE", requires = "sign_bootstrap_payload")]
+    node_lines: Vec<String>,
 }
 
 #[instrument(level = "trace", skip_all, err)]
@@ -191,6 +216,11 @@ fn main() -> EyreResult<()> {
 
     // Get command line options
     let args = CmdlineArgs::parse();
+
+    // clap does not say which alias matched, so the deprecated spelling is looked for as typed
+    if std::env::args_os().any(|arg| arg == "--dump-txt-record") {
+        eprintln!("--dump-txt-record is deprecated, use --dump-bootstrap-records");
+    }
 
     let svc_args = args.clone();
 
@@ -334,7 +364,7 @@ fn main() -> EyreResult<()> {
     if let Some(network_key) = args.network_key {
         settingsrw.core.network.network_key_password = Some(network_key);
     }
-    if args.dump_txt_record {
+    if args.dump_bootstrap_records || args.sign_bootstrap_payload {
         // Turn off terminal logging so we can be interactive
         settingsrw.logging.terminal.enabled = false;
     }
@@ -517,27 +547,34 @@ fn main() -> EyreResult<()> {
             "Key pairs set successfully",
             "Failed to set key pairs",
         )
-    } else if args.dump_txt_record {
-        println!(
-            "Enter signing keypairs, one per cryptosystem per line (will not echo, empty line to finish): "
-        );
-
-        let keypairs = read_keypairs()?;
-        if keypairs.is_empty() {
-            println!("No keypairs specified, will only generate V0 TXT records.");
-        } else {
-            println!(
-                "{} keypair{} specified.",
-                keypairs.len(),
-                if keypairs.len() == 1 { "" } else { "s" }
-            );
-        }
-
+    } else if args.dump_bootstrap_records {
+        let keypairs =
+            prompt_signing_keypairs("No keypairs specified, leaving out the signed legacy line.")?;
         println!("Dumping...");
         (
-            ServerMode::DumpTXTRecord(keypairs),
+            ServerMode::DumpBootstrapRecords {
+                hostname: args.bootstrap_hostname,
+                keypairs,
+            },
             "",
-            "Failed to dump bootstrap TXT record",
+            "Failed to dump bootstrap records",
+        )
+    } else if args.sign_bootstrap_payload {
+        let node_lines = read_node_lines(&args.node_lines)?;
+        let Some(lifetime) = args.bootstrap_record_lifetime else {
+            bail!("--bootstrap-record-lifetime is required");
+        };
+        let keypairs =
+            prompt_signing_keypairs("No keypairs specified, the payload will be unsigned.")?;
+        (
+            ServerMode::SignBootstrapPayload {
+                lifetime,
+                cache_ttl_hours: args.bootstrap_cache_ttl_hours,
+                keypairs,
+                node_lines,
+            },
+            "",
+            "Failed to sign bootstrap payload",
         )
     } else {
         (ServerMode::Normal, "", "")
@@ -608,4 +645,45 @@ fn main() -> EyreResult<()> {
     })?;
 
     std::process::exit(exit_code);
+}
+
+/// Signing keypairs from stdin, behind the prompt the record tooling shares
+fn prompt_signing_keypairs(none_message: &str) -> EyreResult<veilid_core::KeyPairGroup> {
+    println!(
+        "Enter signing keypairs, one per cryptosystem per line (will not echo, empty line to finish): "
+    );
+    let keypairs = read_keypairs()?;
+    if keypairs.is_empty() {
+        println!("{}", none_message);
+    } else {
+        println!(
+            "{} keypair{} specified.",
+            keypairs.len(),
+            if keypairs.len() == 1 { "" } else { "s" }
+        );
+    }
+    Ok(keypairs)
+}
+
+/// Node lines as given, an '@FILE' argument standing for the file's non-empty lines
+fn read_node_lines(args: &[String]) -> EyreResult<Vec<String>> {
+    let mut lines = Vec::new();
+    for arg in args {
+        if let Some(path) = arg.strip_prefix('@') {
+            let text = std::fs::read_to_string(path)
+                .wrap_err_with(|| format!("could not read node lines from {}", path))?;
+            lines.extend(
+                text.lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_owned),
+            );
+        } else {
+            lines.push(arg.trim().to_owned());
+        }
+    }
+    if lines.is_empty() {
+        bail!("no bootstrap node lines given");
+    }
+    Ok(lines)
 }

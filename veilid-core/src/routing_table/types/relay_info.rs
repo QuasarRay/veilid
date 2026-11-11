@@ -1,7 +1,7 @@
 use super::*;
 
 /// Just enough information to describe a single relay, for the RLAY capability
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RelayInfo {
     timestamp: Timestamp,
     node_ids: NodeIdGroup,
@@ -9,7 +9,6 @@ pub struct RelayInfo {
     address_types: AddressTypeSet,
     dial_info_detail_list: Vec<DialInfoDetail>,
     relay_kind: RelayKind,
-    #[serde(default)]
     receive_mtus: TransportMtus,
 }
 

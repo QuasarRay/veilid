@@ -1,54 +1,11 @@
 use super::*;
 use crate::crypto::tests_crypto::*;
-use crate::routing_table::tests_routing_table::fix_crypto_info_list;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use crate::routing_table::tests_routing_table::make_public_internet_direct;
 use crate::tests::*;
 
-fn make_mock_bootstrap_record(include_timestamp: bool) -> BootstrapRecord {
-    let public_keys = PublicKeyGroup::from(mock_public_keys());
-    let envelope_support = VALID_ENVELOPE_VERSIONS.to_vec();
-    let dial_info_details = vec![
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_ws(
-                SocketAddress::new(Address::IPV4(Ipv4Addr::UNSPECIFIED), 5150),
-                "ws://example.com:5150/ws".to_owned(),
-            )
-            .expect("should make ws dialinfo"),
-        },
-        #[cfg(feature = "enable-protocol-wss")]
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_wss(
-                SocketAddress::new(Address::IPV4(Ipv4Addr::UNSPECIFIED), 5150),
-                "wss://example.com:5150/wss".to_owned(),
-            )
-            .expect("should make wss dialinfo"),
-        },
-        #[cfg(feature = "enable-protocol-webtransport")]
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_webtransport_stream(
-                SocketAddress::new(Address::IPV4(Ipv4Addr::UNSPECIFIED), 5150),
-                "https://example.com:5150/wt".to_owned(),
-                vec![],
-                None,
-            )
-            .expect("should make webtransport dialinfo"),
-        },
-    ];
-    let opt_timestamp = if include_timestamp {
-        Some(Timestamp::now().as_u64() / 1_000_000u64)
-    } else {
-        None
-    };
-    BootstrapRecord::new(
-        public_keys,
-        envelope_support,
-        dial_info_details,
-        opt_timestamp,
-        vec![],
-    )
-}
+/// How long a test payload stays valid
+const TEST_LIFETIME: TimestampDuration = TimestampDuration::new_secs(3600);
 
 fn mock_signing_keys() -> Vec<PublicKey> {
     mock_keypairs()
@@ -57,484 +14,614 @@ fn mock_signing_keys() -> Vec<PublicKey> {
         .collect()
 }
 
-async fn mock_v1_string(
-    network_manager: &NetworkManager,
-    dial_info_converter: &dyn DialInfoConverter,
-) -> String {
-    make_mock_bootstrap_record(true)
-        .to_v1_string(
-            network_manager,
-            dial_info_converter,
-            mock_keypairs()[0].clone(),
-        )
-        .await
-        .expect("should make string")
+fn test_dial_info(last_octet: u8) -> DialInfo {
+    DialInfo::tcp(SocketAddress::new(
+        Address::IPV4(Ipv4Addr::new(18, 218, 0, last_octet)),
+        5150,
+    ))
 }
 
-pub async fn test_bootstrap_v0() {
-    let registry = mock_registry::init("").await;
-    let network_manager = registry.network_manager();
-    let dial_info_converter = MockDialInfoConverter::default();
-
-    let bsrec = make_mock_bootstrap_record(false);
-    let v0str = bsrec
-        .to_v0_string(&dial_info_converter)
-        .await
-        .expect("should make string");
-    let bsrec2 =
-        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
-            .await
-            .expect("should parse string")
-            .expect("should be valid record");
-    assert_eq!(bsrec, bsrec2);
-
-    mock_registry::terminate(registry).await;
-}
-
-pub async fn test_bootstrap_v1() {
-    let registry = mock_registry::init("").await;
-    let network_manager = registry.network_manager();
-    let dial_info_converter = MockDialInfoConverter::default();
-
-    let bsrec = make_mock_bootstrap_record(true);
-    let signing_key_pairs = mock_keypairs();
-    println!("signing_key_pairs: {:?}", signing_key_pairs);
-    let signing_keys = signing_key_pairs
-        .iter()
-        .map(|skp| PublicKey::new(skp.kind(), skp.ref_value().key()))
-        .collect::<Vec<_>>();
-    let v1str = bsrec
-        .to_v1_string(
-            &network_manager,
-            &dial_info_converter,
-            signing_key_pairs[0].clone(),
-        )
-        .await
-        .expect("should make string");
-    let bsrec2 = BootstrapRecord::try_new_from_v1_str(
-        &network_manager,
-        Some(&dial_info_converter),
-        &v1str,
-        &signing_keys,
-    )
-    .await
-    .expect("should parse string")
-    .expect("should be valid record");
-    assert_eq!(bsrec, bsrec2);
-
-    // Persisted with the routing domain state
-    let bsrec3: BootstrapRecord =
-        deserialize_json(&serialize_json(&bsrec2)).expect("should round trip");
-    assert_eq!(bsrec2, bsrec3);
-
-    mock_registry::terminate(registry).await;
-}
-
-/// B01T answers only from the routing domain's stored records and never resolves anything
-pub async fn test_boot_v1_response() {
-    let registry = mock_registry::init("").await;
-    let network_manager = registry.network_manager();
-    let routing_table = registry.routing_table();
-    let dial_info_converter = MockDialInfoConverter::default();
-
-    // Nothing stored, nothing served
-    assert!(network_manager.boot_v1_response().is_none());
-
-    let signing_key_pairs = mock_keypairs();
-    let signing_keys = signing_key_pairs
-        .iter()
-        .map(|skp| PublicKey::new(skp.kind(), skp.ref_value().key()))
-        .collect::<Vec<_>>();
-    let v1str = make_mock_bootstrap_record(true)
-        .to_v1_string(
-            &network_manager,
-            &dial_info_converter,
-            signing_key_pairs[0].clone(),
-        )
-        .await
-        .expect("should make string");
-    let bsrec = BootstrapRecord::try_new_from_v1_str(
-        &network_manager,
-        Some(&dial_info_converter),
-        &v1str,
-        &signing_keys,
-    )
-    .await
-    .expect("should parse string")
-    .expect("should be valid record");
-
-    // A v0 string and a version this build cannot parse are cached and served just the same,
-    // so a node passes on what it was told rather than only what it understood
-    let v0str = make_mock_bootstrap_record(false)
-        .to_v0_string(&dial_info_converter)
-        .await
-        .expect("should make string");
-    let future_str = "2|0|VLD0:something|example.com|T5150|1746492253|sig".to_owned();
-
-    routing_table
-        .get_routing_domain_controller(RoutingDomain::PublicInternet)
-        .read_dyn()
-        .record_bootstrap_cache(BootstrapCache::new(
-            vec![
-                v1str.clone(),
-                v1str.clone(),
-                v0str.clone(),
-                future_str.clone(),
-            ],
-            vec![bsrec.clone(), bsrec],
-        ));
-
-    let response = network_manager
-        .boot_v1_response()
-        .expect("should serve stored records");
-    let mut expected = vec![v1str, v0str, future_str];
-    expected.sort_unstable();
-    assert_eq!(response.records, expected);
-    // The record's node is not in the routing table and is not us
-    assert!(response.peers.is_empty());
-
-    mock_registry::terminate(registry).await;
-}
-
-/// A JSON bootstrap peer's node info and ids come from its signed bytes, not from the JSON
-pub async fn test_bootstrap_peer_json_binding() {
-    let registry = mock_registry::init("jsonbind").await;
-    let network_manager = registry.network_manager();
-    let routing_table = registry.routing_table();
-
-    let keypair = mock_keypairs()[0].clone();
-    let node_info = NodeInfo::new(
-        Timestamp::now(),
-        VALID_ENVELOPE_VERSIONS.to_vec(),
-        vec![CryptoInfo::VLD0 {
-            public_key: keypair.ref_value().key(),
-        }],
-        PUBLIC_INTERNET_CAPABILITIES.to_vec(),
-        ProtocolTypeSet::all(),
-        AddressTypeSet::all(),
-        vec![DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::udp(SocketAddress::new(
-                Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)),
-                5150,
-            )),
-        }],
-        vec![],
-        TransportMtus::default(),
-        None,
-    );
-    let secret_keys =
-        SecretKeyGroup::from(SecretKey::new(keypair.kind(), keypair.ref_value().secret()));
-    let peer_info = PeerInfo::try_new_from_node_info(
-        &routing_table,
-        RoutingDomain::PublicInternet,
-        &secret_keys,
-        node_info,
-    )
-    .expect("should sign peer info");
-    let json = serialize_json(&peer_info);
-
-    // Fields beside the signed bytes are ignored
-    let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("should parse");
-    tampered["node_info"]["timestamp"] =
-        serde_json::to_value(Timestamp::new(u64::MAX / 2)).expect("should serialize");
-    tampered["node_info"]["dial_info_detail_list"] = serde_json::json!([]);
-    let tampered: PeerInfo =
-        deserialize_json(&tampered.to_string()).expect("should parse tampered peer info");
-    assert_ne!(tampered.node_info(), peer_info.node_info());
-    let bound = network_manager
-        .bind_bootstrap_peer(&tampered)
-        .expect("signed bytes are intact");
-    assert_eq!(bound.node_info(), peer_info.node_info());
-    assert_eq!(bound.node_ids(), peer_info.node_ids());
-
-    // A changed signed byte is refused
-    let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("should parse");
-    let byte = tampered["node_info_message"][0]
-        .as_u64()
-        .expect("bytes serialize as numbers");
-    tampered["node_info_message"][0] = serde_json::Value::from(byte ^ 1);
-    let tampered: PeerInfo =
-        deserialize_json(&tampered.to_string()).expect("should parse tampered peer info");
-    assert!(network_manager.bind_bootstrap_peer(&tampered).is_none());
-
-    mock_registry::terminate(registry).await;
-}
-
-/// A short dial info or hostname with a multibyte character fails to parse instead of panicking
-pub async fn test_short_dial_info_multibyte() {
-    let dial_info_converter = MockDialInfoConverter::default();
-    for (short_url, hostname) in [
-        ("é5150", "example.org"),
-        ("Ué150", "example.org"),
-        ("U5150", "é.example.org"),
-        ("U5150", "example.orgé"),
-        ("W5150", "[::1]é"),
-    ] {
-        let short_dial_info = ShortDialInfo {
-            short_url: short_url.to_owned(),
-            hostname: hostname.to_owned(),
-        };
-        assert!(dial_info_converter
-            .try_vec_from_short(&short_dial_info)
-            .await
-            .is_err());
-    }
-}
-
-/// A record parsed for serving is verified but never resolved
-pub async fn test_bootstrap_record_unresolved() {
-    let registry = mock_registry::init("unresolved").await;
-    let network_manager = registry.network_manager();
-    let dial_info_converter = MockDialInfoConverter::default();
-    let signing_keys = mock_signing_keys();
-
-    let v1str = mock_v1_string(&network_manager, &dial_info_converter).await;
-    let baseline = dial_info_converter.resolve_count();
-
-    // Parsing for serving consults no converter at all
-    let unresolved =
-        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &v1str, &signing_keys)
-            .await
-            .expect("should parse string")
-            .expect("should be valid record");
-    assert!(unresolved.dial_info_details().is_empty());
-    assert_eq!(dial_info_converter.resolve_count(), baseline);
-
-    // Same record, resolved, differs only in its dial info
-    let resolved = BootstrapRecord::try_new_from_v1_str(
-        &network_manager,
-        Some(&dial_info_converter),
-        &v1str,
-        &signing_keys,
-    )
-    .await
-    .expect("should parse string")
-    .expect("should be valid record");
-    assert_eq!(resolved.public_keys(), unresolved.public_keys());
-    assert!(!resolved.dial_info_details().is_empty());
-    assert!(dial_info_converter.resolve_count() > baseline);
-
-    // A config file is a likely source of trailing whitespace, and the signature covers
-    // the record exactly as written
-    let padded = format!("  {}\n", v1str);
-    assert!(
-        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &padded, &signing_keys)
-            .await
-            .expect("should parse string")
-            .is_some()
-    );
-
-    // A record no configured key signed is refused
-    let mut tampered = v1str.clone();
-    tampered.insert(tampered.rfind('|').expect("has a signature") + 1, 'A');
-    assert!(
-        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &tampered, &signing_keys)
-            .await
-            .is_err()
-    );
-
-    mock_registry::terminate(registry).await;
-}
-
-/// Configured records are served without a bootstrap ever running, and without claiming one did.
-/// Both record versions are accepted: what a node serves is not limited to what it can verify.
-pub async fn test_config_bootstrap_records() {
-    // Mint the records to configure the next node with
-    let registry = mock_registry::init("configsrc").await;
-    let dial_info_converter = MockDialInfoConverter::default();
-    let v1str = mock_v1_string(&registry.network_manager(), &dial_info_converter).await;
-    let v0str = make_mock_bootstrap_record(false)
-        .to_v0_string(&dial_info_converter)
-        .await
-        .expect("should make string");
-    mock_registry::terminate(registry).await;
-
-    let configured = vec![v1str.clone(), v0str.clone()];
-    let registry = mock_registry::init_with_config("configured", move |config| {
-        config.network.routing_table.bootstrap_keys = mock_signing_keys();
-        config.network.routing_table.bootstrap_records = configured;
-    })
-    .await;
-    let network_manager = registry.network_manager();
-    let routing_table = registry.routing_table();
-
-    // What RoutingTable::startup does with them
-    let cache = network_manager.config_bootstrap_cache().await;
-    let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
-    rdc.read_dyn().set_config_bootstrap_cache(cache);
-
-    let response = network_manager
-        .boot_v1_response()
-        .expect("should serve configured records");
-    let mut expected = vec![v1str, v0str];
-    expected.sort_unstable();
-    assert_eq!(response.records, expected);
-
-    // Configuring records is not the same as having bootstrapped
-    assert!(rdc.read_dyn().get_bootstrap_cache().is_none());
-
-    mock_registry::terminate(registry).await;
-}
-
-/// A hostile bootstrap cannot grow every response of every node that contacted it
-pub fn test_bootstrap_cache_cap() {
-    let strings: Vec<String> = (0..MAX_BOOTSTRAP_RECORD_STRINGS * 2)
-        .map(|i| format!("1|0|VLD0:k{}|example.com|T5150|1|sig", i))
-        .collect();
-    let cache = BootstrapCache::new(strings, vec![]);
-    assert_eq!(cache.record_strings().len(), MAX_BOOTSTRAP_RECORD_STRINGS);
-}
-
-#[cfg(feature = "enable-protocol-webtransport")]
-pub async fn test_webtransport_ip_literal_record_single_hostname() {
-    let registry = mock_registry::init("").await;
-    let network_manager = registry.network_manager();
-    let dial_info_converter = MockDialInfoConverter::default();
-
-    let addr = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
-    let dial_info_details = vec![
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::udp(addr),
-        },
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_webtransport_stream(
-                addr,
-                "https://1.2.3.4:5150/".to_owned(),
-                vec![],
-                None,
-            )
-            .expect("should make ip-literal webtransport dialinfo"),
-        },
-    ];
-    let bsrec = BootstrapRecord::new(
-        PublicKeyGroup::from(mock_public_keys()),
-        VALID_ENVELOPE_VERSIONS.to_vec(),
-        dial_info_details,
-        None,
-        vec![],
-    );
-
-    let v0str = bsrec
-        .to_v0_string(&dial_info_converter)
-        .await
-        .expect("ip-literal webtransport must serialize into a single-hostname record");
-    assert!(
-        v0str.contains("example.com"),
-        "record should use the PTR-derived hostname: {v0str}"
-    );
-    assert!(
-        v0str.contains("B5150"),
-        "record should include the WTS short form: {v0str}"
-    );
-
-    let bsrec2 =
-        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
-            .await
-            .expect("should parse string")
-            .expect("should be valid record");
-    assert!(
-        bsrec2.dial_info_details().iter().any(|did| {
-            did.dial_info.protocol_type() == ProtocolType::WTS && did.dial_info.port() == 5150
-        }),
-        "parsed record should contain the WTS dial info"
-    );
-
-    mock_registry::terminate(registry).await;
-}
-
-#[cfg(feature = "enable-protocol-webtransport")]
-pub async fn test_webtransport_short_form_slash_tolerant() {
-    let dial_info_converter = MockDialInfoConverter::default();
-    for short in ["B5150", "B5150/"] {
-        let sdi = ShortDialInfo {
-            short_url: short.to_string(),
-            hostname: "example.com".to_string(),
-        };
-        let dis = dial_info_converter
-            .try_vec_from_short(&sdi)
-            .await
-            .unwrap_or_else(|e| panic!("short form {short} should parse: {e}"));
-        assert!(!dis.is_empty(), "short form {short} produced no dial info");
-        for di in dis {
-            assert_eq!(di.protocol_type(), ProtocolType::WTS, "short form {short}");
-            assert_eq!(di.port(), 5150, "short form {short}");
-        }
-    }
-}
-
-fn current_bootstrap_socket_address() -> SocketAddress {
-    SocketAddress::new(Address::IPV4(Ipv4Addr::new(18, 218, 0, 180)), 5150)
-}
-
-fn expired_bootstrap_socket_address() -> SocketAddress {
-    SocketAddress::new(Address::IPV4(Ipv4Addr::new(18, 218, 0, 181)), 5150)
-}
-
-fn bootstrap_candidate_peer_info(
+/// A signed peer info for a fresh node, directly reachable at `dial_info`
+fn fresh_peer_info(
     routing_table: &RoutingTable,
-    crypto_info_list: Vec<CryptoInfo>,
-    socket_address: SocketAddress,
+    crypto: &Crypto,
+    dial_info: DialInfo,
     expiration: Option<Timestamp>,
 ) -> Arc<PeerInfo> {
+    let kp = crypto.best().generate_keypair();
     let node_info = NodeInfo::new(
-        Timestamp::new(0),
+        Timestamp::now(),
         vec![ENVELOPE_VERSION_ENV0],
-        crypto_info_list,
+        vec![CryptoInfo::VLD0 {
+            public_key: kp.ref_value().key(),
+        }],
         CONNECTIVITY_CAPABILITIES.to_vec(),
         ProtocolTypeSet::new(),
         AddressTypeSet::new(),
         vec![DialInfoDetail {
             class: DialInfoClass::Direct,
-            dial_info: DialInfo::tcp(socket_address),
+            dial_info,
         }],
         vec![],
         TransportMtus::default(),
         expiration,
     );
-
+    let secret_keys = SecretKeyGroup::from(vec![kp.secret()]);
     Arc::new(
-        PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
-            .expect("should build unsigned peer info"),
+        PeerInfo::try_new_from_node_info(
+            routing_table,
+            RoutingDomain::PublicInternet,
+            &secret_keys,
+            node_info,
+        )
+        .expect("should sign peer info"),
     )
 }
 
+/// A current and an expired directly reachable node, registered, for the native dial info
+/// validator test
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn register_current_and_expired(
     routing_table: &RoutingTable,
 ) -> (Arc<PeerInfo>, Arc<PeerInfo>) {
-    let current = bootstrap_candidate_peer_info(
+    let crypto = routing_table.crypto();
+    let current = fresh_peer_info(routing_table, &crypto, test_dial_info(180), None);
+    let expired = fresh_peer_info(
         routing_table,
-        fix_crypto_info_list(true),
-        current_bootstrap_socket_address(),
-        None,
-    );
-    let expired = bootstrap_candidate_peer_info(
-        routing_table,
-        fix_crypto_info_list(false),
-        expired_bootstrap_socket_address(),
+        &crypto,
+        test_dial_info(181),
         Some(Timestamp::new(1)),
     );
-    routing_table
-        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&current)), true)
-        .expect("should register the current node");
-    routing_table
-        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&expired)), true)
-        .expect("should register the expired node");
+    register(routing_table, &current);
+    register(routing_table, &expired);
     (current, expired)
 }
 
-pub async fn test_bootstrap_v0_omits_expired_peer_info() {
-    let registry = mock_registry::init("bootstrap_v0_expiration").await;
+fn register(routing_table: &RoutingTable, peer_info: &Arc<PeerInfo>) {
+    routing_table
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(peer_info)), true)
+        .expect("should register the node");
+}
+
+/// A payload naming `peers`, signed with `key_pairs` (none makes it unsigned)
+fn payload_for(
+    peers: &[Arc<PeerInfo>],
+    crypto: &Crypto,
+    key_pairs: &[KeyPair],
+    timestamp: Timestamp,
+    expiration: Option<Timestamp>,
+) -> SignedBootstrapPayload {
+    let bootstrap_nodes = peers
+        .iter()
+        .map(|pi| {
+            BootstrapNode::new(
+                pi.node_ids().clone(),
+                pi.node_info()
+                    .dial_info_detail_list()
+                    .iter()
+                    .map(|did| did.dial_info.clone())
+                    .collect(),
+            )
+        })
+        .collect();
+    let payload = BootstrapPayload::new(timestamp, expiration, None, bootstrap_nodes);
+    SignedBootstrapPayload::try_new_signed(crypto, payload, key_pairs).expect("should sign payload")
+}
+
+fn serve_payload(routing_table: &RoutingTable, payload: &SignedBootstrapPayload) {
+    routing_table
+        .get_routing_domain_controller(RoutingDomain::PublicInternet)
+        .read_dyn()
+        .set_config_bootstrap_cache(BootstrapCache::from_payload(payload, None));
+}
+
+pub async fn test_boot_v2_payload_round_trip() {
+    let registry = mock_registry::init("boot_v2_payload").await;
+    {
+        let routing_table = registry.routing_table();
+        let crypto = registry.crypto();
+        let pi = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let now = Timestamp::now();
+        let signed = payload_for(
+            std::slice::from_ref(&pi),
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            Some(now.later(TEST_LIFETIME)),
+        );
+
+        // The line form carries the exact bytes
+        let line = signed.to_line();
+        assert!(SignedBootstrapPayload::is_payload_line(&line));
+        assert!(!SignedBootstrapPayload::is_payload_line(
+            "1|0|VLD0:x|host|U5150"
+        ));
+        let parsed = SignedBootstrapPayload::try_new_from_line(&line).expect("should parse line");
+        assert_eq!(parsed, signed);
+        assert_eq!(parsed.payload().timestamp(), now);
+        assert!(parsed.payload().names_node(pi.node_ids()));
+        assert_eq!(parsed.payload().cache_ttl(), DEFAULT_BOOTSTRAP_CACHE_TTL);
+        assert!(!parsed.payload().is_expired(now));
+        assert!(parsed.payload().is_expired(now.later(TEST_LIFETIME)));
+
+        // Trusted keys verify it, others do not
+        parsed
+            .verify(&crypto, &mock_signing_keys()[..1])
+            .expect("should verify with the signing key");
+        assert!(parsed.verify(&crypto, &mock_signing_keys()[1..2]).is_err());
+
+        // An unsigned payload passes no key check
+        let unsigned = payload_for(&[pi], &crypto, &[], now, None);
+        assert!(unsigned.verify(&crypto, &mock_signing_keys()).is_err());
+        assert_eq!(unsigned.payload().expiration(), None);
+
+        // A node line round trips too
+        let node = &signed.payload().bootstrap_nodes()[0];
+        let node_line = node.to_line().expect("should make node line");
+        assert!(node_line.starts_with(BOOTSTRAP_NODE_LINE_PREFIX));
+        assert_eq!(
+            &BootstrapNode::try_new_from_line(&node_line).expect("should parse node line"),
+            node
+        );
+        assert!(BootstrapNode::try_new_from_line("node|not base64!").is_err());
+    }
+    mock_registry::terminate(registry).await;
+}
+
+pub async fn test_boot_v2_request_forms() {
+    assert!(NetworkManager::is_boot_v2_request(b"B02T"));
+    assert!(NetworkManager::is_boot_v2_request(b"B01TB02T"));
+    assert!(NetworkManager::is_boot_v2_request(b"BOOTB02Tand more"));
+    assert!(!NetworkManager::is_boot_v2_request(b"B01T"));
+    assert!(!NetworkManager::is_boot_v2_request(b"BOOT"));
+    assert!(!NetworkManager::is_boot_v2_request(b"B01TBOOT"));
+    assert!(!NetworkManager::is_boot_v2_request(b"B03T"));
+    assert!(!NetworkManager::is_boot_v2_request(b"B0"));
+
+    // A keyed client leads with the signed legacy tag while that version is still answered
+    let registry = mock_registry::init("boot_v2_request_keyed").await;
+    let keyed = registry.network_manager().boot_v2_request_bytes();
+    #[cfg(feature = "enable-bootstrap-v1")]
+    assert_eq!(&keyed[..], b"B01TB02T");
+    #[cfg(not(feature = "enable-bootstrap-v1"))]
+    assert_eq!(&keyed[..], b"B02T");
+    assert!(NetworkManager::is_boot_v2_request(&keyed));
+    mock_registry::terminate(registry).await;
+
+    let registry = mock_registry::init_with_config("boot_v2_request_keyless", |cfg| {
+        cfg.network.routing_table.bootstrap_keys.clear();
+    })
+    .await;
+    let keyless = registry.network_manager().boot_v2_request_bytes();
+    #[cfg(feature = "enable-bootstrap-v0")]
+    assert_eq!(&keyless[..], b"BOOTB02T");
+    #[cfg(not(feature = "enable-bootstrap-v0"))]
+    assert_eq!(&keyless[..], b"B02T");
+    assert!(NetworkManager::is_boot_v2_request(&keyless));
+    mock_registry::terminate(registry).await;
+}
+
+/// A reply carries the held payload bytes unchanged and the peers it names
+pub async fn test_boot_v2_response_round_trip() {
+    let registry = mock_registry::init("boot_v2_response").await;
     {
         let routing_table = registry.routing_table();
         let network_manager = registry.network_manager();
-        let (current, expired) = register_current_and_expired(&routing_table);
+        let crypto = registry.crypto();
+
+        let named = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let expired = fresh_peer_info(
+            &routing_table,
+            &crypto,
+            test_dial_info(181),
+            Some(Timestamp::new(1)),
+        );
+        register(&routing_table, &named);
+        register(&routing_table, &expired);
+        let now = Timestamp::now();
+        let signed = payload_for(
+            &[named.clone(), expired.clone()],
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            Some(now.later(TEST_LIFETIME)),
+        );
+        serve_payload(&routing_table, &signed);
+
+        let reply = network_manager
+            .boot_v2_response()
+            .expect("should build reply");
+        assert_eq!(&reply[..4], B02T_MAGIC);
+        assert!(reply.len() <= MAX_MESSAGE_SIZE);
+        let decoded = network_manager
+            .decode_boot_v2_response(&reply[4..])
+            .expect("should decode reply");
+        assert_eq!(decoded.payload.as_ref(), Some(signed.bytes()));
+        let ids: Vec<NodeIdGroup> = decoded
+            .peers
+            .iter()
+            .map(|pi| pi.node_ids().clone())
+            .collect();
+        assert!(ids.contains(named.node_ids()), "{ids:?}");
+        assert!(!ids.contains(expired.node_ids()), "{ids:?}");
+
+        // With no payload held, the reply still offers direct peers for an unsigned client
+        routing_table
+            .get_routing_domain_controller(RoutingDomain::PublicInternet)
+            .read_dyn()
+            .set_config_bootstrap_cache(BootstrapCache::default());
+        let reply = network_manager
+            .boot_v2_response()
+            .expect("should build reply");
+        let decoded = network_manager
+            .decode_boot_v2_response(&reply[4..])
+            .expect("should decode reply");
+        assert!(decoded.payload.is_none());
+        let ids: Vec<NodeIdGroup> = decoded
+            .peers
+            .iter()
+            .map(|pi| pi.node_ids().clone())
+            .collect();
+        assert!(ids.contains(named.node_ids()), "{ids:?}");
+        assert!(!ids.contains(expired.node_ids()), "{ids:?}");
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// With keys, the payload must verify and every peer must be one of its nodes; without keys
+/// everything offered is taken; a payload older than the one held is refused either way
+pub async fn test_boot_v2_accept_rules() {
+    let registry = mock_registry::init_with_config("boot_v2_accept", |cfg| {
+        cfg.network.routing_table.bootstrap_keys = mock_signing_keys()[..1].to_vec();
+    })
+    .await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let crypto = registry.crypto();
+        let named = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let stranger = fresh_peer_info(&routing_table, &crypto, test_dial_info(182), None);
+        let now = Timestamp::now();
+        let expiration = Some(now.later(TEST_LIFETIME));
+        let good = payload_for(
+            std::slice::from_ref(&named),
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            expiration,
+        );
+        let response = |payload: Option<&SignedBootstrapPayload>| BootV2Response {
+            payload: payload.map(|p| p.bytes().clone()),
+            peers: vec![
+                UnverifiedPeerInfo::from_verified(&named),
+                UnverifiedPeerInfo::from_verified(&stranger),
+            ],
+        };
+
+        // A trusted payload: its node is kept, the stranger is not, and it is asked for nothing
+        let accepted = network_manager.accept_boot_v2_response(response(Some(&good)));
+        assert_eq!(accepted.payload.as_ref(), Some(&good));
+        assert_eq!(accepted.peers.len(), 1);
+        assert_eq!(accepted.peers[0].node_ids(), named.node_ids());
+        assert!(accepted.unanswered.is_empty());
+
+        // A payload naming a node the reply did not carry leaves it to be asked
+        let absent = payload_for(
+            &[named.clone(), stranger.clone()],
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            expiration,
+        );
+        let accepted = network_manager.accept_boot_v2_response(BootV2Response {
+            payload: Some(absent.bytes().clone()),
+            peers: vec![UnverifiedPeerInfo::from_verified(&named)],
+        });
+        assert_eq!(accepted.unanswered.len(), 1);
+        assert_eq!(accepted.unanswered[0].node_ids(), stranger.node_ids());
+
+        // The wrong signing key, an unsigned payload, an expired one, or none: nothing is trusted
+        let wrong_key = payload_for(
+            std::slice::from_ref(&named),
+            &crypto,
+            &mock_keypairs()[1..2],
+            now,
+            expiration,
+        );
+        let unsigned = payload_for(std::slice::from_ref(&named), &crypto, &[], now, expiration);
+        let expired = payload_for(
+            std::slice::from_ref(&named),
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            Some(Timestamp::new(1)),
+        );
+        for bad in [Some(&wrong_key), Some(&unsigned), Some(&expired), None] {
+            let accepted = network_manager.accept_boot_v2_response(response(bad));
+            assert!(accepted.payload.is_none());
+            assert!(accepted.peers.is_empty());
+        }
+
+        // Holding a newer payload refuses an older one
+        let newer = payload_for(
+            std::slice::from_ref(&named),
+            &crypto,
+            &mock_keypairs()[..1],
+            now.later(TimestampDuration::new_secs(1)),
+            expiration,
+        );
+        serve_payload(&routing_table, &newer);
+        assert_eq!(
+            routing_table.bootstrap_payload_floor(),
+            Some(newer.payload().timestamp())
+        );
+        let accepted = network_manager.accept_boot_v2_response(response(Some(&good)));
+        assert!(accepted.payload.is_none());
+        let accepted = network_manager.accept_boot_v2_response(response(Some(&newer)));
+        assert_eq!(accepted.payload.as_ref(), Some(&newer));
+    }
+    mock_registry::terminate(registry).await;
+
+    // Without keys, the payload and every verified peer are taken as offered
+    let registry = mock_registry::init_with_config("boot_v2_accept_keyless", |cfg| {
+        cfg.network.routing_table.bootstrap_keys.clear();
+    })
+    .await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let crypto = registry.crypto();
+        let named = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let stranger = fresh_peer_info(&routing_table, &crypto, test_dial_info(182), None);
+        let now = Timestamp::now();
+        let unsigned = payload_for(std::slice::from_ref(&named), &crypto, &[], now, None);
+        let accepted = network_manager.accept_boot_v2_response(BootV2Response {
+            payload: Some(unsigned.bytes().clone()),
+            peers: vec![
+                UnverifiedPeerInfo::from_verified(&named),
+                UnverifiedPeerInfo::from_verified(&stranger),
+            ],
+        });
+        assert_eq!(accepted.payload.as_ref(), Some(&unsigned));
+        assert_eq!(accepted.peers.len(), 2);
+        let accepted = network_manager.accept_boot_v2_response(BootV2Response {
+            payload: None,
+            peers: vec![UnverifiedPeerInfo::from_verified(&stranger)],
+        });
+        assert!(accepted.payload.is_none());
+        assert_eq!(accepted.peers.len(), 1);
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// The newest payload wins a union, a config copy takes ties, and a learned copy comes due
+/// for a re-check one ttl after it arrived
+pub async fn test_bootstrap_cache() {
+    let registry = mock_registry::init("boot_v2_cache").await;
+    {
+        let routing_table = registry.routing_table();
+        let crypto = registry.crypto();
+        let pi = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let now = Timestamp::now();
+        let older = payload_for(std::slice::from_ref(&pi), &crypto, &[], now, None);
+        let newer = payload_for(
+            std::slice::from_ref(&pi),
+            &crypto,
+            &[],
+            now.later(TimestampDuration::new_secs(1)),
+            Some(now.later(TEST_LIFETIME)),
+        );
+
+        let empty = BootstrapCache::default();
+        assert!(empty.is_empty());
+        assert!(!empty.recheck_due(now));
+        assert!(empty.served_payload(now).is_none());
+
+        let mut learned = BootstrapCache::from_payload(&older, Some(now));
+        assert!(!learned.is_empty());
+        assert_eq!(learned.served_payload(now), Some(older.clone()));
+        assert!(!learned.recheck_due(now));
+        assert!(learned.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
+        learned.mark_rechecked(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL));
+        assert!(!learned.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
+
+        // The newer payload replaces the older, from either side
+        learned.union(BootstrapCache::from_payload(&newer, Some(now)));
+        assert_eq!(
+            learned.payload_timestamp(),
+            Some(newer.payload().timestamp())
+        );
+        learned.union(BootstrapCache::from_payload(&older, None));
+        assert_eq!(
+            learned.payload_timestamp(),
+            Some(newer.payload().timestamp())
+        );
+
+        // A config copy takes a tie and never comes due
+        let mut config = BootstrapCache::from_payload(&newer, None);
+        assert!(!config.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
+        config.union(BootstrapCache::from_payload(&newer, Some(now)));
+        assert_eq!(config.received_at(), None);
+        learned.union(BootstrapCache::from_payload(&newer, None));
+        assert_eq!(learned.received_at(), None);
+
+        // An expired payload is held for its floor but not served
+        let expired = BootstrapCache::from_payload(&newer, None);
+        let later = now
+            .later(TEST_LIFETIME)
+            .later(TimestampDuration::new_secs(1));
+        assert!(expired.served_payload(later).is_none());
+        assert_eq!(
+            expired.payload_timestamp(),
+            Some(newer.payload().timestamp())
+        );
+    }
+    mock_registry::terminate(registry).await;
+}
+
+pub fn test_record_lifetime_parse() {
+    const DAY: u64 = 86_400_000_000;
+    assert_eq!(parse_record_lifetime("none"), Some(None));
+    assert_eq!(parse_record_lifetime("0"), Some(None));
+    assert_eq!(
+        parse_record_lifetime("30d"),
+        Some(Some(TimestampDuration::new(30 * DAY)))
+    );
+    assert_eq!(
+        parse_record_lifetime("1y6mo"),
+        Some(Some(TimestampDuration::new((365 + 180) * DAY)))
+    );
+    assert_eq!(
+        parse_record_lifetime(" 2Y "),
+        Some(Some(TimestampDuration::new(730 * DAY)))
+    );
+    for bad in ["", "5m", "1y2", "d", "1x", "-1d", "1h"] {
+        assert_eq!(parse_record_lifetime(bad), None, "{bad:?}");
+    }
+}
+
+/// The config's payload line is the newest trusted one; untrusted and malformed lines are skipped
+pub async fn test_config_bootstrap_payload() {
+    let registry = mock_registry::init("boot_v2_config_lines").await;
+    let (older_line, newer_line, wrong_key_line) = {
+        let routing_table = registry.routing_table();
+        let crypto = registry.crypto();
+        let pi = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let now = Timestamp::now();
+        let expiration = Some(now.later(TEST_LIFETIME));
+        (
+            payload_for(
+                std::slice::from_ref(&pi),
+                &crypto,
+                &mock_keypairs()[..1],
+                now,
+                expiration,
+            )
+            .to_line(),
+            payload_for(
+                std::slice::from_ref(&pi),
+                &crypto,
+                &mock_keypairs()[..1],
+                now.later(TimestampDuration::new_secs(1)),
+                expiration,
+            )
+            .to_line(),
+            payload_for(
+                std::slice::from_ref(&pi),
+                &crypto,
+                &mock_keypairs()[1..2],
+                now.later(TimestampDuration::new_secs(2)),
+                expiration,
+            )
+            .to_line(),
+        )
+    };
+    mock_registry::terminate(registry).await;
+
+    let registry = mock_registry::init_with_config("boot_v2_config_payload", |cfg| {
+        cfg.network.routing_table.bootstrap_keys = mock_signing_keys()[..1].to_vec();
+        cfg.network.routing_table.bootstrap_records = vec![
+            older_line.clone(),
+            "2|not base64!".to_owned(),
+            wrong_key_line.clone(),
+            newer_line.clone(),
+        ];
+    })
+    .await;
+    {
+        let network_manager = registry.network_manager();
+        let payload = network_manager
+            .config_bootstrap_payload()
+            .expect("should find the configured payload");
+        assert_eq!(payload.to_line(), newer_line);
+
+        // The configured payload's nodes are what this node asks directly
+        let peers = network_manager.config_bootstrap();
+        assert!(peers.peers.is_empty());
+        assert_eq!(peers.unanswered.len(), 1);
+
+        // And it is what this node serves before it ever bootstraps
+        let cache = network_manager.config_bootstrap_cache();
+        assert_eq!(
+            cache.payload_timestamp(),
+            Some(payload.payload().timestamp())
+        );
+        assert_eq!(cache.received_at(), None);
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A node that serves bootstrap advertises BOOT only once it is directly reachable
+pub async fn test_bootstrap_capability_needs_direct_dial_info() {
+    let registry = mock_registry::init_with_config("boot_capability", |cfg| {
+        cfg.network.routing_table.serve_direct_bootstrap = true;
+    })
+    .await;
+    {
+        let routing_table = registry.routing_table();
+        let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+        assert!(!rdc
+            .read_dyn()
+            .capabilities()
+            .contains(&VEILID_CAPABILITY_BOOTSTRAP));
+        assert!(!routing_table.serves_direct_bootstrap());
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A node told to serve bootstrap that is directly reachable on every transport and needs no
+/// relay carries BOOT in the node info it makes, publishes it, and serves
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub async fn test_bootstrap_capability_reaches_published_node_info() {
+    let registry = mock_registry::init_with_config("boot_capability_published", |cfg| {
+        cfg.network.routing_table.serve_direct_bootstrap = true;
+    })
+    .await;
+    {
+        let routing_table = registry.routing_table();
+        make_public_internet_direct(&routing_table);
+        let controller = routing_table
+            .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
+        let mut editor = controller.edit();
+        editor.set_receive_mtus(Some(TransportMtus::default()));
+        editor.commit();
+
+        let current = routing_table.get_current_peer_info(RoutingDomain::PublicInternet);
+        assert!(
+            current
+                .node_info()
+                .has_capability(VEILID_CAPABILITY_BOOTSTRAP),
+            "the node info this node makes must carry BOOT: {:?}",
+            current.node_info().capabilities()
+        );
+        assert!(
+            controller.publish_peer_info(),
+            "precondition: a node that needs no relay publishes once its mtus are known"
+        );
+        assert!(routing_table.serves_direct_bootstrap());
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A bootstrap never hands out peer info that has expired
+pub async fn test_bootstrap_peers_omit_expired_peer_info() {
+    let registry = mock_registry::init("bootstrap_peers_expiration").await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let crypto = registry.crypto();
+        let current = fresh_peer_info(&routing_table, &crypto, test_dial_info(180), None);
+        let expired = fresh_peer_info(
+            &routing_table,
+            &crypto,
+            test_dial_info(181),
+            Some(Timestamp::new(1)),
+        );
+        register(&routing_table, &current);
+        register(&routing_table, &expired);
 
         let answers = network_manager.find_bootstrap_nodes_filtered(2);
         let answered_node_ids: Vec<NodeIdGroup> = answers.iter().map(|nr| nr.node_ids()).collect();
-
         assert!(
             answered_node_ids.contains(current.node_ids()),
             "a bootstrap candidate whose peer info has not expired must still be answered: \
@@ -548,97 +635,259 @@ pub async fn test_bootstrap_v0_omits_expired_peer_info() {
     mock_registry::terminate(registry).await;
 }
 
-pub async fn test_bootstrap_v1_omits_expired_peer_info() {
-    let registry = mock_registry::init("bootstrap_v1_expiration").await;
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+fn legacy_record(dial_info_details: Vec<DialInfoDetail>) -> BootstrapRecord {
+    BootstrapRecord::new(
+        PublicKeyGroup::from(mock_public_keys()),
+        VALID_ENVELOPE_VERSIONS.to_vec(),
+        dial_info_details,
+        Some(Timestamp::now().as_u64() / 1_000_000u64),
+        vec![],
+    )
+}
+
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+fn legacy_dial_info_details() -> Vec<DialInfoDetail> {
+    let addr = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
+    vec![
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::udp(addr),
+        },
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_ws(addr, "ws://1.2.3.4:5150/ws".to_owned())
+                .expect("should make ws dialinfo"),
+        },
+        #[cfg(feature = "enable-protocol-wss")]
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_wss(addr, "wss://1.2.3.4:5150/wss".to_owned())
+                .expect("should make wss dialinfo"),
+        },
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_stream(
+                addr,
+                "https://1.2.3.4:5150/wt".to_owned(),
+                vec![],
+                None,
+            )
+            .expect("should make wts dialinfo"),
+        },
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::try_webtransport_datagram(
+                addr,
+                "https://1.2.3.4:5150/wt".to_owned(),
+                vec![],
+                None,
+            )
+            .expect("should make wtd dialinfo"),
+        },
+    ]
+}
+
+/// The legacy short forms carry the protocol letter, port and path; the hostname is the line's
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+pub fn test_legacy_short_dial_info() {
+    let shorts: Vec<String> = legacy_dial_info_details()
+        .iter()
+        .map(|did| to_short_dial_info(&did.dial_info).short_url)
+        .collect();
+    assert!(shorts.contains(&"U5150".to_owned()), "{shorts:?}");
+    assert!(shorts.contains(&"W5150/ws".to_owned()), "{shorts:?}");
+    #[cfg(feature = "enable-protocol-wss")]
+    assert!(shorts.contains(&"S5150/wss".to_owned()), "{shorts:?}");
+    #[cfg(feature = "enable-protocol-webtransport")]
+    assert_eq!(
+        shorts.iter().filter(|s| *s == "B5150/wt").count(),
+        2,
+        "the datagram half shares the stream's short form: {shorts:?}"
+    );
+}
+
+/// Legacy lines are written against the hostname the operator names, an IP literal included,
+/// and parse back for serving; a signed line verifies only with its key
+#[cfg(feature = "enable-bootstrap-v1")]
+pub async fn test_legacy_record_lines() {
+    let registry = mock_registry::init("legacy_record_lines").await;
     {
-        let routing_table = registry.routing_table();
         let network_manager = registry.network_manager();
-        let (current, expired) = register_current_and_expired(&routing_table);
+        let record = legacy_record(legacy_dial_info_details());
 
-        let bsrecs = [&current, &expired]
-            .into_iter()
-            .map(|peer_info| {
-                BootstrapRecord::new(
-                    peer_info.node_info().public_keys(),
-                    VALID_ENVELOPE_VERSIONS.to_vec(),
-                    peer_info.node_info().dial_info_detail_list().to_vec(),
-                    None,
-                    vec![],
-                )
-            })
-            .collect::<Vec<_>>();
+        let line = record
+            .to_v1_string(&network_manager, "1.2.3.4", mock_keypairs()[0].clone())
+            .expect("should make v1 line");
+        assert!(line.starts_with("1|"));
+        assert!(line.contains("|1.2.3.4|"));
+        let parsed = BootstrapRecord::try_new_from_v1_str(
+            &network_manager,
+            &line,
+            &mock_signing_keys()[..1],
+        )
+        .expect("should parse v1 line");
+        assert_eq!(parsed.public_keys(), record.public_keys());
+        assert!(parsed.dial_info_details().is_empty());
+        assert!(BootstrapRecord::try_new_from_v1_str(
+            &network_manager,
+            &line,
+            &mock_signing_keys()[1..2]
+        )
+        .is_err());
+        assert!(record
+            .to_v1_string(&network_manager, " ", mock_keypairs()[0].clone())
+            .is_err());
 
-        let peers = network_manager.bootstrap_peer_info_for_records(&bsrecs);
-        let peer_node_ids: Vec<NodeIdGroup> =
-            peers.iter().map(|pi| pi.node_ids().clone()).collect();
-
-        assert!(
-            peer_node_ids.contains(current.node_ids()),
-            "a record whose peer info has not expired must still carry it: {peer_node_ids:?}"
-        );
-        assert!(
-            !peer_node_ids.contains(expired.node_ids()),
-            "a record whose peer info has expired must be answered with records alone: \
-             {peer_node_ids:?}"
-        );
+        #[cfg(feature = "enable-bootstrap-v0")]
+        {
+            let line = record
+                .to_v0_string("bootstrap.example.com")
+                .expect("should make v0 line");
+            assert!(line.starts_with("0|"));
+            let parsed = BootstrapRecord::try_new_from_v0_str(&line).expect("should parse v0 line");
+            assert_eq!(parsed.public_keys(), record.public_keys());
+        }
     }
     mock_registry::terminate(registry).await;
 }
 
-#[cfg(feature = "enable-protocol-webtransport")]
-pub async fn test_webtransport_datagram_shares_the_stream_short_form() {
-    let registry = mock_registry::init("").await;
-    let network_manager = registry.network_manager();
-    let dial_info_converter = MockDialInfoConverter::default();
+/// The JSON a 0.5.x node is answered with has 0.5.8's fields and only the dial info kinds and
+/// protocols of a 0.5.x build without its optional WSS
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+pub async fn test_legacy_json_shape() {
+    let registry = mock_registry::init("legacy_json_shape").await;
+    {
+        let routing_table = registry.routing_table();
+        let crypto = registry.crypto();
+        let kp = crypto.best().generate_keypair();
+        let node_info = NodeInfo::new(
+            Timestamp::now(),
+            vec![ENVELOPE_VERSION_ENV0],
+            vec![CryptoInfo::VLD0 {
+                public_key: kp.ref_value().key(),
+            }],
+            CONNECTIVITY_CAPABILITIES.to_vec(),
+            ProtocolTypeSet::all(),
+            AddressTypeSet::all(),
+            legacy_dial_info_details(),
+            vec![],
+            TransportMtus::default(),
+            None,
+        );
+        let pi = PeerInfo::try_new_from_node_info(
+            &routing_table,
+            RoutingDomain::PublicInternet,
+            &SecretKeyGroup::from(vec![kp.secret()]),
+            node_info,
+        )
+        .expect("should sign peer info");
 
-    let addr = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
-    let url = "https://1.2.3.4:5150/wt".to_owned();
-    let dial_info_details = vec![
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_webtransport_stream(addr, url.clone(), vec![], None)
-                .expect("should make wts dialinfo"),
-        },
-        DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info: DialInfo::try_webtransport_datagram(addr, url, vec![], None)
-                .expect("should make wtd dialinfo"),
-        },
-    ];
-    let bsrec = BootstrapRecord::new(
-        PublicKeyGroup::from(mock_public_keys()),
-        VALID_ENVELOPE_VERSIONS.to_vec(),
-        dial_info_details,
-        None,
-        vec![],
-    );
-
-    let v0str = bsrec
-        .to_v0_string(&dial_info_converter)
-        .await
-        .expect("a webtransport pair must serialize");
-    let short_urls = v0str
-        .split('|')
-        .nth(4)
-        .expect("record has a short url list");
-    assert_eq!(
-        short_urls, "B5150/wt",
-        "the stream and datagram dial info must dedupe into the one stream short form, and the \
-         datagram must never emit a short form of its own: {v0str}"
-    );
-
-    let bsrec2 =
-        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
-            .await
-            .expect("should parse string")
-            .expect("should be valid record");
-    assert!(
-        bsrec2
-            .dial_info_details()
+        let json = serialize_json(LegacyPeerInfo::from_peer_info(&pi));
+        let value: serde_json::Value = serde_json::from_str(&json).expect("should be json");
+        let keys = |v: &serde_json::Value| -> Vec<String> {
+            v.as_object().expect("object").keys().cloned().collect()
+        };
+        let mut top = keys(&value);
+        top.sort();
+        assert_eq!(
+            top,
+            [
+                "node_ids",
+                "node_info",
+                "node_info_message",
+                "routing_domain",
+                "signatures"
+            ]
+        );
+        let mut inner = keys(&value["node_info"]);
+        inner.sort();
+        assert_eq!(
+            inner,
+            [
+                "address_types",
+                "capabilities",
+                "crypto_info_list",
+                "dial_info_detail_list",
+                "envelope_support",
+                "outbound_protocols",
+                "relay_info_list",
+                "timestamp"
+            ]
+        );
+        let mut kinds: Vec<&str> = value["node_info"]["dial_info_detail_list"]
+            .as_array()
+            .expect("array")
             .iter()
-            .all(|did| did.dial_info.protocol_type() == ProtocolType::WTS),
-        "the short form parses back to the stream dial info alone"
-    );
-
+            .map(|did| did["dial_info"]["kind"].as_str().expect("kind"))
+            .collect();
+        kinds.sort();
+        assert_eq!(
+            kinds,
+            ["UDP", "WS"],
+            "the fixture's other kinds are left out"
+        );
+        assert_eq!(
+            value["node_info"]["outbound_protocols"].as_u64(),
+            Some(0b111),
+            "UDP, TCP and WS, the bits 0.5.8 gave them"
+        );
+        assert!(value["node_info_message"].is_array());
+    }
     mock_registry::terminate(registry).await;
+}
+
+pub async fn test_bootstrap_entry_forms() {
+    for (entry, expected) in [
+        (
+            "bootstrap.test",
+            Some(("bootstrap.test", BOOTSTRAP_DIRECT_PORT)),
+        ),
+        ("bootstrap.test:443", Some(("bootstrap.test", 443))),
+        (
+            "18.218.0.160",
+            Some(("18.218.0.160", BOOTSTRAP_DIRECT_PORT)),
+        ),
+        ("18.218.0.160:443", Some(("18.218.0.160", 443))),
+        (
+            "2001:db8::1",
+            Some(("[2001:db8::1]", BOOTSTRAP_DIRECT_PORT)),
+        ),
+        (
+            "[2001:db8::1]",
+            Some(("[2001:db8::1]", BOOTSTRAP_DIRECT_PORT)),
+        ),
+        ("[2001:db8::1]:443", Some(("[2001:db8::1]", 443))),
+        ("bootstrap.test:port", None),
+        ("boot strap.test", None),
+        ("", None),
+    ] {
+        assert_eq!(
+            split_bootstrap_entry(entry),
+            expected.map(|(host, port)| (host.to_owned(), port)),
+            "{entry:?}"
+        );
+    }
+
+    // An address entry becomes a dial info without any lookup, in either family
+    let converter = BootstrapDialInfoConverter::default();
+    for (url, address) in [
+        ("tcp://18.218.0.160:5150", "18.218.0.160"),
+        ("tcp://[2001:db8::1]:5150", "2001:db8::1"),
+        #[cfg(feature = "enable-protocol-wss")]
+        ("wss://[2001:db8::1]:5150/ws", "2001:db8::1"),
+    ] {
+        let dial_infos = converter
+            .try_vec_from_url(url)
+            .await
+            .expect("address url should convert");
+        assert_eq!(dial_infos.len(), 1, "{url}");
+        assert_eq!(
+            dial_infos[0].to_socket_addr().ip(),
+            IpAddr::from_str(address).expect("address"),
+            "{url}"
+        );
+    }
 }

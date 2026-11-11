@@ -895,15 +895,6 @@ pub fn veilid_tools::raw_timestamp::get_raw_timestamp() -> u64
 pub fn veilid_tools::raw_timestamp::human_duration(u64) -> alloc::string::String
 pub fn veilid_tools::raw_timestamp::human_timestamp(u64) -> alloc::string::String
 pub fn veilid_tools::raw_timestamp::parse_duration(&str) -> core::option::Option<u64>
-pub mod veilid_tools::resolver
-pub enum veilid_tools::resolver::ResolverError
-pub veilid_tools::resolver::ResolverError::Generic(alloc::string::String)
-pub veilid_tools::resolver::ResolverError::Unsupported
-pub struct veilid_tools::resolver::Resolver
-impl veilid_tools::Resolver
-pub async fn veilid_tools::Resolver::ptr_lookup(core::net::ip_addr::IpAddr) -> core::result::Result<alloc::string::String, veilid_tools::ResolverError>
-pub fn veilid_tools::Resolver::supports_txt() -> bool
-pub async fn veilid_tools::Resolver::txt_lookup<S: core::convert::AsRef<str>>(S) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, veilid_tools::ResolverError>
 pub mod veilid_tools::single_shot_eventual
 pub struct veilid_tools::single_shot_eventual::SingleShotEventual<T> where T: core::marker::Unpin
 impl<T> veilid_tools::SingleShotEventual<T> where T: core::marker::Unpin
@@ -1352,9 +1343,6 @@ impl<T> core::convert::From<veilid_tools::NetworkResult<T>> for core::option::Op
 pub fn core::option::Option<T>::from(veilid_tools::NetworkResult<T>) -> Self
 impl<T> core::fmt::Display for veilid_tools::NetworkResult<T>
 pub fn veilid_tools::NetworkResult<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub enum veilid_tools::ResolverError
-pub veilid_tools::ResolverError::Generic(alloc::string::String)
-pub veilid_tools::ResolverError::Unsupported
 pub enum veilid_tools::SplitUrlHost
 pub veilid_tools::SplitUrlHost::Hostname(alloc::string::String)
 pub veilid_tools::SplitUrlHost::IpAddr(core::net::ip_addr::IpAddr)
@@ -1902,11 +1890,6 @@ pub struct veilid_tools::RawAddressSummary
 pub veilid_tools::RawAddressSummary::has_non_loopback_ipv4: bool
 pub veilid_tools::RawAddressSummary::has_non_loopback_ipv6: bool
 pub veilid_tools::RawAddressSummary::has_unicast_global_ipv6: bool
-pub struct veilid_tools::Resolver
-impl veilid_tools::Resolver
-pub async fn veilid_tools::Resolver::ptr_lookup(core::net::ip_addr::IpAddr) -> core::result::Result<alloc::string::String, veilid_tools::ResolverError>
-pub fn veilid_tools::Resolver::supports_txt() -> bool
-pub async fn veilid_tools::Resolver::txt_lookup<S: core::convert::AsRef<str>>(S) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, veilid_tools::ResolverError>
 pub struct veilid_tools::SegmentLimitedTcpStream
 impl veilid_tools::SegmentLimitedTcpStream
 pub fn veilid_tools::SegmentLimitedTcpStream::new(tokio::net::tcp::stream::TcpStream) -> (Self, veilid_tools::TcpSegmentLimit)

@@ -57,6 +57,13 @@ impl fmt::Display for PublicInternetRoutingDomainDetail {
 
 impl_veilid_component_accessors!(PublicInternetRoutingDomainDetail);
 
+impl PublicInternetRoutingDomainDetail {
+    /// Whether this node found itself among its own bootstraps, part of its capabilities
+    pub fn set_own_bootstrap(&self, own_bootstrap: bool) {
+        self.common.set_own_bootstrap(own_bootstrap);
+    }
+}
+
 impl RoutingDomainDetailAccessors for PublicInternetRoutingDomainDetail {
     fn common(&self) -> &RoutingDomainDetailCommon {
         &self.common
@@ -368,8 +375,13 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>) {
         self.common.set_bootstrap_cache(bootstrap_cache);
     }
-    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
-        self.common.record_bootstrap_cache(bootstrap_cache);
+    fn record_bootstrap_cache(
+        &self,
+        bootstrap_cache: BootstrapCache,
+        rechecked_at: Option<Timestamp>,
+    ) {
+        self.common
+            .record_bootstrap_cache(bootstrap_cache, rechecked_at);
     }
     fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
         self.common.set_config_bootstrap_cache(bootstrap_cache);

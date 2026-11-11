@@ -39,10 +39,7 @@ pub fn test_persisted_reset_recorded_records() {
     info!("--- test_persisted_reset_recorded_records ---");
 
     let cfg = config(&["bootstrap-v1.veilid.net"], &[]);
-    let state = persisted(Some(BootstrapCache::new(
-        vec!["1|0|VLD0:k|example.com|T5150|1|sig".to_owned()],
-        vec![],
-    )));
+    let state = persisted(Some(BootstrapCache::default()));
     assert!(!persisted_requires_reset(Some(&state), &cfg));
 }
 

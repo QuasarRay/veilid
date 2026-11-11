@@ -40,6 +40,8 @@ flame = ["veilid-core/instrument"]
 debug-locks = ["veilid-core/debug-locks"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
 enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
+enable-bootstrap-v0 = ["veilid-core/enable-bootstrap-v0"]
+enable-bootstrap-v1 = ["veilid-core/enable-bootstrap-v1"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 opentelemetry = [
     "rt-tokio",

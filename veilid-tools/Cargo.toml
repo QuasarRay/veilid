@@ -224,10 +224,7 @@ winapi = { version = "0.3.9", features = [
     "ws2def",
     "ws2ipdef",
 ] }
-windows = { version = "0.62.2", features = [
-    "Win32_NetworkManagement_Dns",
-    "Win32_Foundation",
-] }
+windows = { version = "0.62.2", features = ["Win32_Foundation"] }
 # windows-permissions = "0.2.4"
 
 # Dependencies for iOS

@@ -285,14 +285,23 @@ impl RoutingTable {
         rdd.get_bootstrap_peers()
     }
 
-    /// Return everything a particular routing domain can serve to a B01T request
-    /// Direct bootstrap requests are answered when configured, or when this node is one of its
-    /// own bootstraps
+    /// Bootstrap requests are answered while this node advertises the BOOT capability: it is
+    /// configured to serve or is one of its own bootstraps, and is directly reachable
     pub fn serves_direct_bootstrap(&self) -> bool {
-        self.config().network.routing_table.serve_direct_bootstrap
-            || self
-                .get_routing_domain_controller(RoutingDomain::PublicInternet)
-                .is_own_bootstrap()
+        self.get_published_peer_info(RoutingDomain::PublicInternet)
+            .is_some_and(|pi| pi.node_info().has_capability(VEILID_CAPABILITY_BOOTSTRAP))
+    }
+
+    /// The signing time of the newest payload this node holds, which a later one must reach
+    pub fn bootstrap_payload_floor(&self) -> Option<Timestamp> {
+        self.get_served_bootstrap_cache(RoutingDomain::PublicInternet)
+            .payload_timestamp()
+    }
+
+    /// Note that a served payload is past its cache ttl, for the bootstrap task to re-check
+    pub fn request_bootstrap_recheck(&self, routing_domain: RoutingDomain) {
+        self.get_routing_domain_controller(routing_domain)
+            .request_bootstrap_recheck();
     }
 
     pub fn get_served_bootstrap_cache(&self, routing_domain: RoutingDomain) -> BootstrapCache {

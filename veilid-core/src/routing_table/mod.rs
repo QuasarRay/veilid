@@ -69,8 +69,6 @@ const UPDATE_CM_VIABILITY_INTERVAL_SECS: u32 = 1;
 pub(crate) struct RoutingTableTimings {
     /// Ping period until a node answers steadily, and base of the ping falloffs: one RPC timeout
     pub unreliable_ping_interval: TimestampDuration,
-    /// TXT lookup time for a bootstrap name before direct bootstrap: two RPC timeouts
-    pub bootstrap_txt_timeout: TimestampDuration,
     /// Zero responsive nodes this long falls back to bootstrap: one ping round and its answer
     pub no_responsive_bootstrap_delay: TimestampDuration,
     /// How long nodes must answer or lose questions steadily to become reliable or dead
@@ -83,7 +81,6 @@ impl RoutingTableTimings {
     pub fn new(rpc_timeout: TimestampDuration) -> Self {
         Self {
             unreliable_ping_interval: rpc_timeout,
-            bootstrap_txt_timeout: rpc_timeout.saturating_mul(2),
             no_responsive_bootstrap_delay: rpc_timeout.saturating_mul(2),
             liveness: LivenessSpans::new(rpc_timeout),
             route_test_cooldown: rpc_timeout.saturating_mul(3),
@@ -777,6 +774,7 @@ impl RoutingTable {
         false
     }
 
+    #[cfg_attr(not(feature = "enable-bootstrap-v1"), expect(dead_code))]
     pub fn matches_own_public_key(&self, public_keys: &[PublicKey]) -> bool {
         for pk in public_keys {
             if let Some(v) = self.public_keys().get(pk.kind()) {

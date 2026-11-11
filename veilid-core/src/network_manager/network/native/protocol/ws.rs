@@ -17,6 +17,20 @@ static CLIENT_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
     Arc::new(config)
 });
 
+/// The TLS server name for a WSS url host. An IP literal is named by its address, since the
+/// host's display form brackets IPv6
+#[cfg(feature = "enable-protocol-wss")]
+pub(in crate::network_manager) fn wss_server_name(
+    host: &SplitUrlHost,
+) -> io::Result<ServerName<'static>> {
+    match host {
+        SplitUrlHost::Hostname(hostname) => {
+            ServerName::try_from(hostname.clone()).map_err(to_io_error_other)
+        }
+        SplitUrlHost::IpAddr(ip_addr) => Ok(ServerName::IpAddress((*ip_addr).into())),
+    }
+}
+
 use async_tungstenite::tungstenite::error::ProtocolError;
 use async_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
@@ -400,10 +414,8 @@ impl WebsocketProtocolHandler {
         if tls {
             cfg_if::cfg_if! {
                 if #[cfg(feature="enable-protocol-wss")] {
-                    let domain = split_url.host.clone();
-
                     let connector = TlsConnector::from(CLIENT_CONFIG.clone());
-                    let server_name = ServerName::try_from(domain.to_string()).map_err(to_io_error_other)?;
+                    let server_name = wss_server_name(&split_url.host)?;
                     let Some(ms) = remaining_ms() else {
                         return Ok(NetworkResult::timeout());
                     };

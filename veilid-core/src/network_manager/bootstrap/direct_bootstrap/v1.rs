@@ -2,16 +2,19 @@ use super::*;
 
 impl_veilid_log_facility!("net");
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// The B01T reply a node of the previous version parses
+#[derive(Clone, Debug, Serialize)]
 pub struct BootV1Response {
+    /// The legacy record lines this node serves, verbatim
     pub records: Vec<String>,
-    pub peers: Vec<Arc<PeerInfo>>,
+    /// The peer info of the nodes those lines name, in the JSON shape of 0.5.8
+    pub peers: Vec<legacy_json::LegacyPeerInfo>,
 }
 
 impl NetworkManager {
-    /// Build the B01T response from the routing domain's last successful bootstrap.
+    /// Build the B01T response from the legacy lines this node serves.
     /// Answers an unauthenticated packet, so this touches no resolver and does no I/O:
-    /// records come from the routing domain, peer info from the routing table.
+    /// records come from the routing domain, peer info from the routing table
     pub fn boot_v1_response(&self) -> Option<BootV1Response> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;
@@ -24,15 +27,16 @@ impl NetworkManager {
         }
 
         // Add peer infos if we have them, only for the peers present in the records
-        let peers = self.bootstrap_peer_info_for_records(cache.records());
+        let peers = self
+            .bootstrap_peer_info_for_records(cache.records())
+            .iter()
+            .map(|pi| legacy_json::LegacyPeerInfo::from_peer_info(pi))
+            .collect();
 
         Some(BootV1Response { records, peers })
     }
 
-    /// Direct bootstrap v1 request handler
-    /// This is a proxy mechanism to the TXT bootstrap mechanism
-    /// that is intended for supporting WS/WSS nodes that can not perform DNS TXT lookups,
-    /// however this does work over straight UDP and TCP protocols as well.
+    /// Direct bootstrap v1 request handler, answering nodes of the previous version
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -63,10 +67,8 @@ impl NetworkManager {
         }
     }
 
-    pub(in crate::network_manager) fn bootstrap_peer_info_for_records(
-        &self,
-        bsrecs: &[BootstrapRecord],
-    ) -> Vec<Arc<PeerInfo>> {
+    /// The peer info of the nodes the legacy lines name, from the table or our own publication
+    fn bootstrap_peer_info_for_records(&self, bsrecs: &[BootstrapRecord]) -> Vec<Arc<PeerInfo>> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;
         let cur_ts = Timestamp::now();

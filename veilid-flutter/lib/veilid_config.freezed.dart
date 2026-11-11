@@ -6759,7 +6759,7 @@ as int,
 /// @nodoc
 mixin _$VeilidConfigRoutingTable implements DiagnosticableTreeMixin {
 
- List<PublicKey> get publicKeys; List<SecretKey> get secretKeys; List<String> get bootstrap; List<PublicKey> get bootstrapKeys; List<String> get bootstrapRecords; bool get serveDirectBootstrap;
+ List<PublicKey> get publicKeys; List<SecretKey> get secretKeys; List<String> get bootstrap; List<VeilidConfigBootstrapProtocol> get bootstrapProtocols; List<PublicKey> get bootstrapKeys; List<String> get bootstrapRecords; bool get serveDirectBootstrap;
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -6773,21 +6773,21 @@ $VeilidConfigRoutingTableCopyWith<VeilidConfigRoutingTable> get copyWith => _$Ve
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRoutingTable'))
-    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('bootstrapRecords', bootstrapRecords))..add(DiagnosticsProperty('serveDirectBootstrap', serveDirectBootstrap));
+    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapProtocols', bootstrapProtocols))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('bootstrapRecords', bootstrapRecords))..add(DiagnosticsProperty('serveDirectBootstrap', serveDirectBootstrap));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other.publicKeys, publicKeys)&&const DeepCollectionEquality().equals(other.secretKeys, secretKeys)&&const DeepCollectionEquality().equals(other.bootstrap, bootstrap)&&const DeepCollectionEquality().equals(other.bootstrapKeys, bootstrapKeys)&&const DeepCollectionEquality().equals(other.bootstrapRecords, bootstrapRecords)&&(identical(other.serveDirectBootstrap, serveDirectBootstrap) || other.serveDirectBootstrap == serveDirectBootstrap));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other.publicKeys, publicKeys)&&const DeepCollectionEquality().equals(other.secretKeys, secretKeys)&&const DeepCollectionEquality().equals(other.bootstrap, bootstrap)&&const DeepCollectionEquality().equals(other.bootstrapProtocols, bootstrapProtocols)&&const DeepCollectionEquality().equals(other.bootstrapKeys, bootstrapKeys)&&const DeepCollectionEquality().equals(other.bootstrapRecords, bootstrapRecords)&&(identical(other.serveDirectBootstrap, serveDirectBootstrap) || other.serveDirectBootstrap == serveDirectBootstrap));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(publicKeys),const DeepCollectionEquality().hash(secretKeys),const DeepCollectionEquality().hash(bootstrap),const DeepCollectionEquality().hash(bootstrapKeys),const DeepCollectionEquality().hash(bootstrapRecords),serveDirectBootstrap);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(publicKeys),const DeepCollectionEquality().hash(secretKeys),const DeepCollectionEquality().hash(bootstrap),const DeepCollectionEquality().hash(bootstrapProtocols),const DeepCollectionEquality().hash(bootstrapKeys),const DeepCollectionEquality().hash(bootstrapRecords),serveDirectBootstrap);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys, bootstrapRecords: $bootstrapRecords, serveDirectBootstrap: $serveDirectBootstrap)';
+  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapProtocols: $bootstrapProtocols, bootstrapKeys: $bootstrapKeys, bootstrapRecords: $bootstrapRecords, serveDirectBootstrap: $serveDirectBootstrap)';
 }
 
 
@@ -6798,7 +6798,7 @@ abstract mixin class $VeilidConfigRoutingTableCopyWith<$Res>  {
   factory $VeilidConfigRoutingTableCopyWith(VeilidConfigRoutingTable value, $Res Function(VeilidConfigRoutingTable) _then) = _$VeilidConfigRoutingTableCopyWithImpl;
 @useResult
 $Res call({
- List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys, List<String> bootstrapRecords, bool serveDirectBootstrap
+ List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<VeilidConfigBootstrapProtocol> bootstrapProtocols, List<PublicKey> bootstrapKeys, List<String> bootstrapRecords, bool serveDirectBootstrap
 });
 
 
@@ -6815,12 +6815,13 @@ class _$VeilidConfigRoutingTableCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,Object? bootstrapRecords = null,Object? serveDirectBootstrap = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapProtocols = null,Object? bootstrapKeys = null,Object? bootstrapRecords = null,Object? serveDirectBootstrap = null,}) {
   return _then(_self.copyWith(
 publicKeys: null == publicKeys ? _self.publicKeys : publicKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,secretKeys: null == secretKeys ? _self.secretKeys : secretKeys // ignore: cast_nullable_to_non_nullable
 as List<SecretKey>,bootstrap: null == bootstrap ? _self.bootstrap : bootstrap // ignore: cast_nullable_to_non_nullable
-as List<String>,bootstrapKeys: null == bootstrapKeys ? _self.bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
+as List<String>,bootstrapProtocols: null == bootstrapProtocols ? _self.bootstrapProtocols : bootstrapProtocols // ignore: cast_nullable_to_non_nullable
+as List<VeilidConfigBootstrapProtocol>,bootstrapKeys: null == bootstrapKeys ? _self.bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,bootstrapRecords: null == bootstrapRecords ? _self.bootstrapRecords : bootstrapRecords // ignore: cast_nullable_to_non_nullable
 as List<String>,serveDirectBootstrap: null == serveDirectBootstrap ? _self.serveDirectBootstrap : serveDirectBootstrap // ignore: cast_nullable_to_non_nullable
 as bool,
@@ -6905,10 +6906,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<VeilidConfigBootstrapProtocol> bootstrapProtocols,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable() when $default != null:
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);case _:
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapProtocols,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);case _:
   return orElse();
 
 }
@@ -6926,10 +6927,10 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<VeilidConfigBootstrapProtocol> bootstrapProtocols,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable():
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);}
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapProtocols,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -6943,10 +6944,10 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<VeilidConfigBootstrapProtocol> bootstrapProtocols,  List<PublicKey> bootstrapKeys,  List<String> bootstrapRecords,  bool serveDirectBootstrap)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable() when $default != null:
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);case _:
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapProtocols,_that.bootstrapKeys,_that.bootstrapRecords,_that.serveDirectBootstrap);case _:
   return null;
 
 }
@@ -6958,7 +6959,7 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 @JsonSerializable()
 
 class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidConfigRoutingTable {
-  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, required final  List<PublicKey> bootstrapKeys, required final  List<String> bootstrapRecords, this.serveDirectBootstrap = false}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapKeys = bootstrapKeys,_bootstrapRecords = bootstrapRecords;
+  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, required final  List<VeilidConfigBootstrapProtocol> bootstrapProtocols, required final  List<PublicKey> bootstrapKeys, required final  List<String> bootstrapRecords, this.serveDirectBootstrap = false}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapProtocols = bootstrapProtocols,_bootstrapKeys = bootstrapKeys,_bootstrapRecords = bootstrapRecords;
   factory _VeilidConfigRoutingTable.fromJson(Map<String, dynamic> json) => _$VeilidConfigRoutingTableFromJson(json);
 
  final  List<PublicKey> _publicKeys;
@@ -6980,6 +6981,13 @@ class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidCo
   if (_bootstrap is EqualUnmodifiableListView) return _bootstrap;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_bootstrap);
+}
+
+ final  List<VeilidConfigBootstrapProtocol> _bootstrapProtocols;
+@override List<VeilidConfigBootstrapProtocol> get bootstrapProtocols {
+  if (_bootstrapProtocols is EqualUnmodifiableListView) return _bootstrapProtocols;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_bootstrapProtocols);
 }
 
  final  List<PublicKey> _bootstrapKeys;
@@ -7012,21 +7020,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRoutingTable'))
-    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('bootstrapRecords', bootstrapRecords))..add(DiagnosticsProperty('serveDirectBootstrap', serveDirectBootstrap));
+    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapProtocols', bootstrapProtocols))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('bootstrapRecords', bootstrapRecords))..add(DiagnosticsProperty('serveDirectBootstrap', serveDirectBootstrap));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other._publicKeys, _publicKeys)&&const DeepCollectionEquality().equals(other._secretKeys, _secretKeys)&&const DeepCollectionEquality().equals(other._bootstrap, _bootstrap)&&const DeepCollectionEquality().equals(other._bootstrapKeys, _bootstrapKeys)&&const DeepCollectionEquality().equals(other._bootstrapRecords, _bootstrapRecords)&&(identical(other.serveDirectBootstrap, serveDirectBootstrap) || other.serveDirectBootstrap == serveDirectBootstrap));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other._publicKeys, _publicKeys)&&const DeepCollectionEquality().equals(other._secretKeys, _secretKeys)&&const DeepCollectionEquality().equals(other._bootstrap, _bootstrap)&&const DeepCollectionEquality().equals(other._bootstrapProtocols, _bootstrapProtocols)&&const DeepCollectionEquality().equals(other._bootstrapKeys, _bootstrapKeys)&&const DeepCollectionEquality().equals(other._bootstrapRecords, _bootstrapRecords)&&(identical(other.serveDirectBootstrap, serveDirectBootstrap) || other.serveDirectBootstrap == serveDirectBootstrap));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_publicKeys),const DeepCollectionEquality().hash(_secretKeys),const DeepCollectionEquality().hash(_bootstrap),const DeepCollectionEquality().hash(_bootstrapKeys),const DeepCollectionEquality().hash(_bootstrapRecords),serveDirectBootstrap);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_publicKeys),const DeepCollectionEquality().hash(_secretKeys),const DeepCollectionEquality().hash(_bootstrap),const DeepCollectionEquality().hash(_bootstrapProtocols),const DeepCollectionEquality().hash(_bootstrapKeys),const DeepCollectionEquality().hash(_bootstrapRecords),serveDirectBootstrap);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys, bootstrapRecords: $bootstrapRecords, serveDirectBootstrap: $serveDirectBootstrap)';
+  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapProtocols: $bootstrapProtocols, bootstrapKeys: $bootstrapKeys, bootstrapRecords: $bootstrapRecords, serveDirectBootstrap: $serveDirectBootstrap)';
 }
 
 
@@ -7037,7 +7045,7 @@ abstract mixin class _$VeilidConfigRoutingTableCopyWith<$Res> implements $Veilid
   factory _$VeilidConfigRoutingTableCopyWith(_VeilidConfigRoutingTable value, $Res Function(_VeilidConfigRoutingTable) _then) = __$VeilidConfigRoutingTableCopyWithImpl;
 @override @useResult
 $Res call({
- List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys, List<String> bootstrapRecords, bool serveDirectBootstrap
+ List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<VeilidConfigBootstrapProtocol> bootstrapProtocols, List<PublicKey> bootstrapKeys, List<String> bootstrapRecords, bool serveDirectBootstrap
 });
 
 
@@ -7054,12 +7062,13 @@ class __$VeilidConfigRoutingTableCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,Object? bootstrapRecords = null,Object? serveDirectBootstrap = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapProtocols = null,Object? bootstrapKeys = null,Object? bootstrapRecords = null,Object? serveDirectBootstrap = null,}) {
   return _then(_VeilidConfigRoutingTable(
 publicKeys: null == publicKeys ? _self._publicKeys : publicKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,secretKeys: null == secretKeys ? _self._secretKeys : secretKeys // ignore: cast_nullable_to_non_nullable
 as List<SecretKey>,bootstrap: null == bootstrap ? _self._bootstrap : bootstrap // ignore: cast_nullable_to_non_nullable
-as List<String>,bootstrapKeys: null == bootstrapKeys ? _self._bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
+as List<String>,bootstrapProtocols: null == bootstrapProtocols ? _self._bootstrapProtocols : bootstrapProtocols // ignore: cast_nullable_to_non_nullable
+as List<VeilidConfigBootstrapProtocol>,bootstrapKeys: null == bootstrapKeys ? _self._bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,bootstrapRecords: null == bootstrapRecords ? _self._bootstrapRecords : bootstrapRecords // ignore: cast_nullable_to_non_nullable
 as List<String>,serveDirectBootstrap: null == serveDirectBootstrap ? _self.serveDirectBootstrap : serveDirectBootstrap // ignore: cast_nullable_to_non_nullable
 as bool,

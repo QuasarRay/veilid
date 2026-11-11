@@ -15,6 +15,12 @@ const maxTransportMtus :UInt32 = 16;
 # DialInfo
 const maxWebTransportCertHashes :UInt32 = 8;
 
+# Bootstrap (B02T)
+const maxBootstrapNodes :UInt32 = 64;                   # bootstrap servers in one payload
+const maxBootstrapNodeIds :UInt32 = 16;                 # node ids per bootstrap server
+const maxBootstrapPeers :UInt32 = 64;                   # peer infos in one reply; the byte budget binds first
+const defaultBootstrapCacheTtlSecs :UInt32 = 86400;    # how long a learned payload is served before its source is re-checked, when the payload says 0
+
 # Answer peer lists
 const maxFindNodeAPeersLen :UInt32 = 20;
 const maxGetValueAPeersLen :UInt32 = 20;
@@ -297,6 +303,33 @@ struct NodeInfo @0xaab6a61cc9dc8e34 {
 struct PeerInfo @0xca2ea684ebbdad2f {
     nodeInfoMessage         @0  :Data;                  # capnp message of NodeInfo being signed
     signatures              @1  :List(Signature);       # signatures over the nodeInfoMessage for each CryptoKind, via the public keys in the nodeInfoMessage (VLD0: 64 bytes, VLD1: 3309 bytes)
+}
+
+# Bootstrap (B02T)
+################################################################
+
+# One bootstrap server: who it is and where a bootstrap request reaches it without any lookup
+struct BootstrapNode @0xdb2683ab569c867b {
+    nodeIds                 @0  :List(NodeId);          # the node's ids per crypto kind
+    dialInfos               @1  :List(DialInfo);        # where B02T reaches it when no peer info is at hand
+}
+
+# What the bootstrap operator signs for the whole network. Later content is added as fields here
+struct BootstrapPayload @0xf11b3ada78a02662 {
+    timestamp               @0  :UInt64;                # when signed (us since epoch); a node never accepts an older payload than the one it holds
+    expiration              @1  :UInt64;                # us since epoch, 0 for none; the operator re-signs before it
+    cacheTtl                @2  :UInt64;                # advisory: how long a node serves a learned copy before re-checking its source on demand (us), 0 for the default
+    bootstrapNodes          @3  :List(BootstrapNode);   # the bootstrap servers
+}
+
+struct SignedBootstrapPayload @0x81f903cde8a98054 {
+    payloadMessage          @0  :Data;                  # capnp message of BootstrapPayload being signed
+    signatures              @1  :List(Signature);       # signatures over the payloadMessage by the bootstrap signing keys, empty on an unsigned network
+}
+
+struct BootV2Response @0xffdf390a8752ed5e {
+    payload                 @0  :Data;                  # capnp message of SignedBootstrapPayload, bytes exactly as held, empty when none
+    peers                   @1  :List(PeerInfo);        # the payload's nodes first, then reliable directly reachable nodes
 }
 
 struct RoutedOperation @0xc8e9c493627bb3f2 {

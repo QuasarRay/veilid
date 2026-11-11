@@ -12,10 +12,7 @@ pub(crate) const MTU_PROBE_FILL_SLACK: u16 = 16;
 
 /// Largest packet a node takes on each low-level transport without fragmentation. UDP sizes count
 /// datagram payload bytes and TCP sizes count segment payload bytes.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct TransportMtus {
     udp_v4: Option<u16>,
     udp_v6: Option<u16>,

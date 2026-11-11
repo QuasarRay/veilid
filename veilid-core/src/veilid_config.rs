@@ -501,8 +501,16 @@ pub struct VeilidConfigRoutingTable {
         tsify(type = "string[]")
     )]
     pub secret_keys: SecretKeyGroup,
-    /// Bootstrap server hostnames/URLs used to join the network.
+    /// Bootstrap servers to join the network from: a dial info url, a `host`, or a `host:port`.
+    /// A bare host resolves to every address it names, each dialed on port 5150 or the one
+    /// given, over `bootstrap_protocols` in order.
     pub bootstrap: Vec<String>,
+    /// Protocols a bootstrap request goes out on, in order of preference, for a bare host in
+    /// `bootstrap` and for a payload's nodes. Defaults to the encrypted ones, WSS first: an
+    /// insecure browser page can open WSS but not WebTransport. A node whose list has no
+    /// protocol it can dial fails to start.
+    #[serde(default = "default_bootstrap_protocols")]
+    pub bootstrap_protocols: Vec<VeilidConfigBootstrapProtocol>,
     /// Public keys trusted to sign bootstrap records.
     #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
@@ -510,15 +518,17 @@ pub struct VeilidConfigRoutingTable {
         tsify(type = "string[]")
     )]
     pub bootstrap_keys: Vec<PublicKey>,
-    /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
-    /// Served to direct bootstrap requests without any lookup, and usable to bootstrap this
-    /// node itself. Both record versions are served; bootstrapping from them follows the same
-    /// rule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.
-    /// Empty by default, in which case records come from the bootstrap servers.
+    /// Bootstrap record lines, verbatim: the network's signed payload line (`2|...`) as
+    /// `veilid-server --sign-bootstrap-payload` prints it, and the legacy TXT lines as
+    /// `--dump-bootstrap-records` prints them. The payload is served to bootstrap requests and
+    /// names the nodes this node joins from; the legacy lines are served to nodes of the
+    /// previous version. Empty by default, in which case the payload comes from the bootstraps.
     pub bootstrap_records: Vec<String>,
-    /// Answer direct bootstrap requests (BOOT and B01T) from the last successful bootstrap set.
-    /// Off by default: a bootstrap server turns it on, and an app has no reason to serve. A node
-    /// that finds itself among its own bootstraps answers regardless.
+    /// Answer bootstrap requests with the payload this node holds and its peers. Off by
+    /// default: a bootstrap server turns it on, and an app has no reason to serve. A node that
+    /// finds itself among its own bootstraps answers regardless. Either way the node answers
+    /// only while it is directly reachable on every protocol it listens on, which it advertises
+    /// as the `BOOT` capability.
     #[serde(default)]
     pub serve_direct_bootstrap: bool,
     // xxx pub enable_public_internet: bool,
@@ -527,13 +537,8 @@ pub struct VeilidConfigRoutingTable {
 
 impl Default for VeilidConfigRoutingTable {
     fn default() -> Self {
-        cfg_if::cfg_if! {
-            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-                let bootstrap = vec!["ws://bootstrap-v1.veilid.net:5150/ws".to_string()];
-            } else {
-                let bootstrap = vec!["bootstrap-v1.veilid.net".to_string()];
-            }
-        }
+        // A bare host expands over `bootstrap_protocols`, so browsers dial WSS and WebTransport
+        let bootstrap = vec!["bootstrap-v1.veilid.net".to_string()];
         let bootstrap_keys = vec![
             // Primary Veilid Foundation bootstrap signing key
             PublicKey::from_str("VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k").unwrap_or_log(),
@@ -547,9 +552,64 @@ impl Default for VeilidConfigRoutingTable {
             public_keys: PublicKeyGroup::default(),
             secret_keys: SecretKeyGroup::default(),
             bootstrap,
+            bootstrap_protocols: default_bootstrap_protocols(),
             bootstrap_keys,
             bootstrap_records: vec![],
             serve_direct_bootstrap: false,
+        }
+    }
+}
+
+fn default_bootstrap_protocols() -> Vec<VeilidConfigBootstrapProtocol> {
+    vec![
+        VeilidConfigBootstrapProtocol::Wss,
+        VeilidConfigBootstrapProtocol::Wts,
+    ]
+}
+
+/// A protocol a bootstrap request can go out on.
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord, hash, ts(namespace))]
+pub enum VeilidConfigBootstrapProtocol {
+    /// Raw UDP, in the clear.
+    #[serde(rename = "UDP", alias = "udp")]
+    Udp,
+    /// Raw TCP, in the clear.
+    #[serde(rename = "TCP", alias = "tcp")]
+    Tcp,
+    /// WebSocket, in the clear.
+    #[serde(rename = "WS", alias = "ws")]
+    Ws,
+    /// WebSocket over TLS.
+    #[serde(rename = "WSS", alias = "wss")]
+    Wss,
+    /// WebTransport streams, over QUIC's TLS.
+    #[serde(rename = "WTS", alias = "wts")]
+    Wts,
+}
+
+impl fmt::Display for VeilidConfigBootstrapProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VeilidConfigBootstrapProtocol::Udp => write!(f, "UDP"),
+            VeilidConfigBootstrapProtocol::Tcp => write!(f, "TCP"),
+            VeilidConfigBootstrapProtocol::Ws => write!(f, "WS"),
+            VeilidConfigBootstrapProtocol::Wss => write!(f, "WSS"),
+            VeilidConfigBootstrapProtocol::Wts => write!(f, "WTS"),
+        }
+    }
+}
+
+impl FromStr for VeilidConfigBootstrapProtocol {
+    type Err = VeilidAPIError;
+    fn from_str(s: &str) -> VeilidAPIResult<VeilidConfigBootstrapProtocol> {
+        match s.to_ascii_lowercase().as_str() {
+            "udp" => Ok(VeilidConfigBootstrapProtocol::Udp),
+            "tcp" => Ok(VeilidConfigBootstrapProtocol::Tcp),
+            "ws" => Ok(VeilidConfigBootstrapProtocol::Ws),
+            "wss" => Ok(VeilidConfigBootstrapProtocol::Wss),
+            "wts" => Ok(VeilidConfigBootstrapProtocol::Wts),
+            _ => apibail_invalid_argument!("invalid VeilidConfigBootstrapProtocol string", "s", s),
         }
     }
 }
@@ -1465,6 +1525,40 @@ impl VeilidConfig {
         Ok(())
     }
 
+    /// A node with bootstraps to reach must be able to dial at least one of the protocols it
+    /// would reach them over, or it would start and never bootstrap
+    fn validate_bootstrap_protocols(&self) -> VeilidAPIResult<()> {
+        let rt = &self.network.routing_table;
+        let has_bootstraps = !rt.bootstrap.is_empty()
+            || rt
+                .bootstrap_records
+                .iter()
+                .any(|line| line.trim().starts_with("2|"));
+        if !has_bootstraps {
+            return Ok(());
+        }
+        let protocol = &self.network.protocol;
+        let dialable = rt.bootstrap_protocols.iter().any(|bp| match bp {
+            VeilidConfigBootstrapProtocol::Udp => protocol.udp.enabled,
+            VeilidConfigBootstrapProtocol::Tcp => protocol.tcp.connect,
+            VeilidConfigBootstrapProtocol::Ws => protocol.ws.connect,
+            #[cfg(feature = "enable-protocol-wss")]
+            VeilidConfigBootstrapProtocol::Wss => protocol.wss.connect,
+            #[cfg(not(feature = "enable-protocol-wss"))]
+            VeilidConfigBootstrapProtocol::Wss => false,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            VeilidConfigBootstrapProtocol::Wts => protocol.webtransport.connect,
+            #[cfg(not(feature = "enable-protocol-webtransport"))]
+            VeilidConfigBootstrapProtocol::Wts => false,
+        });
+        if !dialable {
+            apibail_generic!(
+                "no protocol in 'network.routing_table.bootstrap_protocols' is enabled for outbound connections, so this node could not bootstrap"
+            );
+        }
+        Ok(())
+    }
+
     fn validate_max_connections(max_connections: u32, key: &str) -> VeilidAPIResult<()> {
         if !(MAX_CONNECTIONS_MIN..=MAX_CONNECTIONS_MAX).contains(&max_connections) {
             apibail_generic!(format!(
@@ -1583,6 +1677,7 @@ impl VeilidConfig {
                 self.validate_webtransport_url(url)?;
             }
         }
+        self.validate_bootstrap_protocols()?;
         if self.internal().network.rpc.max_route_hop_count == 0 {
             apibail_generic!(
                 "max route hop count must be >= 1 in 'network.rpc.max_route_hop_count'"

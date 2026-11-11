@@ -50,7 +50,6 @@ pub async fn test_all() {
     test_serialize_routing_table::test_register_known_node_keeps_entry().await;
     test_serialize_routing_table::test_persisted_entries_round_trip().await;
     test_serialize_routing_table::test_persisted_entries_write_only_changes().await;
-    test_serialize_routing_table::test_round_trip_peerinfo().await;
     test_persisted_cbor::test_persisted_dial_info().await;
     test_persisted_cbor::test_persisted_public_internet_state().await;
     test_persisted_cbor::test_persisted_network_estimator().await;

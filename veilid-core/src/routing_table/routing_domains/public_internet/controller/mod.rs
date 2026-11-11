@@ -92,6 +92,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
     /// This node appeared among its own bootstraps in the last round that resolved any
     own_bootstrap: AtomicBool,
+    /// When a served payload past its cache ttl gets re-checked, set once per cache period
+    bootstrap_recheck_at: Mutex<Option<Timestamp>>,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
@@ -181,6 +183,7 @@ impl PublicInternetRoutingDomainController {
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
             bootstrap_standoff: Mutex::new(None),
             own_bootstrap: AtomicBool::new(false),
+            bootstrap_recheck_at: Mutex::new(None),
             no_responsive_since: Default::default(),
         };
         let this = Self {
@@ -234,7 +237,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             *self.bootstrap_standoff.lock() = None;
 
             // Serve the configured bootstrap records, whether or not we ever bootstrap
-            let config_cache = self.network_manager().config_bootstrap_cache().await;
+            let config_cache = self.network_manager().config_bootstrap_cache();
             self.read_dyn().set_config_bootstrap_cache(config_cache);
 
             // Publish peer info
@@ -300,8 +303,25 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         ))
     }
 
-    fn is_own_bootstrap(&self) -> bool {
-        self.own_bootstrap.load(Ordering::Acquire)
+    /// A served copy past its ttl is re-checked once, after a delay inside the ttl's first
+    /// half, so many nodes asked at once do not all ask the bootstraps at once
+    fn request_bootstrap_recheck(&self) {
+        let mut recheck_at = self.bootstrap_recheck_at.lock();
+        if recheck_at.is_some() {
+            return;
+        }
+        let ttl = self
+            .read_dyn()
+            .get_served_bootstrap_cache()
+            .cache_ttl()
+            .unwrap_or(DEFAULT_BOOTSTRAP_CACHE_TTL);
+        let half = ttl.as_u64() / 2;
+        let jitter = TimestampDuration::new(if half == 0 {
+            0
+        } else {
+            get_random_u64() % half
+        });
+        *recheck_at = Some(Timestamp::now().later(jitter));
     }
 
     fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {

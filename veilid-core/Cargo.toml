@@ -30,6 +30,8 @@ default-tokio = [
     "backtrace",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 default-async-std = [
     "enable-crypto-vld0",
@@ -38,12 +40,16 @@ default-async-std = [
     "backtrace",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 default-wasm = [
     "enable-crypto-vld0",
     "rt-wasm-bindgen",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 
 # Capture backtraces in diagnostics (error logs, guard tracking); off for wasm product builds
@@ -91,6 +97,10 @@ enable-protocol-webtransport = [
 ]
 
 # JSON format to use for serializing
+# Answer BOOT (v0) and B01T (v1) bootstrap requests from nodes of the previous version
+enable-bootstrap-v0 = []
+enable-bootstrap-v1 = []
+
 json-camel-case = []
 
 # GeoIP

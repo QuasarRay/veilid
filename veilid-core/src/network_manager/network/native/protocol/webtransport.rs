@@ -8,7 +8,6 @@ use futures_rustls::rustls::{
         ring::default_provider, verify_tls12_signature, verify_tls13_signature, CryptoProvider,
     },
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
-    server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
     DigitallySignedStruct, RootCertStore, SignatureScheme,
 };
@@ -349,50 +348,12 @@ pub(in crate::network_manager) fn build_server_config(
     build_server_config_from_chain(cert_chain, key, seed)
 }
 
-/// A rustls server-certificate resolver for CA-signed (bootstrap) WebTransport. It serves the
-/// `hostname` certificate (from `network.tls`, with `DNS:` SANs) for SNI-bearing handshakes, and
-/// a family-specific IP-SAN certificate (`ip`) for handshakes that carry no SNI. A browser forcing
-/// an address family dials an IP literal (`https://203.0.113.5:5150/`), which sends no SNI per
-/// RFC 6066, so the certificate it validates must carry an `IP:` SAN and the bound endpoint is
-/// the only signal for which family to present: each bound (v4/v6) endpoint installs a resolver
-/// holding that family's IP certificate. With no IP certificate configured the hostname
-/// certificate is served instead, so by-hostname dials work and by-IP dials fail to validate.
-#[derive(Debug)]
-struct WebTransportCaCertResolver {
-    hostname: Arc<CertifiedKey>,
-    ip: Option<Arc<CertifiedKey>>,
-}
-
-impl ResolvesServerCert for WebTransportCaCertResolver {
-    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        if client_hello.server_name().is_some() {
-            Some(Arc::clone(&self.hostname))
-        } else {
-            self.ip
-                .as_ref()
-                .map(Arc::clone)
-                .or_else(|| Some(Arc::clone(&self.hostname)))
-        }
-    }
-}
-
-pub(in crate::network_manager) fn certified_key_from_chain(
-    cert_chain: Vec<CertificateDer<'static>>,
-    key: PrivateKeyDer<'static>,
-) -> io::Result<Arc<CertifiedKey>> {
-    let signing_key = crypto_provider()
-        .key_provider
-        .load_private_key(key)
-        .map_err(to_io_error_other)?;
-    Ok(Arc::new(CertifiedKey::new(cert_chain, signing_key)))
-}
-
 pub(in crate::network_manager) fn build_ca_server_config(
     hostname: Arc<CertifiedKey>,
     ip: Option<Arc<CertifiedKey>>,
     seed: QuicMtuSeed,
 ) -> io::Result<quinn::ServerConfig> {
-    let resolver = Arc::new(WebTransportCaCertResolver { hostname, ip });
+    let resolver = Arc::new(TlsServerCertResolver::new(hostname, ip));
     let provider = crypto_provider();
     let mut crypto = rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])

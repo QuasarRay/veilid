@@ -44,6 +44,8 @@ pub struct RoutingDomainDetailCommon {
     restore_point: Mutex<Option<Arc<RoutingDomainRestorePoint>>>,
     /// Peer infos we sign are stamped no earlier than this: peers take only newer ones
     peer_info_ts_floor: AtomicU64,
+    /// This node found itself among its own bootstraps, so it answers bootstrap requests
+    own_bootstrap: AtomicBool,
 }
 
 impl fmt::Debug for RoutingDomainDetailCommon {
@@ -63,6 +65,7 @@ impl fmt::Debug for RoutingDomainDetailCommon {
             .field("entry_summary", &self.entry_summary)
             .field("restore_point", &self.restore_point)
             .field("peer_info_ts_floor", &self.peer_info_ts_floor)
+            .field("own_bootstrap", &self.own_bootstrap)
             .finish()
     }
 }
@@ -71,7 +74,7 @@ impl fmt::Display for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nReceive MTUs: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nBootstrap Records: {}\nEntry Summary:\n{}",
+            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nReceive MTUs: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nBootstrap Payload: {}\nEntry Summary:\n{}",
             if f.alternate() {
                 format!("\n{}",indent_all_string(f.to_string(&self.network_config)))
             } else {
@@ -87,7 +90,19 @@ impl fmt::Display for RoutingDomainDetailCommon {
             },
             f.to_string(self.low_water_mark.lock().1.clone()),
             self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
-            self.get_served_bootstrap_cache().records().iter().map(|r| f.to_string(r.public_keys())).collect::<Vec<_>>().join(",").string_if_empty("None"),
+            {
+                let cache = self.get_served_bootstrap_cache();
+                match cache.payload_timestamp() {
+                    Some(ts) => format!(
+                        "signed {} expires {} ttl {} received {}",
+                        f.to_string(ts),
+                        cache.payload_expiration().map_or("never".to_owned(), |x| f.to_string(x)),
+                        cache.cache_ttl().map_or("default".to_owned(), |x| f.to_string(x)),
+                        cache.received_at().map_or("from config".to_owned(), |x| f.to_string(x)),
+                    ),
+                    None => "None".to_owned(),
+                }
+            },
             indent_all_string(f.to_string(self.entry_summary.lock().clone()))
         )
     }
@@ -114,6 +129,7 @@ impl RoutingDomainDetailCommon {
             entry_summary: Mutex::new(Default::default()),
             restore_point: Mutex::new(None),
             peer_info_ts_floor: AtomicU64::new(0),
+            own_bootstrap: AtomicBool::new(false),
         }
     }
 
@@ -144,8 +160,50 @@ impl RoutingDomainDetailCommon {
         self.network_config.address_types
     }
 
+    /// The configured capabilities, plus BOOT while this node answers bootstrap requests
     pub fn capabilities(&self) -> BTreeSet<VeilidCapability> {
-        self.network_config.capabilities.clone()
+        let mut capabilities = self.network_config.capabilities.clone();
+        if self.serves_bootstrap() {
+            capabilities.insert(VEILID_CAPABILITY_BOOTSTRAP);
+        }
+        capabilities
+    }
+
+    pub fn set_own_bootstrap(&self, own_bootstrap: bool) {
+        self.own_bootstrap.store(own_bootstrap, Ordering::Release);
+    }
+
+    /// A node answers bootstrap requests when it is told to or finds itself among its own
+    /// bootstraps, and only while every protocol it listens on has confirmed direct dial info
+    /// and it needs no relay: a request is answered with what the node can vouch for
+    fn serves_bootstrap(&self) -> bool {
+        if self.routing_domain != RoutingDomain::PublicInternet {
+            return false;
+        }
+        let config = self.config();
+        if config
+            .capabilities
+            .disable
+            .contains(&VEILID_CAPABILITY_BOOTSTRAP)
+        {
+            return false;
+        }
+        if !config.network.routing_table.serve_direct_bootstrap
+            && !self.own_bootstrap.load(Ordering::Acquire)
+        {
+            return false;
+        }
+        if !self.confirmed
+            || self.opt_relay_compilation.is_some()
+            || self.dial_info_details.is_empty()
+        {
+            return false;
+        }
+        self.network_config.inbound_protocols.iter().all(|pt| {
+            self.dial_info_details.iter().any(|did| {
+                did.class == DialInfoClass::Direct && did.dial_info.protocol_type() == pt
+            })
+        })
     }
 
     pub fn get_bootstrap_peers(&self) -> Vec<NodeRef> {
@@ -171,13 +229,24 @@ impl RoutingDomainDetailCommon {
     }
 
     /// Record what a bootstrap produced. An empty result still marks that a bootstrap ran,
-    /// but keeps the last good set so this node goes on serving through a re-bootstrap.
-    pub fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+    /// but keeps the last good set so this node goes on serving through a re-bootstrap. A
+    /// re-check round that learned nothing newer starts a new cache period on what is held
+    pub fn record_bootstrap_cache(
+        &self,
+        bootstrap_cache: BootstrapCache,
+        rechecked_at: Option<Timestamp>,
+    ) {
         let mut cache = self.bootstrap_cache.lock();
+        let held = cache.get_or_insert_default();
         if bootstrap_cache.is_empty() {
-            cache.get_or_insert_default();
+            if let Some(now) = rechecked_at {
+                held.mark_rechecked(now);
+            }
         } else {
-            *cache = Some(bootstrap_cache);
+            held.union(bootstrap_cache);
+            if let Some(now) = rechecked_at {
+                held.mark_rechecked(now);
+            }
         }
     }
 
@@ -486,7 +555,7 @@ impl RoutingDomainDetailCommon {
             cur_ts,
             VALID_ENVELOPE_VERSIONS.to_vec(),
             crypto_info_list,
-            self.network_config.capabilities.iter().copied().collect(),
+            self.capabilities().into_iter().collect(),
             self.network_config.outbound_protocols,
             self.network_config.address_types,
             self.dial_info_details.clone(),

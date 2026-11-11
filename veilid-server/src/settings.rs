@@ -824,10 +824,8 @@ impl Default for Dht {
 
 /// Routing table identity and bootstrap configuration.
 ///
-/// Bootstrap records, if specified are served to direct bootstrap requests without any lookup,
-/// and usable to bootstrap this node itself. Both record versions are served.
-/// Bootstrapping from them follows the same rule as a TXT bootstrap, so v0 records are only
-/// used when no bootstrap keys are set. Empty means use records from the bootstrap servers.
+/// Records are served to bootstrap requests without any lookup and name the nodes this node
+/// joins from; empty means the payload comes from the bootstraps.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct RoutingTable {
@@ -835,13 +833,15 @@ pub struct RoutingTable {
     pub public_keys: Option<veilid_core::PublicKeyGroup>,
     /// Node identity secret keys matching `public_keys` (`None` = generate fresh).
     pub secret_keys: Option<veilid_core::SecretKeyGroup>,
-    /// Bootstrap server hostnames/URLs used to join the network.
+    /// Bootstrap servers: dial info urls, hosts, or `host:port`.
     pub bootstrap: Vec<String>,
-    /// Public keys trusted to sign bootstrap records.
+    /// Protocols a bootstrap request goes out on, in order of preference.
+    pub bootstrap_protocols: Vec<veilid_core::VeilidConfigBootstrapProtocol>,
+    /// Public keys trusted to sign the bootstrap payload.
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
-    /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
+    /// Bootstrap record lines: the signed payload line and any legacy TXT lines, verbatim.
     pub bootstrap_records: Vec<String>,
-    /// Answer direct bootstrap requests (BOOT and B01T).
+    /// Answer bootstrap requests.
     pub serve_direct_bootstrap: bool,
 }
 impl Default for RoutingTable {
@@ -851,6 +851,7 @@ impl Default for RoutingTable {
             public_keys: None,
             secret_keys: None,
             bootstrap: d.bootstrap,
+            bootstrap_protocols: d.bootstrap_protocols,
             bootstrap_keys: d.bootstrap_keys,
             bootstrap_records: d.bootstrap_records,
             // A server is what serves bootstraps; the packaged config file turns this off
@@ -1660,6 +1661,7 @@ impl Settings {
         set_config_value!(inner.core.network.routing_table.bootstrap, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_keys, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_records, value);
+        set_config_value!(inner.core.network.routing_table.bootstrap_protocols, value);
         set_config_value!(
             inner.core.network.routing_table.serve_direct_bootstrap,
             value
@@ -1947,6 +1949,12 @@ impl Settings {
                     bootstrap: inner.core.network.routing_table.bootstrap.clone(),
                     bootstrap_keys: inner.core.network.routing_table.bootstrap_keys.clone(),
                     bootstrap_records: inner.core.network.routing_table.bootstrap_records.clone(),
+                    bootstrap_protocols: inner
+                        .core
+                        .network
+                        .routing_table
+                        .bootstrap_protocols
+                        .clone(),
                     serve_direct_bootstrap: inner.core.network.routing_table.serve_direct_bootstrap,
                 },
                 rpc: VeilidConfigRPC {
@@ -2323,6 +2331,13 @@ mod tests {
             vec!["bootstrap-v1.veilid.net".to_owned()]
         );
         assert!(s.core.network.routing_table.bootstrap_records.is_empty());
+        assert_eq!(
+            s.core.network.routing_table.bootstrap_protocols,
+            vec![
+                veilid_core::VeilidConfigBootstrapProtocol::Wss,
+                veilid_core::VeilidConfigBootstrapProtocol::Wts
+            ]
+        );
         assert!(s.core.network.routing_table.serve_direct_bootstrap);
         assert_eq!(
             s.core.network.routing_table.bootstrap_keys,

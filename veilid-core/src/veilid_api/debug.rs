@@ -84,11 +84,34 @@ enum DebugCommand {
         #[command(subcommand)]
         command: Option<DebugPunishSubcommand>,
     },
-    /// generate bootstrap TXT record data
-    Txtrecord {
-        /// Optional signing keypair group.
+    /// print this node's bootstrap record lines: the legacy TXT forms when built in, and the node line
+    #[command(alias = "txtrecord")]
+    Bootstraprecords {
+        /// Hostname the legacy lines name this host by
+        #[arg(long, value_name = "hostname")]
+        hostname: Option<String>,
+        /// Optional signing keypair group for the legacy signed line.
         #[arg(value_name = "keypairs")]
         keypairs: Option<String>,
+    },
+    /// print this node's public addresses, one per line
+    Bootstrapaddresses,
+    /// print this node's bootstrap node line, for an operator to sign into a payload
+    Bootstrapnode,
+    /// sign bootstrap node lines into a payload line
+    Bootstrappayload {
+        /// Payload lifetime: `<N>y`, `<N>mo`, `<N>d`, combinable, or `none`
+        #[arg(value_name = "lifetime")]
+        lifetime: String,
+        /// Advisory cache ttl in hours; nodes re-check their copy after it (default 24)
+        #[arg(long, value_name = "hours")]
+        ttl: Option<u32>,
+        /// Signing keypair group; none makes an unsigned payload
+        #[arg(long, value_name = "keypairs")]
+        keypairs: Option<String>,
+        /// Node lines to sign
+        #[arg(value_name = "node_line")]
+        nodes: Vec<String>,
     },
     /// change relays in use
     Relay {
@@ -1294,23 +1317,58 @@ impl VeilidAPI {
         Ok(routing_table.debug_info_peerinfo(routing_domain, published))
     }
 
-    async fn debug_txtrecord(&self, keypairs: Option<String>) -> VeilidAPIResult<String> {
-        // Dump routing table txt record
-        let signing_key_pairs = if let Some(keypairs) = keypairs {
-            get_debug_argument(
-                &keypairs,
-                "debug_txtrecord",
-                "signing_key_pairs",
-                get_keypair_group,
-            )?
-        } else {
-            KeyPairGroup::new()
-        };
+    /// An absent, empty or `[]` keypair argument is no keypairs at all
+    fn debug_signing_key_pairs(
+        context: &str,
+        keypairs: Option<String>,
+    ) -> VeilidAPIResult<KeyPairGroup> {
+        match keypairs {
+            Some(keypairs) if !matches!(keypairs.trim(), "" | "[]") => {
+                get_debug_argument(&keypairs, context, "signing_key_pairs", get_keypair_group)
+            }
+            _ => Ok(KeyPairGroup::new()),
+        }
+    }
 
+    fn debug_bootstraprecords(
+        &self,
+        hostname: Option<String>,
+        keypairs: Option<String>,
+    ) -> VeilidAPIResult<String> {
+        let signing_key_pairs = Self::debug_signing_key_pairs("debug_bootstraprecords", keypairs)?;
         let network_manager = self.core_context()?.network_manager();
-        Ok(network_manager
-            .debug_info_txtrecord(signing_key_pairs)
-            .await)
+        Ok(network_manager.debug_info_bootstrap_records(hostname, signing_key_pairs))
+    }
+
+    fn debug_bootstrapaddresses(&self) -> VeilidAPIResult<String> {
+        let network_manager = self.core_context()?.network_manager();
+        Ok(network_manager.debug_info_bootstrap_addresses())
+    }
+
+    fn debug_bootstrapnode(&self) -> VeilidAPIResult<String> {
+        let network_manager = self.core_context()?.network_manager();
+        Ok(network_manager.debug_info_bootstrap_node())
+    }
+
+    fn debug_bootstrappayload(
+        &self,
+        lifetime: String,
+        ttl: Option<u32>,
+        keypairs: Option<String>,
+        nodes: Vec<String>,
+    ) -> VeilidAPIResult<String> {
+        let Some(lifetime) = parse_record_lifetime(&lifetime) else {
+            apibail_invalid_argument!("debug_bootstrappayload", "lifetime", lifetime);
+        };
+        let cache_ttl = ttl.map(|hours| TimestampDuration::new_secs(hours.saturating_mul(3600)));
+        let signing_key_pairs = Self::debug_signing_key_pairs("debug_bootstrappayload", keypairs)?;
+        let network_manager = self.core_context()?.network_manager();
+        Ok(network_manager.debug_info_bootstrap_payload(
+            lifetime,
+            cache_ttl,
+            &nodes,
+            signing_key_pairs,
+        ))
     }
 
     fn debug_keypair(&self, cryptokind: Option<String>) -> VeilidAPIResult<String> {
@@ -3584,7 +3642,17 @@ impl VeilidAPI {
                 DebugCommand::Entries { args } => self.debug_entries(args),
                 DebugCommand::Entry { node } => self.debug_entry(node),
                 DebugCommand::Punish { command } => self.debug_punish(command),
-                DebugCommand::Txtrecord { keypairs } => self.debug_txtrecord(keypairs).await,
+                DebugCommand::Bootstraprecords { hostname, keypairs } => {
+                    self.debug_bootstraprecords(hostname, keypairs)
+                }
+                DebugCommand::Bootstrapaddresses => self.debug_bootstrapaddresses(),
+                DebugCommand::Bootstrapnode => self.debug_bootstrapnode(),
+                DebugCommand::Bootstrappayload {
+                    lifetime,
+                    ttl,
+                    keypairs,
+                    nodes,
+                } => self.debug_bootstrappayload(lifetime, ttl, keypairs, nodes),
                 DebugCommand::Relay { args } => self.debug_relay(args).await,
                 DebugCommand::Transport { args } => self.debug_transport(args),
                 DebugCommand::Chaos { args } => self.debug_chaos(args),

@@ -190,8 +190,13 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
     fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>) {
         self.common.set_bootstrap_cache(bootstrap_cache);
     }
-    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
-        self.common.record_bootstrap_cache(bootstrap_cache);
+    fn record_bootstrap_cache(
+        &self,
+        bootstrap_cache: BootstrapCache,
+        rechecked_at: Option<Timestamp>,
+    ) {
+        self.common
+            .record_bootstrap_cache(bootstrap_cache, rechecked_at);
     }
     fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
         self.common.set_config_bootstrap_cache(bootstrap_cache);

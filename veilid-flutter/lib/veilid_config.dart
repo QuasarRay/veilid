@@ -427,13 +427,68 @@ sealed class VeilidConfigRPC with _$VeilidConfigRPC {
 
 ////////////
 
+//////////////////////////////////////
+/// VeilidConfigBootstrapProtocol
+
+/// A protocol a bootstrap request can go out on.
+enum VeilidConfigBootstrapProtocol {
+  /// Raw UDP, in the clear.
+  udp,
+
+  /// Raw TCP, in the clear.
+  tcp,
+
+  /// WebSocket, in the clear.
+  ws,
+
+  /// WebSocket over TLS.
+  wss,
+
+  /// WebTransport streams, over QUIC's TLS.
+  wts;
+
+  /// Parse from its JSON name (`UDP`/`TCP`/`WS`/`WSS`/`WTS`).
+  factory VeilidConfigBootstrapProtocol.fromJson(dynamic j) =>
+      switch (j as String) {
+        'UDP' => VeilidConfigBootstrapProtocol.udp,
+        'TCP' => VeilidConfigBootstrapProtocol.tcp,
+        'WS' => VeilidConfigBootstrapProtocol.ws,
+        'WSS' => VeilidConfigBootstrapProtocol.wss,
+        'WTS' => VeilidConfigBootstrapProtocol.wts,
+        _ => throw ArgumentError.value(
+          j,
+          'j',
+          'invalid VeilidConfigBootstrapProtocol',
+        ),
+      };
+
+  /// The JSON name (`UDP`/`TCP`/`WS`/`WSS`/`WTS`).
+  String toJson() => switch (this) {
+    VeilidConfigBootstrapProtocol.udp => 'UDP',
+    VeilidConfigBootstrapProtocol.tcp => 'TCP',
+    VeilidConfigBootstrapProtocol.ws => 'WS',
+    VeilidConfigBootstrapProtocol.wss => 'WSS',
+    VeilidConfigBootstrapProtocol.wts => 'WTS',
+  };
+}
+
+////////////
+
 /// Routing table identity and bootstrap configuration.
+///
+/// A [bootstrap] entry is a dial info url, a `host`, or a `host:port` (port
+/// 5150 by default); a bare host resolves to every address it names, each
+/// dialed over [bootstrapProtocols] in order, WSS then WebTransport by
+/// default. [bootstrapRecords] holds the network's signed payload line
+/// (`2|...`) and any legacy TXT lines, verbatim, as `veilid-server` prints
+/// them. [serveDirectBootstrap] makes the node answer bootstrap requests.
 @freezed
 sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
   const factory VeilidConfigRoutingTable({
     required List<PublicKey> publicKeys,
     required List<SecretKey> secretKeys,
     required List<String> bootstrap,
+    required List<VeilidConfigBootstrapProtocol> bootstrapProtocols,
     required List<PublicKey> bootstrapKeys,
     required List<String> bootstrapRecords,
     @Default(false) bool serveDirectBootstrap,

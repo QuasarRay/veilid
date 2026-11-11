@@ -22,6 +22,7 @@ files:
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
   - "veilid-flutter/rust/src/**"
+  - "veilid-server/src/**"
 
 utils:
   safety-comment:

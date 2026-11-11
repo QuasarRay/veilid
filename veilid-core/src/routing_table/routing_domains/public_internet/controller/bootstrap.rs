@@ -2,20 +2,26 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-/// What a round that found this node to be its only bootstrap was judged on. Config records do
-/// not change, so only a new TXT answer or a change in our network can give another verdict.
+/// What a round that found this node to be its only bootstrap was judged on. Config does not
+/// change on its own, so only a change in our network can give another verdict
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BootstrapStandoff {
     /// Our published peer info and online state when the round started
     epoch: LossEpoch,
-    /// When the earliest TXT answer the round used leaves the lookup cache
-    opt_txt_expiration: Option<Timestamp>,
 }
 
 impl BootstrapStandoff {
-    fn holds(&self, epoch: &LossEpoch, now: Timestamp) -> bool {
-        self.epoch.same_network(epoch) && self.opt_txt_expiration.is_none_or(|exp| now < exp)
+    fn holds(&self, epoch: &LossEpoch) -> bool {
+        self.epoch.same_network(epoch)
     }
+}
+
+/// The dial infos one bootstrap entry expands to, grouped by protocol in the order to try them
+struct BootstrapTarget {
+    /// What the config said
+    entry: String,
+    /// One group per protocol, in `bootstrap_protocols` order; a url is one group
+    groups: Vec<Vec<DialInfo>>,
 }
 
 impl PublicInternetRoutingDomainController {
@@ -26,21 +32,21 @@ impl PublicInternetRoutingDomainController {
         _last_ts: Timestamp,
         _cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        // Don't bother if the state changed and we don't need to bootstrap
+        // A round runs to fill the table, or to re-check a served payload past its cache ttl
         let nodes_needed = self.nodes_needed();
-        if nodes_needed.needs_bootstrap.is_empty() {
+        let recheck = self.take_bootstrap_recheck();
+        if nodes_needed.needs_bootstrap.is_empty() && !recheck {
             return Ok(());
         }
+        let refresh_only = nodes_needed.needs_bootstrap.is_empty();
         let crypto_kinds = nodes_needed.needs_bootstrap;
 
         // Don't bother if nothing to bootstrap from is configured
         let routing_table = self.routing_table();
-        let (bootstraps, has_config_records) = {
-            let cfg = self.config();
-            let rt = &cfg.network.routing_table;
-            (rt.bootstrap.clone(), !rt.bootstrap_records.is_empty())
-        };
-        if bootstraps.is_empty() && !has_config_records {
+        let network_manager = self.network_manager();
+        let bootstraps = self.config().network.routing_table.bootstrap.clone();
+        let config_peers = network_manager.config_bootstrap();
+        if bootstraps.is_empty() && config_peers.unanswered.is_empty() {
             return Ok(());
         }
 
@@ -49,178 +55,155 @@ impl PublicInternetRoutingDomainController {
         if self
             .bootstrap_standoff
             .lock()
-            .is_some_and(|standoff| standoff.holds(&epoch, Timestamp::now()))
+            .is_some_and(|standoff| standoff.holds(&epoch))
         {
             return Ok(());
         }
 
-        // Reset the low water mark for this routing domain
-        routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
+        if !refresh_only {
+            // Reset the low water mark for this routing domain
+            routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
+        }
 
-        // See if we are specifying a direct dialinfo for bootstrap, if so use the direct mechanism
-        // Otherwise treat them as txt names for the normal dns-based bootstrap mechanism
-        let dial_info_converter = BootstrapDialInfoConverter::default();
-
-        let mut bootstrap_dialinfos = Vec::<DialInfo>::new();
-        let mut bootstrap_txt_names = Vec::<String>::new();
-        for bootstrap in bootstraps {
-            // A url's hostname resolves on the blocking pool, which a stop cannot interrupt
-            let Ok(converted) = dial_info_converter
-                .try_vec_from_url(&bootstrap)
+        // Expand every entry: a url is dialed as given, a bare name on every address it
+        // resolves to over the configured protocols, in order
+        let mut targets = Vec::<BootstrapTarget>::new();
+        for entry in bootstraps {
+            // A hostname resolves on the blocking pool, which a stop cannot interrupt
+            let Ok(target) = self
+                .bootstrap_target(entry)
                 .timeout_at(stop_token.clone())
                 .await
             else {
                 return Ok(());
             };
-            if let Ok(bootstrap_di_vec) = converted {
-                for bootstrap_di in bootstrap_di_vec {
-                    bootstrap_dialinfos.push(bootstrap_di);
-                }
-            } else if Resolver::supports_txt() {
-                bootstrap_txt_names.push(bootstrap);
-            } else {
-                // No TXT resolver here, so the bootstrap host is asked directly instead
-                for url in self.direct_bootstrap_urls(&bootstrap) {
-                    let Ok(converted) = dial_info_converter
-                        .try_vec_from_url(&url)
-                        .timeout_at(stop_token.clone())
-                        .await
-                    else {
-                        return Ok(());
-                    };
-                    match converted {
-                        Ok(bootstrap_di_vec) => bootstrap_dialinfos.extend(bootstrap_di_vec),
-                        Err(e) => {
-                            veilid_log!(self debug "Could not resolve direct bootstrap {}: {}", url, e);
-                        }
-                    }
-                }
+            if let Some(target) = target {
+                targets.push(target);
             }
         }
+        // The configured payload's nodes are asked directly, on their own dial infos
+        for bsn in &config_peers.unanswered {
+            targets.push(BootstrapTarget {
+                entry: format!("payload node {}", bsn.node_ids()),
+                groups: self.protocol_groups(bsn.dial_infos()),
+            });
+        }
 
-        // Process bootstraps into peers lists
-        let network_manager = self.network_manager();
-        let txt_names = bootstrap_txt_names.clone();
         let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<BootstrapPeers>>>::new();
-
-        // Records supplied by config need no lookup of any kind
-        if has_config_records {
+        for target in targets {
             unord.push(pin_dyn_future!(async {
-                veilid_log!(self debug "Bootstrap with configured records");
-                pin_future!(network_manager.config_bootstrap()).await
+                let target = target;
+                veilid_log!(self debug "Bootstrap with: {}", target.entry);
+                self.direct_bootstrap_ordered(target.groups).await
             }));
         }
 
-        // Get a peer list from bootstraps to process
-        for bsdi in bootstrap_dialinfos {
-            // Direct bootstrap
-            unord.push(pin_dyn_future!(async {
-                let bsdi = bsdi;
-                veilid_log!(self debug "Direct bootstrap with: {}", bsdi);
-                pin_future!(network_manager.direct_bootstrap(bsdi)).await
-            }));
-        }
-        for bstn in bootstrap_txt_names {
-            // TXT bootstrap, then the host directly if the resolver gave no records in
-            // time: a tethered phone's DNS relay answers A/AAAA but not TXT
-            unord.push(pin_dyn_future!(async {
-                let bstn = bstn;
-                veilid_log!(self debug "TXT bootstrap with: {}", bstn);
-                let txt_timeout = self.routing_table().timings().bootstrap_txt_timeout;
-                match pin_future!(network_manager.txt_bootstrap(bstn.clone()))
-                    .timeout_duration(txt_timeout)
-                    .await
-                {
-                    Ok(Ok(peers)) if !peers.records.is_empty() => Ok(peers),
-                    _ => {
-                        veilid_log!(self debug "TXT bootstrap gave nothing, trying direct bootstrap on: {}", bstn);
-                        self.direct_bootstrap_by_name(&bstn).await
-                    }
-                }
-            }));
-        }
-
-        let mut bootstrapped_peer_id_set = HashSet::<NodeId>::new();
-        let mut bootstrapped_peers = vec![];
-        let mut bootstrapped_records = vec![];
-        let mut bootstrapped_record_strings = vec![];
-        let mut own_node_seen = false;
+        let mut found = BootstrapPeers::default();
         loop {
             match unord.next().timeout_at(stop_token.clone()).await {
                 Ok(Some(res)) => match res {
-                    Ok(BootstrapPeers {
-                        peers,
-                        records,
-                        record_strings,
-                    }) => {
-                        bootstrapped_records.extend(records);
-                        bootstrapped_record_strings.extend(record_strings);
-                        for peer in peers {
-                            let peer_node_ids = peer.node_ids();
-                            let routing_domain = peer.routing_domain();
-                            if routing_domain != RoutingDomain::PublicInternet {
-                                continue;
-                            }
-                            if !peer_node_ids
-                                .iter()
-                                .any(|x| bootstrapped_peer_id_set.contains(x))
-                            {
-                                if routing_table.matches_own_node_id(peer_node_ids) {
-                                    veilid_log!(self debug "Ignoring own node in bootstrap list");
-                                    own_node_seen = true;
-                                } else {
-                                    for nid in peer.node_ids().iter().cloned() {
-                                        bootstrapped_peer_id_set.insert(nid);
-                                    }
-                                    bootstrapped_peers.push(peer);
-                                }
-                            }
-                        }
+                    Ok(peers) => found.extend(peers),
+                    Err(e) => {
+                        veilid_log!(self debug "Bootstrap error: {}", e);
+                    }
+                },
+                Ok(None) => break,
+                Err(_) => return Ok(()),
+            }
+        }
+
+        // Nodes a payload named but no reply carried are asked directly, once
+        let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<BootstrapPeers>>>::new();
+        for bsn in core::mem::take(&mut found.unanswered) {
+            if found
+                .peers
+                .iter()
+                .any(|pi| bsn.node_ids().contains_any_from_iter(pi.node_ids().iter()))
+            {
+                continue;
+            }
+            let groups = self.protocol_groups(bsn.dial_infos());
+            let node_ids = bsn.node_ids().clone();
+            unord.push(pin_dyn_future!(async {
+                let (groups, node_ids) = (groups, node_ids);
+                veilid_log!(self debug "Bootstrap with payload node: {}", node_ids);
+                self.direct_bootstrap_ordered(groups).await
+            }));
+        }
+        loop {
+            match unord.next().timeout_at(stop_token.clone()).await {
+                Ok(Some(res)) => match res {
+                    Ok(mut peers) => {
+                        peers.unanswered.clear();
+                        found.extend(peers);
                     }
                     Err(e) => {
                         veilid_log!(self debug "Bootstrap error: {}", e);
                     }
                 },
-                Ok(None) => {
-                    // Done
-                    break;
-                }
-                Err(_) => {
-                    // Cancelled
-                    return Ok(());
-                }
+                Ok(None) => break,
+                Err(_) => return Ok(()),
             }
+        }
+
+        // Dedup the peers and notice our own node among them
+        let mut bootstrapped_peer_id_set = HashSet::<NodeId>::new();
+        let mut bootstrapped_peers = vec![];
+        let mut own_node_seen = false;
+        for peer in found.peers {
+            if peer.routing_domain() != RoutingDomain::PublicInternet {
+                continue;
+            }
+            let peer_node_ids = peer.node_ids();
+            if peer_node_ids
+                .iter()
+                .any(|x| bootstrapped_peer_id_set.contains(x))
+            {
+                continue;
+            }
+            if routing_table.matches_own_node_id(peer_node_ids) {
+                veilid_log!(self debug "Ignoring own node in bootstrap list");
+                own_node_seen = true;
+            } else {
+                bootstrapped_peer_id_set.extend(peer_node_ids.iter().cloned());
+                bootstrapped_peers.push(peer);
+            }
+        }
+
+        // A payload learned over the network is what this node serves from now on; a round
+        // that learned none still marks that a bootstrap ran, and starts a new cache period
+        let now = Timestamp::now();
+        let bootstrap_cache = found
+            .payload
+            .as_ref()
+            .map(|payload| BootstrapCache::from_payload(payload, Some(now)))
+            .unwrap_or_default();
+        let resolved_anything = found.payload.is_some() || own_node_seen;
+
+        // A round that resolved anything decides whether this node is one of its own bootstraps
+        if resolved_anything || !bootstrapped_peers.is_empty() {
+            let was_own_bootstrap = self.own_bootstrap.swap(own_node_seen, Ordering::AcqRel);
+            if own_node_seen != was_own_bootstrap {
+                if own_node_seen {
+                    veilid_log!(self info "This node is one of its own bootstraps and answers direct bootstrap requests");
+                }
+                // The verdict is part of the advertised capabilities
+                self.read().set_own_bootstrap(own_node_seen);
+                self.publish_peer_info();
+            }
+        }
+
+        if refresh_only {
+            self.record_bootstrap_cache(bootstrap_cache, recheck);
+            return Ok(());
         }
 
         self.read_dyn().clear_bootstrap_peers();
 
-        // Every string received is cached, including versions this build cannot parse, so a node
-        // can pass on what it was told. A receiving client re-verifies signatures against its own
-        // keys, so relaying a string it does not trust costs response size and nothing else.
-        let bootstrap_cache =
-            BootstrapCache::new(bootstrapped_record_strings, bootstrapped_records);
-
-        // A round that resolved anything decides whether this node is one of its own bootstraps
-        if own_node_seen || !bootstrap_cache.records().is_empty() {
-            let was_own_bootstrap = self.own_bootstrap.swap(own_node_seen, Ordering::AcqRel);
-            if own_node_seen && !was_own_bootstrap {
-                veilid_log!(self info "This node is one of its own bootstraps and answers direct bootstrap requests");
-            }
-        }
-
         // Only this node among the bootstraps: nothing to bootstrap from until other nodes connect
         if own_node_seen && bootstrapped_peers.is_empty() {
-            self.record_bootstrap_cache(bootstrap_cache);
-            // An unanswered TXT name leaves the verdict open, so the next round asks again
-            let opt_txt_expiration = (!txt_names.is_empty()).then(|| {
-                network_manager
-                    .txt_answers_expiration(&txt_names)
-                    .unwrap_or_else(Timestamp::now)
-            });
-            let standoff = BootstrapStandoff {
-                epoch,
-                opt_txt_expiration,
-            };
+            self.record_bootstrap_cache(bootstrap_cache, recheck);
+            let standoff = BootstrapStandoff { epoch };
             if self.bootstrap_standoff.lock().replace(standoff).is_none() {
                 veilid_log!(self info "This node is its only bootstrap, waiting for other nodes to connect");
             }
@@ -246,7 +229,7 @@ impl PublicInternetRoutingDomainController {
             .bootstrap_with_peer_list(bootstrapped_peers.clone(), crypto_kinds.clone(), stop_token)
             .await?;
 
-        self.record_bootstrap_cache(bootstrap_cache);
+        self.record_bootstrap_cache(bootstrap_cache, recheck);
 
         if valid_bootstraps.is_empty() {
             veilid_log!(self debug "No external bootstrap peers");
@@ -290,69 +273,195 @@ impl PublicInternetRoutingDomainController {
         if let Some(old_ts) = self.unlocked_inner.bootstrap_wait_detector.swap(None) {
             let end_ts = Timestamp::now();
             let duration = end_ts.duration_since(old_ts);
-            veilid_log!(self info "Bootstrap finished in {:#} via {}", duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
+            let signed = if self
+                .config()
+                .network
+                .routing_table
+                .bootstrap_keys
+                .is_empty()
+            {
+                "unsigned"
+            } else {
+                "signed"
+            };
+            veilid_log!(self info "Bootstrap finished ({}) in {:#} via {}", signed, duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
         }
 
         Ok(())
     }
 
-    /// Direct bootstrap from every address a bootstrap name resolves to, every
-    /// protocol at once, results merged
-    async fn direct_bootstrap_by_name(&self, hostname: &str) -> EyreResult<BootstrapPeers> {
-        let dial_info_converter = BootstrapDialInfoConverter::default();
-        let mut unord = FuturesUnordered::new();
-        for url in self.direct_bootstrap_urls(hostname) {
-            match dial_info_converter.try_vec_from_url(&url).await {
-                Ok(dial_infos) => {
-                    for dial_info in dial_infos {
-                        let registry = self.registry();
-                        unord.push(async move {
-                            let network_manager = registry.network_manager();
-                            let res =
-                                pin_future!(network_manager.direct_bootstrap(dial_info.clone()))
-                                    .await;
-                            (dial_info, res)
-                        });
+    /// Ask one bootstrap over its dial infos, a protocol group at a time: every address of a
+    /// group at once, the next group only when none of them answered the way this node speaks
+    async fn direct_bootstrap_ordered(
+        &self,
+        groups: Vec<Vec<DialInfo>>,
+    ) -> EyreResult<BootstrapPeers> {
+        for group in groups {
+            let mut unord = FuturesUnordered::new();
+            for dial_info in group {
+                let registry = self.registry();
+                unord.push(async move {
+                    let network_manager = registry.network_manager();
+                    let res =
+                        pin_future!(network_manager.direct_bootstrap(dial_info.clone())).await;
+                    (dial_info, res)
+                });
+            }
+            let mut out = BootstrapPeers::default();
+            let mut answered = false;
+            while let Some((dial_info, res)) = unord.next().await {
+                match res {
+                    Ok(peers) => {
+                        if peers.payload.is_some() || !peers.peers.is_empty() {
+                            answered = true;
+                        }
+                        out.extend(peers);
+                    }
+                    Err(e) => {
+                        veilid_log!(self debug "Direct bootstrap {} failed: {}", dial_info, e);
                     }
                 }
+            }
+            if answered {
+                return Ok(out);
+            }
+        }
+        Ok(BootstrapPeers::default())
+    }
+
+    /// What a config entry expands to: a url as itself, a bare `host` or `host:port` as one dial
+    /// info per configured protocol on every address it resolves to
+    async fn bootstrap_target(&self, entry: String) -> Option<BootstrapTarget> {
+        let dial_info_converter = BootstrapDialInfoConverter::default();
+        if let Ok(dial_infos) = dial_info_converter.try_vec_from_url(&entry).await {
+            return Some(BootstrapTarget {
+                groups: vec![dial_infos],
+                entry,
+            });
+        }
+        let Some((host, port)) = split_bootstrap_entry(&entry) else {
+            veilid_log!(self warn "Invalid bootstrap entry: {}", entry);
+            return None;
+        };
+        let mut groups = Vec::new();
+        for url in self.bootstrap_urls(&host, port) {
+            match dial_info_converter.try_vec_from_url(&url).await {
+                Ok(dial_infos) if !dial_infos.is_empty() => groups.push(dial_infos),
+                Ok(_) => {}
                 Err(e) => {
-                    veilid_log!(self debug "Could not resolve direct bootstrap {}: {}", url, e);
+                    veilid_log!(self debug "Could not resolve bootstrap {}: {}", url, e);
                 }
             }
         }
-        let mut out = BootstrapPeers::default();
-        while let Some((dial_info, res)) = unord.next().await {
-            match res {
-                Ok(peers) => {
-                    out.peers.extend(peers.peers);
-                    out.records.extend(peers.records);
-                    out.record_strings.extend(peers.record_strings);
+        if groups.is_empty() {
+            veilid_log!(self debug "Bootstrap entry resolved to nothing: {}", entry);
+            return None;
+        }
+        Some(BootstrapTarget { entry, groups })
+    }
+
+    /// The protocols this node bootstraps over, in order, dropping the ones it cannot dial here
+    fn bootstrap_protocols(&self) -> Vec<ProtocolType> {
+        let config = self.config();
+        let protocol = &config.network.protocol;
+        let mut out = Vec::new();
+        for bp in &config.network.routing_table.bootstrap_protocols {
+            let pt = match bp {
+                VeilidConfigBootstrapProtocol::Udp if protocol.udp.enabled => ProtocolType::UDP,
+                VeilidConfigBootstrapProtocol::Tcp if protocol.tcp.connect => ProtocolType::TCP,
+                VeilidConfigBootstrapProtocol::Ws if protocol.ws.connect && !ws_blocked_here() => {
+                    ProtocolType::WS
                 }
-                Err(e) => {
-                    veilid_log!(self debug "Direct bootstrap {} failed: {}", dial_info, e);
+                #[cfg(feature = "enable-protocol-wss")]
+                VeilidConfigBootstrapProtocol::Wss if protocol.wss.connect => ProtocolType::WSS,
+                #[cfg(feature = "enable-protocol-webtransport")]
+                VeilidConfigBootstrapProtocol::Wts
+                    if protocol.webtransport.connect && !webtransport_blocked_here() =>
+                {
+                    ProtocolType::WTS
                 }
+                _ => continue,
+            };
+            if !out.contains(&pt) {
+                out.push(pt);
             }
         }
-        Ok(out)
+        out
     }
 
-    /// Direct bootstrap urls for a TXT bootstrap name, one per enabled outbound protocol
-    fn direct_bootstrap_urls(&self, hostname: &str) -> Vec<String> {
-        let protocol = &self.config().network.protocol;
-        let mut urls = Vec::new();
-        if protocol.udp.enabled {
-            urls.push(format!("udp://{}:{}", hostname, BOOTSTRAP_DIRECT_PORT));
-        }
-        if protocol.tcp.connect {
-            urls.push(format!("tcp://{}:{}", hostname, BOOTSTRAP_DIRECT_PORT));
-        }
-        urls
+    /// One url per bootstrap protocol for a bare name, with this node's own paths as the
+    /// network's convention
+    fn bootstrap_urls(&self, host: &str, port: u16) -> Vec<String> {
+        let config = self.config();
+        let protocol = &config.network.protocol;
+        self.bootstrap_protocols()
+            .into_iter()
+            .map(|pt| match pt {
+                ProtocolType::UDP => format!("udp://{}:{}", host, port),
+                ProtocolType::TCP => format!("tcp://{}:{}", host, port),
+                ProtocolType::WS => format!(
+                    "ws://{}:{}/{}",
+                    host,
+                    port,
+                    protocol.ws.path.trim_matches('/')
+                ),
+                #[cfg(feature = "enable-protocol-wss")]
+                ProtocolType::WSS => format!(
+                    "wss://{}:{}/{}",
+                    host,
+                    port,
+                    protocol.wss.path.trim_matches('/')
+                ),
+                #[cfg(feature = "enable-protocol-webtransport")]
+                ProtocolType::WTS | ProtocolType::WTD => format!(
+                    "wts://{}:{}/{}",
+                    host,
+                    port,
+                    protocol.webtransport.path.trim_matches('/')
+                ),
+            })
+            .collect()
     }
 
-    /// Record what this bootstrap produced, so a restart can serve it without a lookup
-    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
-        veilid_log!(self debug "Bootstrap records: {:?}", bootstrap_cache.record_strings());
-        self.read_dyn().record_bootstrap_cache(bootstrap_cache);
+    /// A payload node's dial infos grouped by the configured protocol order
+    fn protocol_groups(&self, dial_infos: &[DialInfo]) -> Vec<Vec<DialInfo>> {
+        self.bootstrap_protocols()
+            .into_iter()
+            .map(|pt| {
+                dial_infos
+                    .iter()
+                    .filter(|di| di.protocol_type() == pt)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .filter(|group| !group.is_empty())
+            .collect()
+    }
+
+    /// Whether a served payload's re-check has come due
+    pub(super) fn bootstrap_recheck_pending(&self) -> bool {
+        self.bootstrap_recheck_at
+            .lock()
+            .is_some_and(|at| Timestamp::now() >= at)
+    }
+
+    /// Take a due re-check, so the round that runs it is the only one
+    fn take_bootstrap_recheck(&self) -> bool {
+        let mut recheck_at = self.bootstrap_recheck_at.lock();
+        if recheck_at.is_some_and(|at| Timestamp::now() >= at) {
+            *recheck_at = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Record what this bootstrap produced, so a restart can serve it without a lookup. A
+    /// re-check round starts a new cache period whether or not it learned anything newer
+    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache, rechecked: bool) {
+        veilid_log!(self debug "Bootstrap payload: {:?}", bootstrap_cache.payload_timestamp());
+        self.read_dyn()
+            .record_bootstrap_cache(bootstrap_cache, rechecked.then(Timestamp::now));
     }
 
     pub fn bootstrap_with_peer(
@@ -520,5 +629,28 @@ impl PublicInternetRoutingDomainController {
             }
         }
         Ok(valid_bootstraps)
+    }
+}
+
+/// Browsers refuse a clear websocket from a secure page
+fn ws_blocked_here() -> bool {
+    cfg_if::cfg_if! {
+        if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+            is_browser_https()
+        } else {
+            false
+        }
+    }
+}
+
+/// Browsers offer WebTransport only to a secure context
+#[cfg(feature = "enable-protocol-webtransport")]
+fn webtransport_blocked_here() -> bool {
+    cfg_if::cfg_if! {
+        if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+            !is_secure_context()
+        } else {
+            false
+        }
     }
 }

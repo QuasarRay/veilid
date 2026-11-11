@@ -23,6 +23,7 @@
 1 unsafe-safety-sites veilid-core/src/veilid_api/debug.rs
 1 unsafe-safety-sites veilid-flutter/rust/src/dart_ffi.rs
 8 unsafe-safety-sites veilid-flutter/rust/src/duplicate_image_guard.rs
+4 unsafe-safety-sites veilid-server/src/ptr_lookup.rs
 2 unsafe-safety-sites veilid-tools/src/app_lifecycle/ios.rs
 2 unsafe-safety-sites veilid-tools/src/app_lifecycle/macos.rs
 1 unsafe-safety-sites veilid-tools/src/app_lifecycle/windows.rs
@@ -32,12 +33,6 @@
 14 unsafe-safety-sites veilid-tools/src/network_interfaces/openbsd.rs
 5 unsafe-safety-sites veilid-tools/src/network_interfaces/sockaddr_tools.rs
 10 unsafe-safety-sites veilid-tools/src/network_interfaces/windows.rs
-8 unsafe-safety-sites veilid-tools/src/resolver/native/android.rs
-9 unsafe-safety-sites veilid-tools/src/resolver/native/apple.rs
-2 unsafe-safety-sites veilid-tools/src/resolver/native/fd_ready.rs
-2 unsafe-safety-sites veilid-tools/src/resolver/native/ptr_unix.rs
-6 unsafe-safety-sites veilid-tools/src/resolver/native/resolv.rs
-2 unsafe-safety-sites veilid-tools/src/resolver/native/windows.rs
 10 unsafe-safety-sites veilid-tools/src/socket_tools.rs
 5 unsafe-safety-sites veilid-tools/src/system_info.rs
 3 unsafe-safety-sites veilid-tools/src/tests/native/test_socket_tools.rs

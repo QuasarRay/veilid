@@ -7,7 +7,7 @@ pub const MAX_RELAY_INFOS: usize = veilid_capnp::MAX_RELAY_INFOS as usize;
 /// Most transport mtus a node info or relay info carries
 pub const MAX_TRANSPORT_MTUS: usize = veilid_capnp::MAX_TRANSPORT_MTUS as usize;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeInfo {
     timestamp: Timestamp,
     envelope_support: Vec<EnvelopeVersion>,
@@ -17,9 +17,7 @@ pub struct NodeInfo {
     address_types: AddressTypeSet,
     dial_info_detail_list: Vec<DialInfoDetail>,
     relay_info_list: Vec<RelayInfo>,
-    #[serde(default)]
     receive_mtus: TransportMtus,
-    #[serde(default, rename = "expiration")]
     opt_expiration: Option<Timestamp>,
 }
 

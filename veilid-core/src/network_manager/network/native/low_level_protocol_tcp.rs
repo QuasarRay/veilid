@@ -27,19 +27,6 @@ impl ListenerState {
 /////////////////////////////////////////////////////////////////
 
 impl NativeNetwork {
-    fn get_or_create_tls_acceptor(&self) -> EyreResult<TlsAcceptor> {
-        if let Some(ts) = self.inner.lock().tls_acceptor.as_ref() {
-            return Ok(ts.clone());
-        }
-
-        let server_config = self
-            .load_server_config()
-            .wrap_err("Couldn't create TLS configuration")?;
-        let acceptor = TlsAcceptor::from(Arc::new(server_config));
-        self.inner.lock().tls_acceptor = Some(acceptor.clone());
-        Ok(acceptor)
-    }
-
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     async fn try_tls_handlers(
         &self,
@@ -373,7 +360,7 @@ impl NativeNetwork {
 
             if is_tls {
                 if ls.read().tls_acceptor.is_none() {
-                    ls.write().tls_acceptor = Some(self.clone().get_or_create_tls_acceptor()?);
+                    ls.write().tls_acceptor = Some(self.get_or_create_tls_acceptor(&addr)?);
                 }
                 ls.write()
                     .tls_protocol_handlers

@@ -1,13 +1,23 @@
+const BOOTSTRAP_PROTOCOLS = ['UDP', 'TCP', 'WS', 'WSS', 'WTS'] as const;
+export type BootstrapProtocol = (typeof BOOTSTRAP_PROTOCOLS)[number];
+
 export interface TestEnvironment {
   description?: string;
   networkKey?: string;
   bootstrap?: string[];
+  bootstrapProtocols?: BootstrapProtocol[];
   bootstrapKeys?: string[];
 }
 
 export const TEST_ENVIRONMENT_VAR = 'VEILID_TEST_ENVIRONMENT';
 
-const KNOWN_FIELDS = ['description', 'networkKey', 'bootstrap', 'bootstrapKeys'];
+const KNOWN_FIELDS = [
+  'description',
+  'networkKey',
+  'bootstrap',
+  'bootstrapProtocols',
+  'bootstrapKeys',
+];
 
 // `process` is undefined in worker/service-worker bundles; fall back to an empty env there.
 const env: Record<string, string | undefined> =
@@ -55,6 +65,18 @@ export function parseTestEnvironment(text: string, source: string): TestEnvironm
   }
   if (fields.bootstrap !== undefined) {
     environment.bootstrap = asStringArray(fields.bootstrap, 'bootstrap', source);
+  }
+  if (fields.bootstrapProtocols !== undefined) {
+    const protocols = asStringArray(fields.bootstrapProtocols, 'bootstrapProtocols', source);
+    const unknownProtocols = protocols.filter(
+      (protocol) => !(BOOTSTRAP_PROTOCOLS as readonly string[]).includes(protocol),
+    );
+    if (unknownProtocols.length > 0) {
+      throw new Error(
+        `${source}: "bootstrapProtocols" holds ${unknownProtocols.join(', ')}. The protocols are ${BOOTSTRAP_PROTOCOLS.join(', ')}`,
+      );
+    }
+    environment.bootstrapProtocols = protocols as BootstrapProtocol[];
   }
   if (fields.bootstrapKeys !== undefined) {
     environment.bootstrapKeys = asStringArray(fields.bootstrapKeys, 'bootstrapKeys', source);

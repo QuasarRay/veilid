@@ -3,6 +3,9 @@
 - veilid-core:
   - WebTransport (HTTP/3 over QUIC) is a transport, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching.
   - **Breaking** The `default`, `default-async-std` and `default-wasm` feature sets include `enable-protocol-wss` and `enable-protocol-webtransport`, so a node connects out over WSS and listens and connects over WebTransport. A `wasm32` build needs `--cfg=web_sys_unstable_apis` in its rustflags, which the veilid workspace's `.cargo/config.toml` sets.
+  - **Breaking** TXT-record bootstrap is removed; a bare bootstrap name resolves by A/AAAA and expands over `network.routing_table.bootstrap_protocols`, which defaults to WSS and WebTransport.
+  - **Breaking** Nodes bootstrap only over B02T; bootstrap servers must run 0.6.0 before their clients.
+  - **Breaking** A node with bootstraps configured but no dialable protocol in `bootstrap_protocols` fails to start.
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
   - WebTransport packets start at the RawUDP size proven for the address family, and discovery stops at the UDP interface limit; a WebTransport-only node discovers on its own from 1200.
@@ -14,31 +17,45 @@
   - `TimestampDuration::new_hours()` and `new_days()`.
   - TLS dependency updates: rustls 0.23.46 (RUSTSEC-2026-0346 through 0349), rustls-webpki 0.103.16 (RUSTSEC-2026-0382) and webpki-roots 1.0.11 (RUSTSEC-2026-0381).
   - `network.privacy.country_code_denylist` and `network.virtual_network` take their defaults when a config leaves them out, like every other section a cargo feature adds.
+  - Bootstrap v2 (`B02T`): one operator-signed payload per network with an expiration and an advisory cache ttl, served as received by nodes that advertise the `BOOT` capability, working with and without bootstrap keys.
+  - Answering `BOOT` and `B01T` requests is behind `enable-bootstrap-v0` and `enable-bootstrap-v1`, default on.
+  - Legacy JSON bootstrap replies carry only UDP, TCP and WS dial infos, the kinds every 0.5.x build parses.
+  - `bootstrap_records` accepts the `2|` payload line.
+  - A packet with an unknown four-byte tag is dropped instead of punishing its sender.
+  - `PeerInfo` and `NodeInfo` no longer implement serde.
+  - WSS serves the `ipv4` and `ipv6` certificates beside the `network.tls` certificate to clients that dial by IP literal, as WebTransport does, so a bootstrap listed by address needs no DNS.
+  - WSS re-reads its TLS certificates when the files change, so a renewal needs no restart.
+  - A bootstrap entry can be an IP literal of either family (`2001:db8::1`, `[2001:db8::1]:5150`), and WSS connects to a url whose host is an IPv6 literal.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
 - veilid-flutter:
   - `VeilidConfigWebTransport` under the protocol config.
   - `VeilidConfigAppLifecycle.autoDetectState`, so a Dart app can turn off the platform's own lifecycle reports and drive the node with `reportAppLifecycleState`.
+  - `VeilidConfigRoutingTable.bootstrapProtocols`, the protocols a bootstrap request goes out on, in order.
 - veilid-python:
   - **Breaking** A config's `to_json()` leaves out `None` fields, so `change_config` lets veilid-core apply its own defaults.
   - **Breaking** `VeilidAPI.generate_key_pair(kind)` returns one `KeyPair`, not a list holding the key pair's string one character at a time.
   - `VeilidConfigWSS`, `VeilidConfigWebTransport`, `VeilidConfigVirtualNetwork`, `VeilidConfigAppLifecycle` and `VeilidConfigPrivacy.country_code_denylist` model the sections a cargo feature adds to the config, each `None` when veilid-core is built without that feature, so a `change_config` round trip keeps them.
   - An optional config section loads as its config class rather than a dict.
+  - `VeilidConfigRoutingTable.bootstrap_protocols`, the protocols a bootstrap request goes out on, in order.
 - veilid-server:
   - WebTransport settings under `core.network.protocol.webtransport`.
   - Built with WSS and WebTransport, so a node listens for WebTransport on its UDP port and advertises WTS and WTD dial info.
   - `--port` moves the WebTransport listen address along with the others, and the packaged `veilid-server.conf` names it.
+  - `--dump-bootstrap-records` (with `--bootstrap-hostname`) and `--sign-bootstrap-payload` generate bootstrap records and the signed payload; `--dump-txt-record` is a deprecated alias.
 - veilid-tools:
   - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
   - `UdpDfSender`: a don't-fragment sending socket beside a shared UDP socket, the way `UdpTtlSender` sends hole punches; on Linux and Android it is connected to a documentation address so it never receives.
   - **Breaking** `VeilidRng` implements the `rand` 0.10 traits `TryRng` and `TryCryptoRng`; the `rand` 0.8 `RngCore` and `CryptoRng` impls are gone.
+  - **Breaking** The `Resolver` (`txt_lookup`, `ptr_lookup`, `supports_txt`) is removed.
   - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
 - veilid-wasm:
   - Browser WebTransport client, outbound only.
   - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
   - In a minified app bundle, a thrown error's `name` and `constructor.name` are its class name, such as `VeilidAPIErrorTryAgain`, instead of the short name the minifier gave the class.
+  - Bootstraps over B02T, WSS first and WebTransport second by default.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 

@@ -3052,6 +3052,36 @@
         "delete"
       ]
     },
+    "VeilidConfigBootstrapProtocol": {
+      "description": "A protocol a bootstrap request can go out on.",
+      "oneOf": [
+        {
+          "description": "Raw UDP, in the clear.",
+          "type": "string",
+          "const": "UDP"
+        },
+        {
+          "description": "Raw TCP, in the clear.",
+          "type": "string",
+          "const": "TCP"
+        },
+        {
+          "description": "WebSocket, in the clear.",
+          "type": "string",
+          "const": "WS"
+        },
+        {
+          "description": "WebSocket over TLS.",
+          "type": "string",
+          "const": "WSS"
+        },
+        {
+          "description": "WebTransport streams, over QUIC's TLS.",
+          "type": "string",
+          "const": "WTS"
+        }
+      ]
+    },
     "VeilidConfigCapabilities": {
       "description": "Capabilities advertised by this node.",
       "type": "object",
@@ -3765,7 +3795,7 @@
       "type": "object",
       "properties": {
         "bootstrap": {
-          "description": "Bootstrap server hostnames/URLs used to join the network.",
+          "description": "Bootstrap servers to join the network from: a dial info url, a `host`, or a `host:port`.\nA bare host resolves to every address it names, each dialed on port 5150 or the one\ngiven, over `bootstrap_protocols` in order.",
           "type": "array",
           "items": {
             "type": "string"
@@ -3778,8 +3808,19 @@
             "type": "string"
           }
         },
+        "bootstrap_protocols": {
+          "description": "Protocols a bootstrap request goes out on, in order of preference, for a bare host in\n`bootstrap` and for a payload's nodes. Defaults to the encrypted ones, WSS first: an\ninsecure browser page can open WSS but not WebTransport. A node whose list has no\nprotocol it can dial fails to start.",
+          "type": "array",
+          "default": [
+            "WSS",
+            "WTS"
+          ],
+          "items": {
+            "$ref": "#/$defs/VeilidConfigBootstrapProtocol"
+          }
+        },
         "bootstrap_records": {
-          "description": "Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.\nServed to direct bootstrap requests without any lookup, and usable to bootstrap this\nnode itself. Both record versions are served; bootstrapping from them follows the same\nrule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.\nEmpty by default, in which case records come from the bootstrap servers.",
+          "description": "Bootstrap record lines, verbatim: the network's signed payload line (`2|...`) as\n`veilid-server --sign-bootstrap-payload` prints it, and the legacy TXT lines as\n`--dump-bootstrap-records` prints them. The payload is served to bootstrap requests and\nnames the nodes this node joins from; the legacy lines are served to nodes of the\nprevious version. Empty by default, in which case the payload comes from the bootstraps.",
           "type": "array",
           "items": {
             "type": "string"
@@ -3800,7 +3841,7 @@
           }
         },
         "serve_direct_bootstrap": {
-          "description": "Answer direct bootstrap requests (BOOT and B01T) from the last successful bootstrap set.\nOff by default: a bootstrap server turns it on, and an app has no reason to serve. A node\nthat finds itself among its own bootstraps answers regardless.",
+          "description": "Answer bootstrap requests with the payload this node holds and its peers. Off by\ndefault: a bootstrap server turns it on, and an app has no reason to serve. A node that\nfinds itself among its own bootstraps answers regardless. Either way the node answers\nonly while it is directly reachable on every protocol it listens on, which it advertises\nas the `BOOT` capability.",
           "type": "boolean",
           "default": false
         }

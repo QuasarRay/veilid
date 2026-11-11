@@ -17,36 +17,6 @@ use web_transport_quinn::{quinn, Server};
 /// it into an immediate implicit close that can abandon the still-buffered 404.
 const WT_REJECT_FLUSH_GRACE_MS: u32 = 1000;
 
-fn read_webtransport_tls_mtimes(
-    files: &[(String, bool)],
-) -> Option<Vec<Option<std::time::SystemTime>>> {
-    let mut out = Vec::with_capacity(files.len());
-    for (path, required) in files {
-        let mtime = std::fs::metadata(path)
-            .ok()
-            .and_then(|md| md.modified().ok());
-        if *required && mtime.is_none() {
-            return None;
-        }
-        out.push(mtime);
-    }
-    Some(out)
-}
-
-pub(in crate::network_manager) fn sibling_ip_path(base: &str, family_stem: &str) -> Option<String> {
-    if base.is_empty() {
-        return None;
-    }
-    let p = std::path::Path::new(base);
-    let new_name = match p.extension().and_then(|e| e.to_str()) {
-        Some(ext) => format!("{family_stem}.{ext}"),
-        None => family_stem.to_owned(),
-    };
-    p.with_file_name(new_name)
-        .to_str()
-        .map(std::borrow::ToOwned::to_owned)
-}
-
 /// Assemble an advertised WebTransport URL from `base`, injecting `inject_port` and
 /// `configured_path` only where `base` leaves them out.
 ///
@@ -246,7 +216,7 @@ impl NativeNetwork {
             if keys.is_empty() {
                 bail!("webtransport TLS private key is empty");
             }
-            let hostname_ck = webtransport::certified_key_from_chain(certs, keys.remove(0))
+            let hostname_ck = certified_key_from_chain(certs, keys.remove(0))
                 .wrap_err("failed to build CA-signed webtransport hostname certificate")?;
 
             let v4_ip = self.load_webtransport_ip_certified_key("ipv4");
@@ -322,7 +292,8 @@ impl NativeNetwork {
     }
 
     fn load_webtransport_ip_certified_key(&self, family_stem: &str) -> Option<Arc<CertifiedKey>> {
-        let (cert_path, key_path) = self.webtransport_ip_cert_key_paths(family_stem)?;
+        let (cert_path, key_path) =
+            sibling_ip_cert_key_paths(&self.config().network.tls, family_stem)?;
         let certs = Self::load_certs(std::path::Path::new(&cert_path)).ok()?;
         if certs.is_empty() {
             return None;
@@ -331,7 +302,7 @@ impl NativeNetwork {
         if keys.is_empty() {
             return None;
         }
-        match webtransport::certified_key_from_chain(certs, keys.remove(0)) {
+        match certified_key_from_chain(certs, keys.remove(0)) {
             Ok(ck) => {
                 veilid_log!(self debug "serving WebTransport {} IP-SAN certificate for SNI-less (IP-literal) dials from {}", family_stem, cert_path);
                 Some(ck)
@@ -343,15 +314,10 @@ impl NativeNetwork {
         }
     }
 
-    fn webtransport_ip_cert_key_paths(&self, family_stem: &str) -> Option<(String, String)> {
-        let cfg = self.config();
-        let cert = sibling_ip_path(&cfg.network.tls.certificate_path, family_stem)?;
-        let key = sibling_ip_path(&cfg.network.tls.private_key_path, family_stem)?;
-        Some((cert, key))
-    }
-
     fn webtransport_ip_cert_available(&self, family_stem: &str) -> bool {
-        let Some((cert_path, key_path)) = self.webtransport_ip_cert_key_paths(family_stem) else {
+        let Some((cert_path, key_path)) =
+            sibling_ip_cert_key_paths(&self.config().network.tls, family_stem)
+        else {
             return false;
         };
         Self::load_certs(std::path::Path::new(&cert_path))
@@ -360,21 +326,6 @@ impl NativeNetwork {
             && Self::load_keys(std::path::Path::new(&key_path))
                 .map(|k| !k.is_empty())
                 .unwrap_or(false)
-    }
-
-    fn webtransport_ca_tls_files(&self) -> Vec<(String, bool)> {
-        let cfg = self.config();
-        let mut files = vec![
-            (cfg.network.tls.certificate_path.clone(), true),
-            (cfg.network.tls.private_key_path.clone(), true),
-        ];
-        for fam in ["ipv4", "ipv6"] {
-            if let Some((cert, key)) = self.webtransport_ip_cert_key_paths(fam) {
-                files.push((cert, false));
-                files.push((key, false));
-            }
-        }
-        files
     }
 
     pub(super) fn webtransport_current_advertisement(&self) -> CertificateAdvertisement {
@@ -406,16 +357,16 @@ impl NativeNetwork {
         let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() else {
             return;
         };
-        let files = self.webtransport_ca_tls_files();
-        self.inner.lock().webtransport.tls_mtimes = read_webtransport_tls_mtimes(&files);
+        let files = tls_certificate_files(&self.config().network.tls);
+        self.inner.lock().webtransport.tls_mtimes = read_tls_mtimes(&files);
     }
 
     pub(super) fn maybe_reload_webtransport_ca_certificate(&self) -> EyreResult<()> {
         let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() else {
             return Ok(());
         };
-        let files = self.webtransport_ca_tls_files();
-        let Some(current) = read_webtransport_tls_mtimes(&files) else {
+        let files = tls_certificate_files(&self.config().network.tls);
+        let Some(current) = read_tls_mtimes(&files) else {
             return Ok(());
         };
         if self.inner.lock().webtransport.tls_mtimes.as_ref() == Some(&current) {
@@ -613,8 +564,7 @@ impl NativeNetwork {
         let v6_ip_cert = self.webtransport_ip_cert_available("ipv6");
 
         if !v4_ip_cert && !v6_ip_cert {
-            let example_sibling = self
-                .webtransport_ip_cert_key_paths("ipv4")
+            let example_sibling = sibling_ip_cert_key_paths(&self.config().network.tls, "ipv4")
                 .map(|(cert, _key)| cert)
                 .unwrap_or_else(|| "<network.tls certificate_path unset>".to_string());
             veilid_log!(self info "WebTransport CA mode: no per-family IP-SAN certificate found (expected as the ipv4/ipv6 sibling of network.tls, e.g. {}); advertising the configured hostname URL instead of IP-literal dial info", example_sibling);

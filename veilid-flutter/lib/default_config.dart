@@ -14,14 +14,16 @@ import 'veilid.dart';
 /// path_provider is a platform-channel call, and such an isolate has no
 /// messenger bound to make one. [bootstrap] and [bootstrapKeys] are
 /// comma-separated; empty strings leave the built-in defaults in place.
-/// [bootstrapRecords] are whole TXT records, which contain commas of their own,
-/// so they are passed as a list.
+/// [bootstrapRecords] (the network's `2|` payload line and any legacy TXT
+/// lines, which contain commas of their own) and [bootstrapProtocols] are
+/// lists; null leaves the built-in defaults in place.
 Future<VeilidConfig> getDefaultVeilidConfig({
   required bool isWeb,
   required String programName,
   String bootstrap = '',
   String? bootstrapKeys,
   List<String>? bootstrapRecords,
+  List<VeilidConfigBootstrapProtocol>? bootstrapProtocols,
   String namespace = '',
   String deviceEncryptionKeyPassword = '',
   String? newDeviceEncryptionKeyPassword,
@@ -63,6 +65,9 @@ Future<VeilidConfig> getDefaultVeilidConfig({
         bootstrapRecords:
             bootstrapRecords ??
             defaultConfig.network.routingTable.bootstrapRecords,
+        bootstrapProtocols:
+            bootstrapProtocols ??
+            defaultConfig.network.routingTable.bootstrapProtocols,
       ),
     ),
   );

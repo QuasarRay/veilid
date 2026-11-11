@@ -1,6 +1,6 @@
 """Node startup configuration mirroring veilid-core's `VeilidConfig` tree."""
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from typing import Optional, Self, get_args
 
@@ -23,6 +23,16 @@ class VeilidConfigAddressType(StrEnum):
 
     IPV4 = "IPV4"
     IPV6 = "IPV6"
+
+
+class VeilidConfigBootstrapProtocol(StrEnum):
+    """A protocol a bootstrap request can go out on."""
+
+    UDP = "UDP"
+    TCP = "TCP"
+    WS = "WS"
+    WSS = "WSS"
+    WTS = "WTS"
 
 
 def _loaded_type(field_type):
@@ -126,13 +136,27 @@ class VeilidConfigBlockStore(ConfigBase):
 
 @dataclass
 class VeilidConfigRoutingTable(ConfigBase):
-    """Routing table identity and bootstrap configuration."""
+    """Routing table identity and bootstrap configuration.
+
+    A `bootstrap` entry is a dial info url, a `host`, or a `host:port` (port 5150 by
+    default); a bare host resolves to every address it names, each dialed over
+    `bootstrap_protocols` in order, WSS then WebTransport by default. `bootstrap_records`
+    holds the network's signed payload line (`2|...`) and any legacy TXT lines, verbatim,
+    as `veilid-server` prints them. `serve_direct_bootstrap` makes the node answer
+    bootstrap requests.
+    """
 
     public_keys: list[PublicKey]
     secret_keys: list[SecretKey]
     bootstrap: list[str]
     bootstrap_keys: list[PublicKey]
     bootstrap_records: list[str]
+    bootstrap_protocols: list[VeilidConfigBootstrapProtocol] = field(
+        default_factory=lambda: [
+            VeilidConfigBootstrapProtocol.WSS,
+            VeilidConfigBootstrapProtocol.WTS,
+        ]
+    )
     serve_direct_bootstrap: bool = False
 
 

@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PeerInfo {
     /// The routing domain this peer info was translatd to from its origin routing domain.
     /// This is the 'best' routing domain for this peer info at the time it was received.
@@ -111,16 +111,14 @@ impl PeerInfo {
         })
     }
 
-    // Create an unsigned peer info
+    /// An unsigned peer info, for tests that need a peer without its keys
+    #[cfg(any(test, feature = "test-util"))]
     pub fn try_new_from_unsigned(
         routing_table: &RoutingTable,
         routing_domain: RoutingDomain,
         node_info: NodeInfo,
     ) -> VeilidAPIResult<Self> {
-        // Get signing public keys from node info
         let public_keys = node_info.public_keys();
-
-        // Ensure node ids are within limits
         if public_keys.is_empty() {
             apibail_internal!(
                 "no public keys for peer info ({:?})\n{:#?}",
@@ -136,7 +134,6 @@ impl PeerInfo {
             );
         }
 
-        // Generate on-the-wire node info message
         let mut node_info_message_builder = ::capnp::message::Builder::new_default();
         let mut node_info_builder =
             node_info_message_builder.init_root::<veilid_capnp::node_info::Builder>();
@@ -148,7 +145,6 @@ impl PeerInfo {
             .into_inner()
             .freeze();
 
-        // Extract node ids for convenience
         let mut node_ids = NodeIdGroup::new();
         for pk in public_keys.iter() {
             node_ids.add(routing_table.generate_node_id(pk)?);
