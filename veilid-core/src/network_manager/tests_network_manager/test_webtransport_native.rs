@@ -3,6 +3,7 @@ use crate::network_manager::network::native::certificate_manager::{
     CertificateManager, ManagedCertificate,
 };
 use crate::network_manager::network::native::protocol::webtransport::*;
+use crate::network_manager::network::native::tls_certificates::certified_key_from_chain;
 use crate::network_manager::network::native::webtransport_certificate_profile::*;
 use crate::network_manager::network::native::webtransport_quinn_runtime::{
     veilid_quinn_client_endpoint, veilid_quinn_runtime,

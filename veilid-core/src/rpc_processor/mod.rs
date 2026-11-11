@@ -61,9 +61,10 @@ mod rpc_start_tunnel;
 pub(crate) use answer::*;
 pub(crate) use coders::{
     canonical_message_builder_to_bytes_writer_packed,
-    canonical_message_builder_to_bytes_writer_unpacked, decode_node_info, decode_private_route,
-    encode_node_info, encode_private_route, encode_route_hop, FanoutConfig, RPCDecodeContext,
-    TransactCommand,
+    canonical_message_builder_to_bytes_writer_unpacked, decode_dial_info, decode_node_id,
+    decode_node_info, decode_peer_info, decode_private_route, decode_signature, encode_dial_info,
+    encode_node_id, encode_node_info, encode_peer_info, encode_private_route, encode_route_hop,
+    encode_signature, FanoutConfig, RPCDecodeContext, TransactCommand,
 };
 pub(crate) use descriptor_mode::*;
 pub(crate) use destination::*;

@@ -39,6 +39,13 @@ pub fn fake_veilid_config() -> VeilidConfig {
                 public_keys: PublicKeyGroup::new(),
                 secret_keys: SecretKeyGroup::new(),
                 bootstrap: vec!["boots".to_string()],
+                bootstrap_protocols: vec![
+                    VeilidConfigBootstrapProtocol::Wss,
+                    VeilidConfigBootstrapProtocol::Wts,
+                    VeilidConfigBootstrapProtocol::Udp,
+                    VeilidConfigBootstrapProtocol::Tcp,
+                    VeilidConfigBootstrapProtocol::Ws,
+                ],
                 bootstrap_keys: vec![PublicKey::from_str(
                     "VLD0:qrxwD1-aM9xiUw4IAPVXE_4qgoIfyR4Y6MEPyaDl_GQ",
                 )

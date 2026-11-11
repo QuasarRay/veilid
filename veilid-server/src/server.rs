@@ -1,5 +1,6 @@
 use crate::client_api;
 use crate::logs::*;
+use crate::ptr_lookup::ptr_lookup;
 use crate::settings::*;
 use crate::tools::*;
 use flume::{unbounded, Receiver, Sender};
@@ -7,17 +8,28 @@ use futures_util::select;
 use futures_util::FutureExt;
 use lazy_static::*;
 use parking_lot::Mutex;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::*;
 use veilid_core::tools::*;
+use veilid_core::{KeyPairGroup, VeilidAPI};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMode {
     Normal,
     ShutdownImmediate,
-    DumpTXTRecord(veilid_core::KeyPairGroup),
+    DumpBootstrapRecords {
+        hostname: Option<String>,
+        keypairs: KeyPairGroup,
+    },
+    SignBootstrapPayload {
+        lifetime: String,
+        cache_ttl_hours: Option<u32>,
+        keypairs: KeyPairGroup,
+        node_lines: Vec<String>,
+    },
 }
 
 lazy_static! {
@@ -177,8 +189,12 @@ pub async fn run_veilid_server_subnode(
         None
     };
 
-    // Drop rwlock on settings
-    let auto_attach = settings_auto_attach || !matches!(server_mode, ServerMode::Normal);
+    // Signing needs only the API; every other one-shot mode needs the network
+    let auto_attach = match server_mode {
+        ServerMode::Normal => settings_auto_attach,
+        ServerMode::SignBootstrapPayload { .. } => false,
+        _ => true,
+    };
 
     // Process all updates
     let capi2 = capi.clone();
@@ -221,43 +237,32 @@ pub async fn run_veilid_server_subnode(
         }
     }
 
-    // Process dump-txt-record
-    // A local wall for a one-shot CLI wait, not node timekeeping: it outlives no state
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "bounds a one-shot CLI wait, not a node timestamp"
-    )]
-    if let ServerMode::DumpTXTRecord(kpg) = &server_mode {
-        let start_time = Instant::now();
-        while Instant::now().duration_since(start_time) < Duration::from_secs(10) {
-            match veilid_api.get_state().await {
-                Ok(vs) => {
-                    if vs.network.started {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    out = Err(eyre!("Getting state failed: {:?}", e));
-                    break;
-                }
+    // Run the one-shot modes
+    if out.is_ok() {
+        match &server_mode {
+            ServerMode::Normal => {}
+            ServerMode::ShutdownImmediate => shutdown(),
+            ServerMode::DumpBootstrapRecords { hostname, keypairs } => {
+                out = dump_bootstrap_records(&veilid_api, hostname.as_deref(), keypairs).await;
+                shutdown();
             }
-            sleep(100).await;
-        }
-        match veilid_api.debug(format!("txtrecord {}", kpg)).await {
-            Ok(v) => {
-                print!("{}", v);
-            }
-            Err(e) => {
-                out = Err(eyre!("Getting TXT record failed: {:?}", e));
+            ServerMode::SignBootstrapPayload {
+                lifetime,
+                cache_ttl_hours,
+                keypairs,
+                node_lines,
+            } => {
+                out = sign_bootstrap_payload(
+                    &veilid_api,
+                    lifetime,
+                    *cache_ttl_hours,
+                    keypairs,
+                    node_lines,
+                )
+                .await;
+                shutdown();
             }
         }
-
-        shutdown();
-    }
-
-    // Process shutdown-immediate
-    if matches!(server_mode, ServerMode::ShutdownImmediate) {
-        shutdown();
     }
 
     // Idle while waiting to exit
@@ -284,6 +289,153 @@ pub async fn run_veilid_server_subnode(
     let _ = update_receiver_jh.await;
 
     out
+}
+
+/// Print this node's bootstrap record lines, naming it for the legacy lines by the hostname
+/// the operator gave or by reverse DNS
+async fn dump_bootstrap_records(
+    veilid_api: &VeilidAPI,
+    operator_hostname: Option<&str>,
+    keypairs: &KeyPairGroup,
+) -> EyreResult<()> {
+    let addresses = wait_for_bootstrap_addresses(veilid_api).await?;
+    let mut ptr_names = Vec::new();
+    for address in &addresses {
+        match ptr_lookup(*address).await {
+            Ok(name) => ptr_names.push(name),
+            Err(e) => eprintln!("No reverse DNS name for {}: {}", address, e),
+        }
+    }
+    let (hostname, warning) = choose_legacy_hostname(&addresses, &ptr_names, operator_hostname)?;
+    if let Some(warning) = warning {
+        eprintln!("Warning: {}", warning);
+    }
+
+    let mut command = vec![
+        "bootstraprecords".to_owned(),
+        "--hostname".to_owned(),
+        hostname,
+    ];
+    if !keypairs.is_empty() {
+        command.push(keypairs.to_string());
+    }
+    let records = veilid_api
+        .debug(shell_words::join(&command))
+        .await
+        .map_err(|e| eyre!("Getting bootstrap records failed: {:?}", e))?;
+    print!("{}", records);
+    Ok(())
+}
+
+/// Sign node lines into one payload line, printed on its own
+async fn sign_bootstrap_payload(
+    veilid_api: &VeilidAPI,
+    lifetime: &str,
+    cache_ttl_hours: Option<u32>,
+    keypairs: &KeyPairGroup,
+    node_lines: &[String],
+) -> EyreResult<()> {
+    let mut command = vec!["bootstrappayload".to_owned(), lifetime.to_owned()];
+    if let Some(hours) = cache_ttl_hours {
+        command.push("--ttl".to_owned());
+        command.push(hours.to_string());
+    }
+    if !keypairs.is_empty() {
+        command.push("--keypairs".to_owned());
+        command.push(keypairs.to_string());
+    }
+    command.extend(node_lines.iter().cloned());
+    let payload = veilid_api
+        .debug(shell_words::join(&command))
+        .await
+        .map_err(|e| eyre!("Signing the bootstrap payload failed: {:?}", e))?;
+    // The command reports a bad node line as text rather than an error
+    if !payload.starts_with("2|") {
+        bail!("{}", payload.trim());
+    }
+    print!("{}", payload);
+    Ok(())
+}
+
+/// This node's PublicInternet addresses once the network is up, within a one-shot CLI budget
+#[expect(
+    clippy::disallowed_methods,
+    reason = "bounds a one-shot CLI wait, not a node timestamp"
+)]
+async fn wait_for_bootstrap_addresses(veilid_api: &VeilidAPI) -> EyreResult<Vec<IpAddr>> {
+    let start_time = Instant::now();
+    let mut addresses = Vec::new();
+    while Instant::now().duration_since(start_time) < Duration::from_secs(10) {
+        let state = veilid_api
+            .get_state()
+            .await
+            .map_err(|e| eyre!("Getting state failed: {:?}", e))?;
+        if state.network.started {
+            addresses = bootstrap_addresses(veilid_api).await?;
+            if !addresses.is_empty() {
+                break;
+            }
+        }
+        sleep(100).await;
+    }
+    if addresses.is_empty() {
+        bail!("This node has no PublicInternet addresses to make bootstrap records from");
+    }
+    Ok(addresses)
+}
+
+async fn bootstrap_addresses(veilid_api: &VeilidAPI) -> EyreResult<Vec<IpAddr>> {
+    let listing = veilid_api
+        .debug("bootstrapaddresses".to_owned())
+        .await
+        .map_err(|e| eyre!("Getting bootstrap addresses failed: {:?}", e))?;
+    listing
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            IpAddr::from_str(line).wrap_err_with(|| format!("bad bootstrap address: {}", line))
+        })
+        .collect()
+}
+
+/// The hostname for the legacy record lines: the operator's choice (warned about when it is not
+/// an address of this node or a PTR name), else the one agreed PTR name, else the lone address
+pub(crate) fn choose_legacy_hostname(
+    addresses: &[IpAddr],
+    ptr_names: &[String],
+    operator_hostname: Option<&str>,
+) -> EyreResult<(String, Option<String>)> {
+    let mut names: Vec<String> = ptr_names
+        .iter()
+        .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+
+    if let Some(hostname) = operator_hostname {
+        let is_address = IpAddr::from_str(hostname).is_ok_and(|ip| addresses.contains(&ip));
+        let is_name = names.contains(&hostname.trim_end_matches('.').to_ascii_lowercase());
+        let warning = (!is_address && !is_name).then(|| {
+            format!(
+                "{} is neither an address of this node nor a reverse DNS name of one",
+                hostname
+            )
+        });
+        return Ok((hostname.to_owned(), warning));
+    }
+    match (names.as_slice(), addresses) {
+        ([name], _) => Ok((name.clone(), None)),
+        ([], [address]) => Ok((address.to_string(), None)),
+        ([], _) => bail!(
+            "No reverse DNS name for this node's {} addresses, pass --bootstrap-hostname",
+            addresses.len()
+        ),
+        (names, _) => bail!(
+            "Reverse DNS names disagree ({}), pass --bootstrap-hostname",
+            names.join(", ")
+        ),
+    }
 }
 
 //#[instrument(err, skip_all)]

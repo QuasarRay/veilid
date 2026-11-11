@@ -428,22 +428,3 @@ pub async fn test_register_known_node_keeps_entry() {
     }
     mock_registry::terminate(registry).await;
 }
-
-pub async fn test_round_trip_peerinfo() {
-    let registry = mock_registry::init("a").await;
-    let routing_table = registry.routing_table();
-
-    let pi = fix_peer_info(
-        &routing_table,
-        fix_crypto_info_list(true),
-        fix_crypto_info_list_secrets(),
-    )
-    .expect("should be valid");
-
-    let s = serialize_json(&pi);
-    let pi2 = deserialize_json(&s).expect("Should deserialize");
-    let s2 = serialize_json(&pi2);
-
-    assert_eq!(pi, pi2);
-    assert_eq!(s, s2);
-}

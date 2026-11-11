@@ -24,6 +24,8 @@ default = [
     "veilid-remote-api/default",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 
 default-async-std = [
@@ -32,6 +34,8 @@ default-async-std = [
     "veilid-remote-api/default-async-std",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 
 stats = ["veilid-core/stats"]
@@ -59,10 +63,14 @@ mock-api = [
     "veilid-remote-api/default-tokio",
     "enable-protocol-wss",
     "enable-protocol-webtransport",
+    "enable-bootstrap-v0",
+    "enable-bootstrap-v1",
 ]
 
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
 enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
+enable-bootstrap-v0 = ["veilid-core/enable-bootstrap-v0"]
+enable-bootstrap-v1 = ["veilid-core/enable-bootstrap-v1"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 crypto-test-none = ["rt-tokio", "veilid-core/crypto-test-none"]
 debug-json-api = []
@@ -141,9 +149,15 @@ chrono = "0.4.40"
 windows-service = "0.8.0"
 ansi_term = "0.12.1"
 ctrlc = "3.5.1"
+windows = { version = "0.62.2", features = [
+    "Win32_NetworkManagement_Dns",
+    "Win32_Foundation",
+] }
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5.0"
+libc = "0.2.191"
+socket2 = "0.6.2"
 signal-hook = "0.4.1"
 signal-hook-tokio = { version = "0.4.0", features = [
     "futures-v0_3",

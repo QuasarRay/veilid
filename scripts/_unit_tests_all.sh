@@ -28,16 +28,15 @@ else
     # SELECTED packages, so the mock-api pass shares no dependency artifacts with the default one.
     # They are functions purely so the argument lists are not duplicated by the timing below.
     #
-    # run_test_attachment_manager, run_test_bootstrap, run_test_resolver_live and
-    # txt_records_survive_restart are the native tests that reach the network. The mock pass covers
-    # the attachment lifecycle and run_test_resolver covers answer decoding, so all four are
-    # excluded to keep this script offline.
+    # run_test_attachment_manager and run_test_bootstrap are the native tests that reach the
+    # network. The mock pass covers the attachment lifecycle, so both are excluded to keep this
+    # script offline.
     #
     # app-lifecycle is on here, as the app bindings ship it, so its tests run; clippy's
     # `-p veilid-core` pass compiles it off, as veilid-server ships it.
     native_pass() {
         cargo nextest run "$@" --tests --target $TARGET --all-targets --locked --features=debug-locks,veilid-core/app-lifecycle -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
-            -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live) + test(=tests::bootstrap_records::tests::txt_records_survive_restart))'
+            -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap))'
     }
     # A second pass over veilid-core against the mock, where the DHT and transaction suites run.
     # Additive, not a replacement: mock-api compiles out the subsystem unit tests.
@@ -61,7 +60,7 @@ else
         return $_rc
     }
 
-    echo "Skipping run_test_attachment_manager, run_test_bootstrap, run_test_resolver_live and txt_records_survive_restart (need the network)"
+    echo "Skipping run_test_attachment_manager and run_test_bootstrap (need the network)"
     timed native-build native_pass --no-run
     status=$?
     [ $status -eq 0 ] && { timed native-run native_pass; status=$?; }

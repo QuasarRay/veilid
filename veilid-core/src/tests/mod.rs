@@ -71,7 +71,7 @@ pub async fn run_all_tests() {
     #[cfg(not(feature = "mock-api"))]
     {
         info!("TEST: test_table_store");
-        table_store::tests_table_store::test_all().await;
+        Box::pin(table_store::tests_table_store::test_all()).await;
     }
 
     #[cfg(not(feature = "mock-api"))]

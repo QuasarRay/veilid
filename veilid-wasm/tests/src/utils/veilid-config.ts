@@ -53,6 +53,9 @@ export const veilidCoreStartupConfig = () => {
   if (environment?.bootstrap !== undefined) {
     defaultConfig.network.routingTable.bootstrap = environment.bootstrap;
   }
+  if (environment?.bootstrapProtocols !== undefined) {
+    defaultConfig.network.routingTable.bootstrapProtocols = environment.bootstrapProtocols;
+  }
   // Ensure we are starting from scratch
   defaultConfig.tableStore.delete = true;
   defaultConfig.protectedStore.delete = true;

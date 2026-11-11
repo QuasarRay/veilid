@@ -468,6 +468,9 @@ _VeilidConfigRoutingTable _$VeilidConfigRoutingTableFromJson(
   bootstrap: (json['bootstrap'] as List<dynamic>)
       .map((e) => e as String)
       .toList(),
+  bootstrapProtocols: (json['bootstrapProtocols'] as List<dynamic>)
+      .map(VeilidConfigBootstrapProtocol.fromJson)
+      .toList(),
   bootstrapKeys: (json['bootstrapKeys'] as List<dynamic>)
       .map(Typed<BarePublicKey>.fromJson)
       .toList(),
@@ -483,6 +486,9 @@ Map<String, dynamic> _$VeilidConfigRoutingTableToJson(
   'publicKeys': instance.publicKeys.map((e) => e.toJson()).toList(),
   'secretKeys': instance.secretKeys.map((e) => e.toJson()).toList(),
   'bootstrap': instance.bootstrap,
+  'bootstrapProtocols': instance.bootstrapProtocols
+      .map((e) => e.toJson())
+      .toList(),
   'bootstrapKeys': instance.bootstrapKeys.map((e) => e.toJson()).toList(),
   'bootstrapRecords': instance.bootstrapRecords,
   'serveDirectBootstrap': instance.serveDirectBootstrap,

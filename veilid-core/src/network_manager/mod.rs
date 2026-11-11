@@ -68,10 +68,6 @@ impl_veilid_log_facility!("net");
 pub const BOOT_MAGIC: &[u8; 4] = b"BOOT";
 /// Bootstrap v1 FOURCC
 pub const B01T_MAGIC: &[u8; 4] = b"B01T";
-/// Cache size for TXT lookups used by bootstrap
-pub const TXT_LOOKUP_CACHE_SIZE: usize = 256;
-/// Duration that TXT lookups are valid in the cache (5 minutes, <= the DNS record expiration timeout)
-pub const TXT_LOOKUP_EXPIRATION: TimestampDuration = TimestampDuration::new_secs(300);
 /// Maximum size for a message is the same as the maximum size for an Envelope
 pub const MAX_MESSAGE_SIZE: usize = ENV0_MAX_ENVELOPE_SIZE;
 /// Statistics table size for tracking performance by IP address
@@ -169,9 +165,6 @@ struct NetworkManagerInner {
     peer_info_change_subscription: Option<EventBusSubscription>,
     socket_address_change_subscription: Option<EventBusSubscription>,
 
-    // TXT lookup cache
-    txt_lookup_cache: hashlink::LruCache<String, (Timestamp, Vec<String>)>,
-
     // Relay workers
     relay_stop_source: Option<StopSource>,
     relay_send_channel: Option<flume::Sender<RelayWorkerRequest>>,
@@ -248,7 +241,6 @@ impl NetworkManager {
             tick_subscription: None,
             peer_info_change_subscription: None,
             socket_address_change_subscription: None,
-            txt_lookup_cache: hashlink::LruCache::new(TXT_LOOKUP_CACHE_SIZE),
             //
             relay_send_channel: None,
             relay_stop_source: None,
@@ -557,7 +549,6 @@ impl NetworkManager {
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn startup(&self) -> EyreResult<StartupDisposition> {
-        self.check_bootstrap_reachable()?;
         let guard = self.startup_context.startup_lock.startup()?;
 
         match self.internal_startup().await {
@@ -574,29 +565,6 @@ impl NetworkManager {
                 Err(e)
             }
         }
-    }
-
-    /// A bare bootstrap hostname needs a TXT resolver, or UDP or TCP to reach the host's B01T directly
-    fn check_bootstrap_reachable(&self) -> EyreResult<()> {
-        if Resolver::supports_txt() {
-            return Ok(());
-        }
-        let config = self.config();
-        if !config.network.routing_table.bootstrap_records.is_empty() {
-            // Configured records need nothing resolved to bootstrap from
-            return Ok(());
-        }
-        let has_txt_names = config
-            .network
-            .routing_table
-            .bootstrap
-            .iter()
-            .any(|b| SplitUrl::from_str(b).is_err());
-        let protocol = &config.network.protocol;
-        if has_txt_names && !protocol.udp.enabled && !protocol.tcp.connect {
-            bail!("bootstrap hostnames need a TXT resolver, which this platform lacks, or UDP or TCP enabled to reach them directly");
-        }
-        Ok(())
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -1382,9 +1350,10 @@ impl NetworkManager {
         };
 
         // Is this a direct bootstrap request instead of an envelope?
-        if magic == *BOOT_MAGIC || magic == *B01T_MAGIC {
-            // The reply is large and the request is not authenticated, so only a bootstrap
-            // answers, and no faster than it would accept connections
+        let is_boot_v2 = Self::is_boot_v2_request(&data);
+        if is_boot_v2 || magic == *BOOT_MAGIC || magic == *B01T_MAGIC {
+            // The reply is large and the request is not authenticated, so only a node that
+            // offers bootstrap answers, and no faster than it would accept connections
             if !self.routing_table().serves_direct_bootstrap()
                 || self
                     .address_filter()
@@ -1393,10 +1362,18 @@ impl NetworkManager {
             {
                 return Ok(true);
             }
-            if magic == *BOOT_MAGIC {
+            if is_boot_v2 {
+                network_result_value_or_log!(self pin_future!(self.handle_boot_v2_request(flow)).await? => [ format!(": v2 flow={:?}", flow) ] {});
+            } else if magic == *BOOT_MAGIC {
+                #[cfg(feature = "enable-bootstrap-v0")]
                 network_result_value_or_log!(self pin_future!(self.handle_boot_v0_request(flow)).await? => [ format!(": v0 flow={:?}", flow) ] {});
+                #[cfg(not(feature = "enable-bootstrap-v0"))]
+                veilid_log!(self debug "dropping BOOT request this build no longer answers from {:?}", flow);
             } else {
+                #[cfg(feature = "enable-bootstrap-v1")]
                 network_result_value_or_log!(self pin_future!(self.handle_boot_v1_request(flow)).await? => [ format!(": v1 flow={:?}", flow) ] {});
+                #[cfg(not(feature = "enable-bootstrap-v1"))]
+                veilid_log!(self debug "dropping B01T request this build no longer answers from {:?}", flow);
             }
             return Ok(true);
         }
@@ -1406,6 +1383,12 @@ impl NetworkManager {
             let data_len = data.len();
             network_result_value_or_log!(self pin_future!(self.handle_out_of_band_receipt(data)).await => [ format!(": data.len={}", data_len) ] {});
             return Ok(true);
+        }
+
+        // A tag this build does not know is a newer node or protocol, not an attack: drop it
+        if !VALID_ENVELOPE_VERSIONS.contains(&EnvelopeVersion::from(magic)) {
+            veilid_log!(self debug "dropping packet with unknown tag {:?} from {:?}", String::from_utf8_lossy(&magic), flow);
+            return Ok(false);
         }
 
         // Decode envelope header (may fail signature validation)

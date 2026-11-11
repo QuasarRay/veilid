@@ -210,6 +210,17 @@ pub fn veilid_core::VeilidConfigAddressType::fmt(&self, &mut core::fmt::Formatte
 impl core::str::traits::FromStr for veilid_core::VeilidConfigAddressType
 pub type veilid_core::VeilidConfigAddressType::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::VeilidConfigAddressType::from_str(&str) -> veilid_core::VeilidAPIResult<veilid_core::VeilidConfigAddressType>
+pub enum veilid_core::VeilidConfigBootstrapProtocol
+pub veilid_core::VeilidConfigBootstrapProtocol::Tcp
+pub veilid_core::VeilidConfigBootstrapProtocol::Udp
+pub veilid_core::VeilidConfigBootstrapProtocol::Ws
+pub veilid_core::VeilidConfigBootstrapProtocol::Wss
+pub veilid_core::VeilidConfigBootstrapProtocol::Wts
+impl core::fmt::Display for veilid_core::VeilidConfigBootstrapProtocol
+pub fn veilid_core::VeilidConfigBootstrapProtocol::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for veilid_core::VeilidConfigBootstrapProtocol
+pub type veilid_core::VeilidConfigBootstrapProtocol::Err = veilid_core::VeilidAPIError
+pub fn veilid_core::VeilidConfigBootstrapProtocol::from_str(&str) -> veilid_core::VeilidAPIResult<veilid_core::VeilidConfigBootstrapProtocol>
 pub enum veilid_core::VeilidConfigLogLevel
 pub veilid_core::VeilidConfigLogLevel::Debug
 pub veilid_core::VeilidConfigLogLevel::Error
@@ -1191,7 +1202,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -3019,6 +3030,7 @@ pub fn veilid_core::VeilidConfigRPC::default() -> Self
 pub struct veilid_core::VeilidConfigRoutingTable
 pub veilid_core::VeilidConfigRoutingTable::bootstrap: alloc::vec::Vec<alloc::string::String>
 pub veilid_core::VeilidConfigRoutingTable::bootstrap_keys: alloc::vec::Vec<veilid_core::PublicKey>
+pub veilid_core::VeilidConfigRoutingTable::bootstrap_protocols: alloc::vec::Vec<veilid_core::VeilidConfigBootstrapProtocol>
 pub veilid_core::VeilidConfigRoutingTable::bootstrap_records: alloc::vec::Vec<alloc::string::String>
 pub veilid_core::VeilidConfigRoutingTable::public_keys: veilid_core::PublicKeyGroup
 pub veilid_core::VeilidConfigRoutingTable::secret_keys: veilid_core::SecretKeyGroup
@@ -3240,6 +3252,7 @@ pub const veilid_core::MEMBER_ID_LENGTH: usize
 pub const veilid_core::PUBLIC_INTERNET_CAPABILITIES: &[veilid_core::VeilidCapability]
 pub const veilid_core::VALID_CRYPTO_KINDS: [veilid_core::CryptoKind; 1]
 pub const veilid_core::VEILID_CAPABILITY_APPMESSAGE: veilid_core::VeilidCapability
+pub const veilid_core::VEILID_CAPABILITY_BOOTSTRAP: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_CAPABILITY_DHT: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_CAPABILITY_RELAY: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_CAPABILITY_ROUTE: veilid_core::VeilidCapability

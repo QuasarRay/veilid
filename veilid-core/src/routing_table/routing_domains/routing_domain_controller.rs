@@ -54,11 +54,8 @@ pub trait RoutingDomainController:
     fn persisted_state(&self) -> Option<(Bytes, TableDBSerializedData)> {
         None
     }
-    /// True when this domain's persisted state means the saved routing table must not be trusted
-    /// Whether this node found itself among its own bootstraps
-    fn is_own_bootstrap(&self) -> bool {
-        false
-    }
+    /// Note that a served bootstrap payload is past its cache ttl, for the bootstrap task
+    fn request_bootstrap_recheck(&self) {}
 
     fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {
         Box::pin(async move { false })

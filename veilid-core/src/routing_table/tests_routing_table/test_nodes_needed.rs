@@ -27,10 +27,6 @@ pub fn test_routing_table_timings_at_default_rpc_timeout() {
         TimestampDuration::new_secs(5)
     );
     assert_eq!(
-        timings.bootstrap_txt_timeout,
-        TimestampDuration::new_secs(10)
-    );
-    assert_eq!(
         timings.no_responsive_bootstrap_delay,
         TimestampDuration::new_secs(10)
     );

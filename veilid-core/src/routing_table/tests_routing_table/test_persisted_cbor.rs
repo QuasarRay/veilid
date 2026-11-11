@@ -81,27 +81,29 @@ pub async fn test_persisted_public_internet_state() {
             distance_metric_capabilities: 4,
         },
     );
-    let mut public_keys = PublicKeyGroup::new();
-    public_keys.add(fake_public_key());
-    let dial_info_details = dial_infos()
-        .into_iter()
-        .map(|dial_info| DialInfoDetail {
-            class: DialInfoClass::Direct,
-            dial_info,
-        })
-        .collect();
-    let record = BootstrapRecord::new(
-        public_keys,
-        vec![ENVELOPE_VERSION_ENV0],
-        dial_info_details,
-        Some(1_700_000_000),
-        vec!["extra".to_owned()],
-    );
+    let node_id = registry
+        .routing_table()
+        .generate_node_id(&fake_public_key())
+        .expect("node id");
+    let payload = SignedBootstrapPayload::try_new_signed(
+        &registry.crypto(),
+        BootstrapPayload::new(
+            Timestamp::new(1_700_000_000_000_000),
+            Some(Timestamp::new(1_800_000_000_000_000)),
+            None,
+            vec![BootstrapNode::new(
+                NodeIdGroup::from(vec![node_id]),
+                dial_infos(),
+            )],
+        ),
+        &[],
+    )
+    .expect("unsigned payload");
     let state = PublicInternetPersistedState {
         low_water_mark,
-        bootstrap: Some(BootstrapCache::new(
-            vec!["1|0|VLD0:k|example.com|T5150|1|sig".to_owned()],
-            vec![record],
+        bootstrap: Some(BootstrapCache::from_payload(
+            &payload,
+            Some(Timestamp::new(1_700_000_001_000_000)),
         )),
     };
 

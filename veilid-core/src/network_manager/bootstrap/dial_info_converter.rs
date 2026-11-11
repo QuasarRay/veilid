@@ -1,12 +1,31 @@
 use super::*;
 
+/// The short form of one dial info inside a legacy record line, relative to the line's hostname
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 pub struct ShortDialInfo {
+    /// Protocol letter, port and path, like `W5150/ws`
     pub short_url: String,
-    pub hostname: String,
+}
+
+/// A bare bootstrap entry as a url host and port: `host`, `host:port`, an IP literal, or
+/// `[ipv6]:port`. An IPv6 host comes back bracketed and a missing port is the bootstrap port
+pub fn split_bootstrap_entry(entry: &str) -> Option<(String, u16)> {
+    let url_host = |ip_addr: IpAddr| SplitUrlHost::IpAddr(ip_addr).to_string();
+    if let Ok(ip_addr) = IpAddr::from_str(entry) {
+        return Some((url_host(ip_addr), BOOTSTRAP_DIRECT_PORT));
+    }
+    if let Ok(socket_addr) = SocketAddr::from_str(entry) {
+        return Some((url_host(socket_addr.ip()), socket_addr.port()));
+    }
+    if let Ok(host) = SplitUrlHost::from_str(entry) {
+        return Some((host.to_string(), BOOTSTRAP_DIRECT_PORT));
+    }
+    let (host, port) = entry.rsplit_once(':')?;
+    let host = SplitUrlHost::from_str(host).ok()?;
+    Some((host.to_string(), port.parse().ok()?))
 }
 
 pub trait DialInfoConverterResolver: Send + Sync {
-    fn ptr_lookup(&self, ip_addr: IpAddr) -> PinBoxFuture<'_, EyreResult<String>>;
     fn to_socket_addrs(
         &self,
         host: &str,
@@ -15,53 +34,16 @@ pub trait DialInfoConverterResolver: Send + Sync {
 }
 
 pub trait DialInfoConverter: Send + Sync {
-    fn try_vec_from_short<'a>(
-        &'a self,
-        short_dial_info: &'a ShortDialInfo,
-    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>>;
     fn try_vec_from_url<'a>(
         &'a self,
         url: &'a str,
     ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>>;
-    fn to_short(&self, dial_info: DialInfo) -> PinBoxFuture<'_, ShortDialInfo>;
-    #[expect(dead_code)]
-    fn to_url(&self, dial_info: DialInfo) -> PinBoxFuture<'_, String>;
 }
 
 impl<C> DialInfoConverter for C
 where
     C: DialInfoConverterResolver,
 {
-    fn try_vec_from_short<'a>(
-        &'a self,
-        short_dial_info: &'a ShortDialInfo,
-    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>> {
-        pin_dyn_future!(async move {
-            let short = &short_dial_info.short_url;
-            let hostname = &short_dial_info.hostname;
-
-            if short.len() < 2 {
-                apibail_parse_error!("invalid short url length", short);
-            }
-            let Some((protocol, port)) = short.split_at_checked(1) else {
-                apibail_parse_error!("invalid short url type", short);
-            };
-            let url = match protocol {
-                "U" => format!("udp://{}:{}", hostname, port),
-                "T" => format!("tcp://{}:{}", hostname, port),
-                "W" => format!("ws://{}:{}", hostname, port),
-                #[cfg(feature = "enable-protocol-wss")]
-                "S" => format!("wss://{}:{}", hostname, port),
-                #[cfg(feature = "enable-protocol-webtransport")]
-                "B" => format!("wts://{}:{}", hostname, port),
-                _ => {
-                    apibail_parse_error!("invalid short url type", short);
-                }
-            };
-            self.try_vec_from_url(&url).await
-        })
-    }
-
     fn try_vec_from_url<'a>(
         &'a self,
         url: &'a str,
@@ -127,155 +109,56 @@ where
             Ok(out)
         })
     }
+}
 
-    fn to_short(&self, dial_info: DialInfo) -> PinBoxFuture<'_, ShortDialInfo> {
-        pin_dyn_future!(async move {
-            match dial_info {
-                DialInfo::UDP(di) => ShortDialInfo {
-                    short_url: format!("U{}", di.socket_address.port()),
-                    hostname: self
-                        .ptr_lookup(di.socket_address.ip_addr())
-                        .await
-                        .unwrap_or_else(|_| di.socket_address.to_string()),
-                },
-                DialInfo::TCP(di) => ShortDialInfo {
-                    short_url: format!("T{}", di.socket_address.port()),
-                    hostname: self
-                        .ptr_lookup(di.socket_address.ip_addr())
-                        .await
-                        .unwrap_or_else(|_| di.socket_address.to_string()),
-                },
-                DialInfo::WS(di) => {
-                    let mut split_url =
-                        SplitUrl::from_str(&format!("ws://{}", di.request)).unwrap_or_log();
-                    if let SplitUrlHost::IpAddr(a) = split_url.host {
-                        if let Ok(host) = self.ptr_lookup(a).await {
-                            split_url.host = SplitUrlHost::Hostname(host);
-                        }
-                    }
-                    ShortDialInfo {
-                        short_url: format!(
-                            "W{}{}",
-                            split_url.port.unwrap_or(80),
-                            split_url
-                                .path
-                                .map(|p| format!("/{}", p))
-                                .unwrap_or_default()
-                        ),
-                        hostname: split_url.host.to_string(),
-                    }
-                }
-                #[cfg(feature = "enable-protocol-wss")]
-                DialInfo::WSS(di) => {
-                    let mut split_url =
-                        SplitUrl::from_str(&format!("wss://{}", di.request)).unwrap_or_log();
-                    if let SplitUrlHost::IpAddr(a) = split_url.host {
-                        if let Ok(host) = self.ptr_lookup(a).await {
-                            split_url.host = SplitUrlHost::Hostname(host);
-                        }
-                    }
-                    ShortDialInfo {
-                        short_url: format!(
-                            "S{}{}",
-                            split_url.port.unwrap_or(443),
-                            split_url
-                                .path
-                                .map(|p| format!("/{}", p))
-                                .unwrap_or_default()
-                        ),
-                        hostname: split_url.host.to_string(),
-                    }
-                }
-                // The datagram half shares the stream's `B` short form, which the generator then
-                // dedupes into a single entry; a short form of its own would not parse back.
-                #[cfg(feature = "enable-protocol-webtransport")]
-                DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => {
-                    let split_url = SplitUrl::from_str(&di.request).unwrap_or_log();
-                    let url_host = split_url.host.to_string();
-                    let url_host_is_name = matches!(split_url.host, SplitUrlHost::Hostname(_));
-                    let port = split_url.port.unwrap_or(443);
-                    let path = split_url
-                        .path
-                        .map(|p| p.to_string())
-                        .filter(|p| !p.is_empty())
-                        .map(|p| format!("/{}", p))
-                        .unwrap_or_default();
-                    let ip = di.socket_address.ip_addr();
-                    let hostname = match self.ptr_lookup(ip).await {
-                        Ok(ptr_name) => {
-                            if url_host_is_name && ptr_name != url_host {
-                                tracing::info!(target: "net",
-                                    "WebTransport bootstrap short form for {} advertises PTR-derived hostname {:?}, which differs from the dial info URL host {:?}; browser validation requires the CA certificate SAN to cover {:?}",
-                                    ip, ptr_name, url_host, ptr_name);
-                            }
-                            ptr_name
-                        }
-                        Err(e) => {
-                            let fallback = di.socket_address.to_string();
-                            tracing::warn!(target: "net",
-                                "WebTransport bootstrap short form for {}: reverse DNS (PTR) lookup failed ({}); falling back to the IP literal {:?}. A CA-signed WebTransport certificate cannot validate a bare IP, so WebTransport bootstrap fails for this host while WSS/WS entries in the same record still work. Configure reverse DNS resolving to a name covered by the certificate SAN.",
-                                ip, e, fallback);
-                            fallback
-                        }
-                    };
-                    ShortDialInfo {
-                        short_url: format!("B{}{}", port, path),
-                        hostname,
-                    }
-                }
-            }
-        })
+/// The short form a legacy record line carries for a dial info: the hostname is the line's,
+/// so only the protocol letter, port and path remain
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+pub fn to_short_dial_info(dial_info: &DialInfo) -> ShortDialInfo {
+    fn path_suffix(request: &str, scheme: &str) -> (u16, String) {
+        let split_url = SplitUrl::from_str(&format!("{}://{}", scheme, request)).unwrap_or_log();
+        let default_port = if scheme == "ws" { 80 } else { 443 };
+        let path = split_url
+            .path
+            .map(|p| p.to_string())
+            .filter(|p| !p.is_empty())
+            .map(|p| format!("/{}", p))
+            .unwrap_or_default();
+        (split_url.port.unwrap_or(default_port), path)
     }
-
-    fn to_url(&self, dial_info: DialInfo) -> PinBoxFuture<'_, String> {
-        pin_dyn_future!(async move {
-            match dial_info {
-                DialInfo::UDP(di) => self
-                    .ptr_lookup(di.socket_address.ip_addr())
-                    .await
-                    .map(|h| format!("udp://{}:{}", h, di.socket_address.port()))
-                    .unwrap_or_else(|_| format!("udp://{}", di.socket_address)),
-                DialInfo::TCP(di) => self
-                    .ptr_lookup(di.socket_address.ip_addr())
-                    .await
-                    .map(|h| format!("tcp://{}:{}", h, di.socket_address.port()))
-                    .unwrap_or_else(|_| format!("tcp://{}", di.socket_address)),
-                DialInfo::WS(di) => {
-                    let mut split_url =
-                        SplitUrl::from_str(&format!("ws://{}", di.request)).unwrap_or_log();
-                    if let SplitUrlHost::IpAddr(a) = split_url.host {
-                        if let Ok(host) = self.ptr_lookup(a).await {
-                            split_url.host = SplitUrlHost::Hostname(host);
-                        }
-                    }
-                    split_url.to_string()
-                }
-                #[cfg(feature = "enable-protocol-wss")]
-                DialInfo::WSS(di) => {
-                    let mut split_url =
-                        SplitUrl::from_str(&format!("wss://{}", di.request)).unwrap_or_log();
-                    if let SplitUrlHost::IpAddr(a) = split_url.host {
-                        if let Ok(host) = self.ptr_lookup(a).await {
-                            split_url.host = SplitUrlHost::Hostname(host);
-                        }
-                    }
-                    split_url.to_string()
-                }
-                #[cfg(feature = "enable-protocol-webtransport")]
-                DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => di.request,
-            }
-        })
-    }
+    let short_url = match dial_info {
+        DialInfo::UDP(di) => format!("U{}", di.socket_address.port()),
+        DialInfo::TCP(di) => format!("T{}", di.socket_address.port()),
+        DialInfo::WS(di) => {
+            let (port, path) = path_suffix(&di.request, "ws");
+            format!("W{}{}", port, path)
+        }
+        #[cfg(feature = "enable-protocol-wss")]
+        DialInfo::WSS(di) => {
+            let (port, path) = path_suffix(&di.request, "wss");
+            format!("S{}{}", port, path)
+        }
+        // The datagram half shares the stream's `B` short form, which the generator then
+        // dedupes into a single entry; a short form of its own would not parse back
+        #[cfg(feature = "enable-protocol-webtransport")]
+        DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => {
+            let split_url = SplitUrl::from_str(&di.request).unwrap_or_log();
+            let path = split_url
+                .path
+                .map(|p| p.to_string())
+                .filter(|p| !p.is_empty())
+                .map(|p| format!("/{}", p))
+                .unwrap_or_default();
+            format!("B{}{}", split_url.port.unwrap_or(443), path)
+        }
+    };
+    ShortDialInfo { short_url }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BootstrapDialInfoConverter {}
 
 impl DialInfoConverterResolver for BootstrapDialInfoConverter {
-    fn ptr_lookup(&self, ip_addr: IpAddr) -> PinBoxFuture<'_, EyreResult<String>> {
-        pin_dyn_future!(async move { Resolver::ptr_lookup(ip_addr).await.map_err(|e| e.into()) })
-    }
-
     #[allow(unused_variables)]
     fn to_socket_addrs(
         &self,

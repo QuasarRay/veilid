@@ -1161,7 +1161,7 @@ pub async fn test_all() {
     shutdown(api).await;
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    test_namespace_lock().await;
+    Box::pin(test_namespace_lock()).await;
     test_protected_store_delete_wipes_tables().await;
     test_protected_store_delete_no_wipe_returns_not_initialized().await;
     test_migration_v1().await;

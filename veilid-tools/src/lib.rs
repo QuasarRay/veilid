@@ -104,8 +104,6 @@ pub mod process_watchdog;
 pub mod random;
 /// Raw integer timestamps with duration parsing and human formatting.
 pub mod raw_timestamp;
-/// DNS resolution through the platform's system resolver.
-pub mod resolver;
 /// Single-fire eventual whose resolution returns the prior pending value.
 pub mod single_shot_eventual;
 /// Async sleep for a number of milliseconds.
@@ -309,8 +307,6 @@ pub use process_watchdog::*;
 pub use random::*;
 #[doc(inline)]
 pub use raw_timestamp::*;
-#[doc(inline)]
-pub use resolver::*;
 #[doc(inline)]
 pub use single_shot_eventual::*;
 #[doc(inline)]

@@ -39,14 +39,15 @@ impl PublicInternetRoutingDomainController {
         );
     }
 
-    fn check_bootstrap(state: &RoutingDomainState) -> bool {
+    /// The bootstrap task runs to fill the table, or to re-check a served payload past its ttl
+    fn check_bootstrap(&self, state: &RoutingDomainState) -> bool {
         match state.outbound_stage {
             RoutingDomainOutboundStage::Invalid => false,
             RoutingDomainOutboundStage::NeedsBootstrap => true,
             RoutingDomainOutboundStage::NeedsPublishedPeerInfo
             | RoutingDomainOutboundStage::NeedsMoreTestedNodes
             | RoutingDomainOutboundStage::NeedsSafetyRoutes
-            | RoutingDomainOutboundStage::ReadyToOperate => false,
+            | RoutingDomainOutboundStage::ReadyToOperate => self.bootstrap_recheck_pending(),
         }
     }
 
@@ -174,7 +175,7 @@ impl PublicInternetRoutingDomainController {
             veilid_log!(self debugwarn "[PublicInternet] safety_routes_ready FLAPPING (penalty={:.1}): now ready={}", penalty, safety_ready);
         }
 
-        if Self::check_bootstrap(&state) {
+        if self.check_bootstrap(&state) {
             self.bootstrap_task.tick().await?;
         }
         if Self::check_peer_minimum_refresh(&state, &nodes_needed) {

@@ -11,6 +11,8 @@ pub(in crate::network_manager) mod certificate_manager;
 pub(in crate::network_manager) mod discovery_context;
 pub(in crate::network_manager) mod protocol;
 pub(in crate::network_manager) mod start_protocols;
+pub(in crate::network_manager) mod tls_acceptors;
+pub(in crate::network_manager) mod tls_certificates;
 #[cfg(feature = "enable-protocol-webtransport")]
 pub(in crate::network_manager) mod udp_demux;
 #[cfg(feature = "enable-protocol-webtransport")]
@@ -34,6 +36,8 @@ use protocol::tcp::RawTcpProtocolHandler;
 use protocol::udp::RawUdpProtocolHandler;
 use protocol::ws::WebsocketProtocolHandler;
 use start_protocols::*;
+use tls_acceptors::*;
+use tls_certificates::*;
 #[cfg(feature = "enable-protocol-webtransport")]
 use webtransport_listener::*;
 
@@ -48,7 +52,7 @@ use futures_util::StreamExt;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /////////////////////////////////////////////////////////////////
 
@@ -59,6 +63,12 @@ pub const UPDATE_DIAL_INFO_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const UPNP_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const MTU_DETECTION_TASK_TICK_PERIOD_SECS: u32 = 1;
+/// How often the WSS and WebTransport certificate tasks check the TLS files for a renewal
+#[cfg(any(
+    feature = "enable-protocol-wss",
+    feature = "enable-protocol-webtransport"
+))]
+pub const CERT_TASK_TICK_PERIOD_SECS: u32 = 60;
 
 /// Native network durations derived from config
 #[derive(Clone, Copy, Debug)]
@@ -131,8 +141,8 @@ struct NetworkInner {
     udp_protocol_handlers: BTreeMap<SocketAddr, RawUdpProtocolHandler>,
     /// One sender per UDP listener task, used to add dynamically-bound handlers at runtime
     udp_listener_command_txs: Vec<flume::Sender<UdpListenerCommand>>,
-    /// TLS handling socket controller
-    tls_acceptor: Option<TlsAcceptor>,
+    /// WSS acceptors, built when the first TLS listener binds
+    tls_acceptors: Option<TlsAcceptors>,
     /// Multiplexer record for protocols on low level TCP sockets
     listener_states: BTreeMap<SocketAddr, Arc<RwLock<ListenerState>>>,
     /// Preferred local addresses for transports for outgoing connections
@@ -172,6 +182,8 @@ pub(in crate::network_manager) struct NetworkUnlockedInner {
     network_interfaces_task: TickTask<EyreReport>,
     upnp_task: TickTask<EyreReport>,
     mtu_detection_task: TickTask<EyreReport>,
+    #[cfg(feature = "enable-protocol-wss")]
+    tls_cert_task: TickTask<EyreReport>,
     #[cfg(feature = "enable-protocol-webtransport")]
     webtransport_tasks: webtransport_state::WebTransportTasks,
     network_task_lock: AsyncRwLock<()>,
@@ -978,7 +990,7 @@ impl NativeNetwork {
             bound_address_per_protocol: BTreeMap::new(),
             udp_protocol_handlers: BTreeMap::new(),
             udp_listener_command_txs: Vec::new(),
-            tls_acceptor: None,
+            tls_acceptors: None,
             listener_states: BTreeMap::new(),
             preferred_local_addresses: BTreeMap::new(),
             igd_manager: None,
@@ -1023,6 +1035,8 @@ impl NativeNetwork {
                 "mtu_detection_task",
                 MTU_DETECTION_TASK_TICK_PERIOD_SECS,
             ),
+            #[cfg(feature = "enable-protocol-wss")]
+            tls_cert_task: TickTask::new("tls_cert_task", CERT_TASK_TICK_PERIOD_SECS),
             #[cfg(feature = "enable-protocol-webtransport")]
             webtransport_tasks: webtransport_state::WebTransportTasks::new(),
             network_task_lock: AsyncRwLock::new(()),
@@ -1099,39 +1113,6 @@ impl NativeNetwork {
             io::ErrorKind::InvalidInput,
             "invalid TLS private key",
         ))
-    }
-
-    fn load_server_config(&self) -> io::Result<ServerConfig> {
-        let config = self.config();
-        //
-        veilid_log!(self trace
-            "loading certificate from {}",
-            config.network.tls.certificate_path
-        );
-        let certs_path = PathBuf::from(&config.network.tls.certificate_path);
-        let certs = Self::load_certs(&certs_path)?;
-        veilid_log!(self trace "loaded {} certificates", certs.len());
-        if certs.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Certificates at {} could not be loaded.\nEnsure it is in PEM format, beginning with '-----BEGIN CERTIFICATE-----'",config.network.tls.certificate_path)));
-        }
-        //
-        veilid_log!(self trace
-            "loading private key from {}",
-            config.network.tls.private_key_path
-        );
-        let keys_path = PathBuf::from(&config.network.tls.private_key_path);
-        let mut keys = Self::load_keys(&keys_path)?;
-        veilid_log!(self trace "loaded {} keys", keys.len());
-        if keys.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Private key at {} could not be loaded.\nEnsure it is unencrypted and in RSA or PKCS8 format, beginning with '-----BEGIN RSA PRIVATE KEY-----' or '-----BEGIN PRIVATE KEY-----'",config.network.tls.private_key_path)));
-        }
-
-        let config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, keys.remove(0))
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-
-        Ok(config)
     }
 
     fn add_to_join_handles(&self, jh: MustJoinHandle<()>) {
