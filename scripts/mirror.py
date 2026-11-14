@@ -20,7 +20,7 @@ async def main() -> None:
         mirror = (
             dag.container()
             .from_("alpine:3.21")
-            .with_exec(["apk", "add", "--no-cache", "git", "ca-certificates"])
+            .with_exec(["apk", "add", "--no-cache", "git", "git-filter-repo", "ca-certificates"])
             .with_env_variable("UPSTREAM_URL", "https://gitlab.com/veilid/veilid.git")
             .with_env_variable("DESTINATION_URL", "https://github.com/QuasarRay/veilid.git")
             .with_env_variable("GIT_TERMINAL_PROMPT", "0")

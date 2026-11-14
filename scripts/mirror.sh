@@ -12,6 +12,11 @@ workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 git clone --mirror -- "$UPSTREAM_URL" "$workdir/upstream.git"
 cd "$workdir/upstream.git"
+
+# GitHub rejects oversized Git blobs, even in old commits. Filter a
+# temporary clone only; the original GitLab repository is never modified.
+git filter-repo --strip-blobs-bigger-than "${MIRROR_MAX_BLOB_SIZE:-95M}" --force
+
 git remote add destination "$DESTINATION_URL"
 
 # Scoped, forced refspecs mirror upstream non-fast-forward updates and remove
