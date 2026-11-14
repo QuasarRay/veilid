@@ -1,8 +1,18 @@
 name: Mirror Veilid from GitLab
 
 on:
+  # GitHub Actions' shortest supported schedule; execution may be delayed.
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "*/5 * * * *"
+  # Trigger initial synchronization when this controller is committed.
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/mirror.yml"
+      - "scripts/mirror.py"
+      - "scripts/mirror.sh"
+      - "tests/test_mirror.py"
   workflow_dispatch:
 
 permissions:
