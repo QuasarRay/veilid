@@ -9,7 +9,7 @@ This GitHub repository contains a **Dagger-powered, scheduled Git mirror** of [V
 - Original commit identities, Git history, and annotated tag objects are retained. Upstream force-pushes and deletions are reflected **only** within these prefixed namespaces.
 - Files and commits from upstream are **not executed** during mirroring.
 
-The workflow runs four times daily (00:17, 06:17, 12:17, 18:17 UTC) and can also be run using **Actions → Mirror Veilid from GitLab → Run workflow**. It uses GitHub Actions' short-lived `GITHUB_TOKEN` with `contents: write`; no personal access token is required.
+The workflow requests synchronization **every five minutes** (UTC), also starts after changes to its mirroring controller files on `main`, and can be run manually using **Actions → Mirror Veilid from GitLab → Run workflow**. GitHub Actions cron jobs can start late or be skipped under load. **Until an Actions run finishes successfully, the `mirror/*` branches and `upstream/*` tags will not exist.** To browse the source after a successful run, open the repository's branch selector and choose `mirror/main` (not the default `main` control branch). It uses GitHub Actions' short-lived `GITHUB_TOKEN` with `contents: write`; no personal access token is required.
 
 ## Pipeline and testing
 
