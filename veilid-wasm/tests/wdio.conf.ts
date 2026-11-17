@@ -25,6 +25,17 @@ function publishTestEnvironment() {
 
 publishTestEnvironment();
 
+// WDIO_PAGE_HOST serves the test page from another address of this machine, WDIO_PAGE_CERT with
+// WDIO_PAGE_KEY serve it over https. A plain http page from an address other than localhost is
+// not a secure context; an https page is one where a clear websocket is mixed content
+const pageTls = Boolean(process.env.WDIO_PAGE_CERT && process.env.WDIO_PAGE_KEY);
+const pageOrigin =
+  pageTls || process.env.WDIO_PAGE_HOST
+    ? `${pageTls ? 'https' : 'http'}://${process.env.WDIO_PAGE_HOST || 'localhost'}`
+    : undefined;
+// The page's certificate is the caller's own, signed by no authority a browser knows
+const pageCapabilities = pageTls ? { acceptInsecureCerts: true } : {};
+
 export const config: WebdriverIO.Config = {
   //
   // ====================
@@ -35,6 +46,7 @@ export const config: WebdriverIO.Config = {
     'browser',
     {
       viteConfig: './vite.config.ts',
+      ...(pageOrigin ? { host: pageOrigin } : {}),
       coverage: {
         enabled: true,
         // needed since the ../pkg directory that has the compiled wasm npm package
@@ -97,12 +109,14 @@ export const config: WebdriverIO.Config = {
       ? [
           {
             browserName: 'safari',
+            ...pageCapabilities,
           },
         ]
       : process.env.WDIO_BROWSER === 'firefox'
         ? [
             {
               browserName: 'firefox',
+              ...pageCapabilities,
               'moz:firefoxOptions': {
                 ...(process.env.FIREFOX_BIN ? { binary: process.env.FIREFOX_BIN } : {}),
                 args: process.env.WDIO_HEADLESS ? ['-headless'] : [],
@@ -116,6 +130,7 @@ export const config: WebdriverIO.Config = {
             {
               // capabilities for local browser web tests
               browserName: 'chrome', // or "firefox", "microsoftedge", "safari"
+              ...pageCapabilities,
               'goog:chromeOptions': {
                 ...(process.env.CHROME_BIN ? { binary: process.env.CHROME_BIN } : {}),
                 args: [
@@ -124,6 +139,7 @@ export const config: WebdriverIO.Config = {
                   ...(process.env.WDIO_HEADLESS
                     ? ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage']
                     : []),
+                  ...(process.env.WDIO_CHROME_ARGS?.split(' ').filter(Boolean) ?? []),
                 ],
               },
               // Disable browser log capture. Chrome logs benign P2P WebSocket connect failures as

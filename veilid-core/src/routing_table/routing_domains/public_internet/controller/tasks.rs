@@ -39,7 +39,7 @@ impl PublicInternetRoutingDomainController {
         );
     }
 
-    /// The bootstrap task runs to fill the table, or to re-check a served payload past its ttl
+    /// The bootstrap task runs to fill the table, or to re-check the payload this node serves
     fn check_bootstrap(&self, state: &RoutingDomainState) -> bool {
         match state.outbound_stage {
             RoutingDomainOutboundStage::Invalid => false,
@@ -177,6 +177,10 @@ impl PublicInternetRoutingDomainController {
 
         if self.check_bootstrap(&state) {
             self.bootstrap_task.tick().await?;
+        }
+        // Out of the bootstrap stage, the next round is news again
+        if state.outbound_stage != RoutingDomainOutboundStage::NeedsBootstrap {
+            self.bootstrap_announced_via.lock().take();
         }
         if Self::check_peer_minimum_refresh(&state, &nodes_needed) {
             self.peer_minimum_refresh_task.tick().await?;

@@ -9,16 +9,13 @@ Running Veilid in the browser via WebAssembly has some limitations:
 ### Browser-based limitations
 
 1. TCP/UDP sockets are unavailable in the browser. This limits WASM nodes to communicating using WebSockets and WebTransport.
-1. DNS lookups are unavailable in the browser, so the browser resolves a bootstrap's name itself when it opens the connection. A WASM node bootstraps over WSS and WebTransport (`network.routing_table.bootstrap_protocols`, WSS first by default) to the hosts or urls in `network.routing_table.bootstrap[]`, such as `bootstrap-v1.veilid.net` or `wss://bootstrap-v1.veilid.net:5150/ws`; a `ws://` url works only from an `http://` page.
+1. DNS lookups are unavailable in the browser, so the browser resolves a bootstrap's name itself when it opens the connection. A WASM node bootstraps over WSS and WebTransport (`network.routing_table.bootstrap_protocols`, WSS first by default) to the hosts or urls in `network.routing_table.bootstrap[]`, such as `bootstrap-v1.veilid.net` or `wss://bootstrap-v1.veilid.net:5150/ws`; a url over a protocol the page cannot use, such as `ws://` from an `https://` page, is skipped.
 1. Do not set up any nodes with a core.network.protocol.wss.url IP address such as wss://12.34.56.78:5150/ws to support SSL. Even though a Certificate Authority (trusted by browsers) will give you an SSL certificate for an IP address, this is unsupported by Veilid as of v0.2.3. Any wss:// URL containing an IP address causes an RPC error in veilid-core and your node will lose communication with other nodes.
 1. Since a WASM node running in the browser can't open ports, WASM nodes select another node to act as its Inbound Relay, so other nodes can react out to it and open a WS connection.
-1. Because of browser security policy regarding WebSockets:
-   1. `ws://` only works on `http://` sites
-   1. `wss://` only works on `https://` site with SSL certificates.
-
-### Running WASM on HTTPS sites [Not currently implemented]
-
-Since WSS connections require WSS peers with valid SSL certificates, `veilid-core` plans to implement a feature called Outbound Relays. Outbound Relays will likely be hosted by the same host of the WASM web-app, and must run have valid SSL certificates that are signed by a Certificate Authority that's trusted by browsers. Outbound Relays will allow WASM nodes to communicate to other nodes over TCP/UDP/WS/WSS through the Outbound Relay's connection.
+1. The page decides which protocols reach other nodes:
+   1. A page served over `https://` reaches them over WebTransport only, since the browser refuses it `ws://`. Startup fails there when `webtransport.connect` is off or the browser has no WebTransport.
+   1. A page that is not a secure context (`http://` other than localhost) has no WebTransport and reaches them over `ws://`. The node logs that WebTransport is disabled, and startup fails when `ws.connect` is off.
+   1. `wss://` reaches a bootstrap from any page, but other nodes listen on it only with a certificate from a Certificate Authority, so it does not count: a node with WSS as its only outbound protocol fails to start.
 
 ## Loading the package
 

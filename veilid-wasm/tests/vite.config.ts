@@ -1,5 +1,6 @@
 import { defineConfig, searchForWorkspaceRoot, type PluginOption } from 'vite';
 import wasm from 'vite-plugin-wasm';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // The web-target wasm-bindgen package loads its `.wasm` by a URL relative to its own module, and
@@ -23,6 +24,15 @@ export default defineConfig({
     exclude: ['veilid-wasm'],
   },
   server: {
+    ...(process.env.WDIO_PAGE_HOST ? { host: process.env.WDIO_PAGE_HOST } : {}),
+    ...(process.env.WDIO_PAGE_CERT && process.env.WDIO_PAGE_KEY
+      ? {
+          https: {
+            cert: readFileSync(process.env.WDIO_PAGE_CERT),
+            key: readFileSync(process.env.WDIO_PAGE_KEY),
+          },
+        }
+      : {}),
     fs: {
       allow: [searchForWorkspaceRoot(process.cwd()), pkgDir],
     },

@@ -55,38 +55,27 @@ const WT_STREAM_RECEIVE_WINDOW: u64 = 4 * MAX_MESSAGE_SIZE as u64;
 const WT_CONNECTION_RECEIVE_WINDOW: u64 =
     WT_PEER_BIDI_STREAMS_NEEDED as u64 * WT_STREAM_RECEIVE_WINDOW;
 
-/// The QUIC packet sizes an endpoint starts from and may discover up to, in UDP payload bytes
+/// How large an endpoint's QUIC packets may grow, in UDP payload bytes: the address family's
+/// UDP interface limit, where path MTU discovery stops
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::network_manager) struct QuicMtuSeed {
-    /// RawUDP's settled size for the address family, 1200 until a probe proves more
-    pub initial: u16,
-    /// The family's UDP interface limit, where discovery stops
-    pub limit: u16,
-}
+pub(in crate::network_manager) struct QuicMtuLimit(pub u16);
 
-impl Default for QuicMtuSeed {
-    /// quinn's floor for both, as before any probe
+impl Default for QuicMtuLimit {
+    /// quinn's floor, which leaves discovery nowhere to go
     fn default() -> Self {
-        Self {
-            initial: SAFE_TRANSPORT_MTU,
-            limit: SAFE_TRANSPORT_MTU,
-        }
+        Self(SAFE_TRANSPORT_MTU)
     }
 }
 
-impl QuicMtuSeed {
-    /// The seed for `address_type` from the sizes RawUDP has settled
+impl QuicMtuLimit {
+    /// The limit for `address_type`, from the interface sizes RawUDP detection keeps
     pub fn for_address_type(registry: &VeilidComponentRegistry, address_type: AddressType) -> Self {
         let network_manager = registry.network_manager();
         let own_mtus = network_manager.own_mtus();
-        let llt = LowLevelTransportType {
+        Self(own_mtus.limit(LowLevelTransportType {
             low_level_protocol_type: LowLevelProtocolType::UDP,
             address_type,
-        };
-        Self {
-            initial: own_mtus.get(llt),
-            limit: own_mtus.limit(llt),
-        }
+        }))
     }
 
     pub fn for_remote(registry: &VeilidComponentRegistry, remote: &SocketAddr) -> Self {
@@ -103,11 +92,12 @@ impl QuicMtuSeed {
 /// dial. quinn's defaults allow 100 peer-initiated streams of each kind against an unbounded
 /// connection receive window, and the accept path reads at most one stream per session.
 ///
-/// Packets start at RawUDP's proven size for the family, so a seed at the limit needs no probe,
-/// and discovery stops at the interface limit; quinn floors both at 1200.
-fn webtransport_transport_config(seed: QuicMtuSeed) -> Arc<quinn::TransportConfig> {
+/// Every session starts at QUIC's 1200 minimum, which any path carries, and discovers its own
+/// path up to the interface limit: a first flight sized for this host's interface is lost
+/// whole on a path with a smaller MTU, and the dial times out before quinn falls back.
+fn webtransport_transport_config(mtu_limit: QuicMtuLimit) -> Arc<quinn::TransportConfig> {
     let mut mtu_discovery = quinn::MtuDiscoveryConfig::default();
-    mtu_discovery.upper_bound(seed.limit.max(seed.initial));
+    mtu_discovery.upper_bound(mtu_limit.0);
     let mut transport = quinn::TransportConfig::default();
     transport
         .max_concurrent_bidi_streams(WT_MAX_PEER_BIDI_STREAMS.into())
@@ -118,7 +108,7 @@ fn webtransport_transport_config(seed: QuicMtuSeed) -> Arc<quinn::TransportConfi
         .receive_window(
             quinn::VarInt::from_u64(WT_CONNECTION_RECEIVE_WINDOW).unwrap_or(quinn::VarInt::MAX),
         )
-        .initial_mtu(seed.initial)
+        .initial_mtu(SAFE_TRANSPORT_MTU)
         .mtu_discovery_config(Some(mtu_discovery));
     Arc::new(transport)
 }
@@ -257,7 +247,7 @@ pub(in crate::network_manager) fn webtransport_endpoint_config() -> quinn::Endpo
 
 pub(in crate::network_manager) fn build_client_config(
     allowed_hashes: Vec<[u8; 32]>,
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ClientConfig> {
     let provider = crypto_provider();
     let verifier = CertificateHashVerifier::new(allowed_hashes, provider.clone());
@@ -271,7 +261,7 @@ pub(in crate::network_manager) fn build_client_config(
 
     let quic_crypto = QuicClientConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(seed));
+    config.transport_config(webtransport_transport_config(mtu_limit));
     Ok(config)
 }
 
@@ -290,10 +280,10 @@ fn ca_quic_crypto() -> io::Result<Arc<QuicClientConfig>> {
 }
 
 pub(in crate::network_manager) fn cached_client_config_ca(
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ClientConfig> {
     let mut config = quinn::ClientConfig::new(ca_quic_crypto()?);
-    config.transport_config(webtransport_transport_config(seed));
+    config.transport_config(webtransport_transport_config(mtu_limit));
     Ok(config)
 }
 
@@ -311,18 +301,18 @@ fn quic_client_crypto_with_root_store(root_store: RootCertStore) -> io::Result<Q
 #[cfg(any(test, feature = "test-util"))]
 pub(in crate::network_manager) fn build_client_config_with_root_store(
     root_store: RootCertStore,
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ClientConfig> {
     let quic_crypto = quic_client_crypto_with_root_store(root_store)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(seed));
+    config.transport_config(webtransport_transport_config(mtu_limit));
     Ok(config)
 }
 
 pub(in crate::network_manager) fn build_server_config_from_chain(
     cert_chain: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ServerConfig> {
     let provider = crypto_provider();
     let mut crypto = rustls::ServerConfig::builder_with_provider(provider)
@@ -335,23 +325,23 @@ pub(in crate::network_manager) fn build_server_config_from_chain(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(seed));
+    config.transport_config(webtransport_transport_config(mtu_limit));
     Ok(config)
 }
 
 pub(in crate::network_manager) fn build_server_config(
     cert: &ManagedCertificate,
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ServerConfig> {
     let cert_chain = vec![CertificateDer::from(cert.certificate_der.clone())];
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.private_key_der.clone()));
-    build_server_config_from_chain(cert_chain, key, seed)
+    build_server_config_from_chain(cert_chain, key, mtu_limit)
 }
 
 pub(in crate::network_manager) fn build_ca_server_config(
     hostname: Arc<CertifiedKey>,
     ip: Option<Arc<CertifiedKey>>,
-    seed: QuicMtuSeed,
+    mtu_limit: QuicMtuLimit,
 ) -> io::Result<quinn::ServerConfig> {
     let resolver = Arc::new(TlsServerCertResolver::new(hostname, ip));
     let provider = crypto_provider();
@@ -364,7 +354,7 @@ pub(in crate::network_manager) fn build_ca_server_config(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(seed));
+    config.transport_config(webtransport_transport_config(mtu_limit));
     Ok(config)
 }
 
@@ -765,11 +755,11 @@ pub(in crate::network_manager) async fn connect_connection(
     let url = url::Url::parse(&request).map_err(to_io_error_other)?;
     let remote = dial_info.to_socket_addr();
 
-    let seed = QuicMtuSeed::for_remote(&registry, &remote);
+    let mtu_limit = QuicMtuLimit::for_remote(&registry, &remote);
     let client_config = match dial_mode {
-        WebTransportDialMode::CaSigned => cached_client_config_ca(seed)?,
+        WebTransportDialMode::CaSigned => cached_client_config_ca(mtu_limit)?,
         WebTransportDialMode::PinnedSelfSigned(cert_hashes) => {
-            build_client_config(cert_hashes, seed)?
+            build_client_config(cert_hashes, mtu_limit)?
         }
     };
     let endpoint = match opt_client_endpoint {

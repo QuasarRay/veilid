@@ -394,8 +394,8 @@ pub async fn test_boot_v2_accept_rules() {
     mock_registry::terminate(registry).await;
 }
 
-/// The newest payload wins a union, a config copy takes ties, and a learned copy comes due
-/// for a re-check one ttl after it arrived
+/// The newest payload wins a union, a config copy takes ties, and a re-check comes due once
+/// per cache period for a learned copy and for having nothing to serve
 pub async fn test_bootstrap_cache() {
     let registry = mock_registry::init("boot_v2_cache").await;
     {
@@ -412,10 +412,14 @@ pub async fn test_bootstrap_cache() {
             Some(now.later(TEST_LIFETIME)),
         );
 
-        let empty = BootstrapCache::default();
+        // Nothing held comes due at once, then once per default cache period
+        let mut empty = BootstrapCache::default();
         assert!(empty.is_empty());
-        assert!(!empty.recheck_due(now));
         assert!(empty.served_payload(now).is_none());
+        assert!(empty.recheck_due(now));
+        empty.mark_rechecked(now);
+        assert!(!empty.recheck_due(now));
+        assert!(empty.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
 
         let mut learned = BootstrapCache::from_payload(&older, Some(now));
         assert!(!learned.is_empty());
@@ -424,6 +428,7 @@ pub async fn test_bootstrap_cache() {
         assert!(learned.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
         learned.mark_rechecked(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL));
         assert!(!learned.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
+        assert_eq!(learned.received_at(), Some(now));
 
         // The newer payload replaces the older, from either side
         learned.union(BootstrapCache::from_payload(&newer, Some(now)));
@@ -437,16 +442,17 @@ pub async fn test_bootstrap_cache() {
             Some(newer.payload().timestamp())
         );
 
-        // A config copy takes a tie and never comes due
+        // A config copy never comes due while it is served, and takes a tie
+        let unexpiring = BootstrapCache::from_payload(&older, None);
+        assert!(!unexpiring.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
         let mut config = BootstrapCache::from_payload(&newer, None);
-        assert!(!config.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
         config.union(BootstrapCache::from_payload(&newer, Some(now)));
         assert_eq!(config.received_at(), None);
         learned.union(BootstrapCache::from_payload(&newer, None));
         assert_eq!(learned.received_at(), None);
 
-        // An expired payload is held for its floor but not served
-        let expired = BootstrapCache::from_payload(&newer, None);
+        // An expired payload is held for its floor but not served, and comes due like none
+        let mut expired = BootstrapCache::from_payload(&newer, None);
         let later = now
             .later(TEST_LIFETIME)
             .later(TimestampDuration::new_secs(1));
@@ -455,6 +461,33 @@ pub async fn test_bootstrap_cache() {
             expired.payload_timestamp(),
             Some(newer.payload().timestamp())
         );
+        assert!(!expired.recheck_due(now));
+        assert!(expired.recheck_due(later));
+        expired.mark_rechecked(later);
+        assert!(!expired.recheck_due(later));
+
+        // The last re-check survives a union with the config copy
+        let mut served = BootstrapCache::default();
+        served.mark_rechecked(later);
+        served.union(BootstrapCache::from_payload(&newer, None));
+        assert!(!served.recheck_due(later));
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A node asked for a payload it does not hold asks its bootstraps on the next tick
+pub async fn test_bootstrap_recheck_with_nothing_to_serve() {
+    let registry = mock_registry::init("boot_v2_recheck").await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let controller = routing_table
+            .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
+        assert!(!controller.bootstrap_recheck_pending());
+        network_manager
+            .boot_v2_response()
+            .expect("a reply with no payload still builds");
+        assert!(controller.bootstrap_recheck_pending());
     }
     mock_registry::terminate(registry).await;
 }

@@ -136,6 +136,13 @@ impl NetworkState {
         }
     }
 
+    /// Record which routing domains detect address changes
+    pub fn set_detect_address_changes(&mut self, routing_domains: &BTreeSet<RoutingDomain>) {
+        for (routing_domain, state) in self.routing_domain_network_states.iter_mut() {
+            state.detect_address_changes = routing_domains.contains(routing_domain);
+        }
+    }
+
     pub fn add_static_dial_info_detail(
         &mut self,
         dial_info_detail: DialInfoDetail,
@@ -158,9 +165,6 @@ impl NetworkState {
             return Ok(());
         }
 
-        // It this is a static public address and we are not detecting address changes
-        // then we can add this directly to the public internet routing domain
-        // (otherwise we will add this during the 'confirm dial info' process)
         if let Some(routing_domain_network_state) =
             self.routing_domain_network_states.get_mut(&routing_domain)
         {
@@ -268,7 +272,8 @@ impl NativeNetwork {
         let address_config = self.make_address_config();
         let protocol_config = self.make_protocol_config(&address_config);
 
-        let routing_domain_detect_address_changes =
+        let first_refresh = opt_last_network_state.is_none();
+        let mut routing_domain_detect_address_changes =
             if let Some(last_network_state) = opt_last_network_state {
                 // Post-startup network refresh
                 veilid_log!(self debug
@@ -312,9 +317,7 @@ impl NativeNetwork {
                     AddressTypeSet::new(),
                 );
 
-                // The first time we get a network state, set up the 'detect address changes' settings for
-                // each routing domain based on the config and the initial network state
-                self.set_up_detect_address_changes(&interface_address_state)
+                BTreeSet::new()
             };
 
         // Tell offline detection which socket classes this network uses
@@ -327,11 +330,19 @@ impl NativeNetwork {
             protocol_config,
             address_config,
             interface_address_state.clone(),
-            routing_domain_detect_address_changes,
+            routing_domain_detect_address_changes.clone(),
         );
 
         // Get the updated dialinfo into the new network state
         self.add_interface_dial_info(&mut new_network_state)?;
+
+        // The first network state, with its dial info, settles which routing domains detect
+        // address changes
+        if first_refresh {
+            routing_domain_detect_address_changes =
+                self.set_up_detect_address_changes(&new_network_state);
+            new_network_state.set_detect_address_changes(&routing_domain_detect_address_changes);
+        }
 
         let new_network_state = Arc::new(new_network_state);
         self.inner.lock().network_state = Some(new_network_state.clone());
@@ -634,24 +645,7 @@ impl NativeNetwork {
             inbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
         }
 
-        let mut outbound = ProtocolTypeSet::new();
-        if config.network.protocol.udp.enabled {
-            outbound.insert(ProtocolType::UDP);
-        }
-        if config.network.protocol.tcp.connect {
-            outbound.insert(ProtocolType::TCP);
-        }
-        if config.network.protocol.ws.connect {
-            outbound.insert(ProtocolType::WS);
-        }
-        #[cfg(feature = "enable-protocol-wss")]
-        if config.network.protocol.wss.connect {
-            outbound.insert(ProtocolType::WSS);
-        }
-        #[cfg(feature = "enable-protocol-webtransport")]
-        if config.network.protocol.webtransport.connect {
-            outbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
-        }
+        let outbound = config.outbound_protocols().protocol_types();
 
         let mut family_global = AddressTypeSet::new();
         let mut family_local = AddressTypeSet::new();

@@ -114,26 +114,10 @@ impl WebsocketNetworkConnection {
 
 ///////////////////////////////////////////////////////////
 
-/// Whether the browser blocks a plain ws:// dial as mixed content: from an https page to a peer
-/// other than loopback, which the browser treats as potentially trustworthy. Chrome lets other
-/// secure contexts, such as http://localhost, open ws:// to any host.
-pub(in crate::network_manager) fn ws_blocked_as_mixed_content(
-    host: &SplitUrlHost,
-    socket_address: SocketAddress,
-) -> bool {
-    is_browser_https() && !ws_target_is_local(host, socket_address)
-}
-
-/// Whether a ws:// target is loopback, or names localhost when the dial info has no address
-pub(in crate::network_manager) fn ws_target_is_local(
-    host: &SplitUrlHost,
-    socket_address: SocketAddress,
-) -> bool {
-    if socket_address.ip_addr().is_unspecified() {
-        matches!(host, SplitUrlHost::Hostname(h) if h.eq_ignore_ascii_case("localhost"))
-    } else {
-        socket_address.ip_addr().is_loopback()
-    }
+/// Whether the browser blocks a plain ws:// dial as mixed content, which an https page does.
+/// Other secure contexts, such as http://localhost, open ws:// to any host
+pub(in crate::network_manager) fn ws_blocked_as_mixed_content() -> bool {
+    is_browser_https()
 }
 
 pub(in crate::network_manager) struct WebsocketProtocolHandler {}
@@ -163,9 +147,9 @@ impl WebsocketProtocolHandler {
 
         let socket_address = dial_info.socket_address();
 
-        if !tls && ws_blocked_as_mixed_content(&split_url.host, socket_address) {
+        if !tls && ws_blocked_as_mixed_content() {
             veilid_log!(registry debug
-                "WS: refusing ws:// to non-local {} from an https page (mixed content)", socket_address);
+                "WS: refusing ws:// to {} from an https page (mixed content)", socket_address);
             return Ok(NetworkResult::no_connection_other(
                 "ws:// is blocked as mixed content on an https page",
             ));

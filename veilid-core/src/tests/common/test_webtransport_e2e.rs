@@ -331,12 +331,21 @@ async fn test_webtransport_wrong_path_rejected_404() {
     api.attach().await.expect("attach");
 
     let dids = wait_for_udp_dial_info(&api).await;
-    let wts_dial_info = dids
+    let wts_dial_infos: Vec<_> = dids
         .iter()
-        .find_map(|d| match &d.dial_info {
+        .filter_map(|d| match &d.dial_info {
             DialInfo::WebTransportStream(di) => Some(di.clone()),
             _ => None,
         })
+        .collect();
+    // The node dials itself, which an address on a tunnel interface may not loop back, so
+    // the routed interface's address comes first
+    let routed_ip = discover_non_loopback_interface_ip();
+    let wts_dial_info = wts_dial_infos
+        .iter()
+        .find(|di| Some(di.socket_address.ip_addr()) == routed_ip)
+        .or(wts_dial_infos.first())
+        .cloned()
         .expect("expected at least one advertised WTS dial info");
 
     let registry = api.core_context().expect("core context").registry();

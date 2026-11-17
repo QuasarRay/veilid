@@ -15,9 +15,12 @@ pub struct BootstrapCache {
     /// How long a learned copy is served before its source is re-checked
     #[serde(default)]
     cache_ttl: Option<TimestampDuration>,
-    /// When a learned copy arrived or was last re-checked, None for a copy from config
+    /// When a learned copy arrived, None for a copy from config
     #[serde(default)]
     received_at: Option<Timestamp>,
+    /// When the source was last asked again, whatever it answered
+    #[serde(default)]
+    rechecked_at: Option<Timestamp>,
     /// Legacy record lines served to B01T requests, verbatim
     #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
     #[serde(default)]
@@ -37,6 +40,7 @@ impl BootstrapCache {
             payload_expiration: payload.payload().expiration(),
             cache_ttl: Some(payload.payload().cache_ttl()),
             received_at,
+            rechecked_at: None,
             #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
             record_strings: vec![],
             #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
@@ -80,28 +84,36 @@ impl BootstrapCache {
         self.received_at
     }
 
+    /// Whether a payload is held that has not expired
+    pub fn serves_payload(&self, cur_ts: Timestamp) -> bool {
+        self.payload_line.is_some() && self.payload_expiration.is_none_or(|exp| cur_ts < exp)
+    }
+
     /// The payload to serve, decoded from its line, while it has not expired
     pub fn served_payload(&self, cur_ts: Timestamp) -> Option<SignedBootstrapPayload> {
-        if self.payload_expiration.is_some_and(|exp| cur_ts >= exp) {
+        if !self.serves_payload(cur_ts) {
             return None;
         }
         let line = self.payload_line.as_ref()?;
         SignedBootstrapPayload::try_new_from_line(line).ok()
     }
 
-    /// Whether a learned copy has been served past its ttl and its source should be asked again
+    /// Whether the source should be asked again: nothing is left to serve, or a learned copy
+    /// has been served past its ttl. Either comes due once per cache period
     pub fn recheck_due(&self, cur_ts: Timestamp) -> bool {
-        let (Some(received_at), Some(ttl)) = (self.received_at, self.cache_ttl) else {
+        // A config copy still being served is the operator's to replace
+        if self.received_at.is_none() && self.serves_payload(cur_ts) {
             return false;
-        };
-        self.payload_line.is_some() && cur_ts >= received_at.later(ttl)
+        }
+        let ttl = self.cache_ttl.unwrap_or(DEFAULT_BOOTSTRAP_CACHE_TTL);
+        self.received_at
+            .max(self.rechecked_at)
+            .is_none_or(|last| cur_ts >= last.later(ttl))
     }
 
     /// Start a new cache period after a re-check, whether or not anything changed
     pub fn mark_rechecked(&mut self, cur_ts: Timestamp) {
-        if self.received_at.is_some() {
-            self.received_at = Some(cur_ts);
-        }
+        self.rechecked_at = Some(cur_ts);
     }
 
     /// Fold another cache in: the newer payload wins, with a config copy taking ties
@@ -120,6 +132,7 @@ impl BootstrapCache {
             self.cache_ttl = other.cache_ttl;
             self.received_at = other.received_at;
         }
+        self.rechecked_at = self.rechecked_at.max(other.rechecked_at);
         #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
         {
             self.record_strings.extend(other.record_strings);

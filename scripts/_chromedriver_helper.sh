@@ -367,6 +367,11 @@ stop_chromedriver() {
 # otherwise leaves browser console output stranded inside Chrome. Uses
 # ChromeDriver's legacy POST /session/{id}/log endpoint (active when flutter
 # drive requests goog:loggingPrefs.browser: INFO during session creation).
+# Also drains the performance log every tenth poll. flutter drive turns it on
+# with tracing, and chromedriver moves Chrome's trace into it on each log read
+# made while it is unread or was last read empty: unread, that is 400 MB a
+# minute until chromedriver's allocator traps. Read without emptying it, the
+# trace piles up in Chrome and arrives at once.
 start_chromedriver_log_poller() {
     (
         local session_id=""
@@ -385,7 +390,20 @@ print(v[0]["id"] if v else "")' 2>/dev/null)"
         fi
         echo "chromedriver log poller: streaming logs from session ${session_id}"
 
+        local polls=0
         while true; do
+            if [ $(( polls % 10 )) -eq 0 ]; then
+                local reads=0 size
+                while [ $reads -lt 20 ]; do
+                    size="$(curl -sf -X POST "http://localhost:${CHROMEDRIVER_PORT}/session/${session_id}/log" \
+                        -H 'Content-Type: application/json' \
+                        -d '{"type":"performance"}' -o /dev/null -w '%{size_download}' 2>/dev/null)" || break
+                    # An empty reply is {"value":[]}
+                    [ "${size:-0}" -lt 64 ] && break
+                    reads=$(( reads + 1 ))
+                done
+            fi
+            polls=$(( polls + 1 ))
             local body
             body="$(curl -sf -X POST "http://localhost:${CHROMEDRIVER_PORT}/session/${session_id}/log" \
                 -H 'Content-Type: application/json' \

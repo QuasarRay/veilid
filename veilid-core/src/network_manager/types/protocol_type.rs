@@ -246,3 +246,47 @@ pub type ProtocolTypeSet = EnumSet<ProtocolType>;
 #[cfg(feature = "enable-protocol-webtransport")]
 pub(crate) const WEBTRANSPORT_PROTOCOL_TYPES: ProtocolTypeSet =
     enum_set!(ProtocolType::WTS | ProtocolType::WTD);
+
+impl OutboundProtocols {
+    /// These protocols as protocol types
+    pub(crate) fn protocol_types(&self) -> ProtocolTypeSet {
+        let mut out = ProtocolTypeSet::new();
+        if self.udp {
+            out.insert(ProtocolType::UDP);
+        }
+        if self.tcp {
+            out.insert(ProtocolType::TCP);
+        }
+        if self.ws {
+            out.insert(ProtocolType::WS);
+        }
+        #[cfg(feature = "enable-protocol-wss")]
+        if self.wss {
+            out.insert(ProtocolType::WSS);
+        }
+        #[cfg(feature = "enable-protocol-webtransport")]
+        if self.webtransport {
+            out.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
+        }
+        out
+    }
+}
+
+impl VeilidConfigBootstrapProtocol {
+    /// The protocol a bootstrap is dialed over, None in a build without it
+    pub(crate) fn protocol_type(&self) -> Option<ProtocolType> {
+        match self {
+            VeilidConfigBootstrapProtocol::Udp => Some(ProtocolType::UDP),
+            VeilidConfigBootstrapProtocol::Tcp => Some(ProtocolType::TCP),
+            VeilidConfigBootstrapProtocol::Ws => Some(ProtocolType::WS),
+            #[cfg(feature = "enable-protocol-wss")]
+            VeilidConfigBootstrapProtocol::Wss => Some(ProtocolType::WSS),
+            #[cfg(not(feature = "enable-protocol-wss"))]
+            VeilidConfigBootstrapProtocol::Wss => None,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            VeilidConfigBootstrapProtocol::Wts => Some(ProtocolType::WTS),
+            #[cfg(not(feature = "enable-protocol-webtransport"))]
+            VeilidConfigBootstrapProtocol::Wts => None,
+        }
+    }
+}

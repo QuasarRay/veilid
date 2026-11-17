@@ -54,7 +54,7 @@ pub trait RoutingDomainController:
     fn persisted_state(&self) -> Option<(Bytes, TableDBSerializedData)> {
         None
     }
-    /// Note that a served bootstrap payload is past its cache ttl, for the bootstrap task
+    /// Note that the served bootstrap payload has come due, for the bootstrap task to re-check
     fn request_bootstrap_recheck(&self) {}
 
     fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {

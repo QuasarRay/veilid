@@ -6,9 +6,11 @@
   - **Breaking** TXT-record bootstrap is removed; a bare bootstrap name resolves by A/AAAA and expands over `network.routing_table.bootstrap_protocols`, which defaults to WSS and WebTransport.
   - **Breaking** Nodes bootstrap only over B02T; bootstrap servers must run 0.6.0 before their clients.
   - **Breaking** A node with bootstraps configured but no dialable protocol in `bootstrap_protocols` fails to start.
+  - **Breaking** A node with no outbound protocol, or with WSS as its only one, fails to start, because WSS reaches bootstraps but no other peer.
+  - **Breaking** A browser node fails to start on a page that gives it no protocol reaching peers: WS unless the page is https, WebTransport where the browser offers it.
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
-  - WebTransport packets start at the RawUDP size proven for the address family, and discovery stops at the UDP interface limit; a WebTransport-only node discovers on its own from 1200.
+  - WebTransport sessions start at QUIC's 1200-byte minimum, which every path carries, and discover their path up to the UDP interface limit.
   - WebTransport listens and hole-punches without RawUDP: a WebTransport-only node punches from its own socket and returns the hole-punch receipt over the QUIC session it opens through the hole.
   - WebTransport datagram messages are sized like RawUDP ones, up to the maximum message size, instead of an 8-fragment cap.
   - WebTransport session logs and the `nodeinfo` connection table show each QUIC session's path MTU.
@@ -26,6 +28,13 @@
   - WSS serves the `ipv4` and `ipv6` certificates beside the `network.tls` certificate to clients that dial by IP literal, as WebTransport does, so a bootstrap listed by address needs no DNS.
   - WSS re-reads its TLS certificates when the files change, so a renewal needs no restart.
   - A bootstrap entry can be an IP literal of either family (`2001:db8::1`, `[2001:db8::1]:5150`), and WSS connects to a url whose host is an IPv6 literal.
+  - A node that answers bootstrap requests while holding no payload, or an expired one, asks its bootstraps for one, once per cache period.
+  - A browser node dials only the protocols its page can use: WS unless the page is https, and WebTransport where the page offers it, with a warning where it does not.
+  - A bootstrap url over a protocol the node does not dial is skipped.
+  - A node short of peers logs `Waiting for bootstrap...` and `Bootstrap finished` once per set of bootstrap peers, not on every round.
+  - `network.detect_address_changes` left unset turns PublicInternet address detection off for a node with a configured public address for every inbound protocol, as it does for one with a global address on an interface.
+  - A node that states its own PublicInternet dial info keeps it confirmed when its connection table empties, so the first nodes of a network come up without validators, and `detect_address_changes: false` rules detection out for good.
+  - A browser node counts an answer over a named WSS or WebTransport url toward the address family the peer saw it from, so a name the browser resolved to IPv4 does not confirm IPv6.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
@@ -50,12 +59,15 @@
   - **Breaking** `VeilidRng` implements the `rand` 0.10 traits `TryRng` and `TryCryptoRng`; the `rand` 0.8 `RngCore` and `CryptoRng` impls are gone.
   - **Breaking** The `Resolver` (`txt_lookup`, `ptr_lookup`, `supports_txt`) is removed.
   - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
+  - `has_webtransport()` reports whether the JS environment offers WebTransport.
 - veilid-wasm:
   - Browser WebTransport client, outbound only.
   - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
   - In a minified app bundle, a thrown error's `name` and `constructor.name` are its class name, such as `VeilidAPIErrorTryAgain`, instead of the short name the minifier gave the class.
   - Bootstraps over B02T, WSS first and WebTransport second by default.
+  - **Breaking** Startup fails on a page where the node could reach no peer: an https page without WebTransport, or a page that is not a secure context with `ws.connect` off.
+  - A `ws://` bootstrap url on an https page, or a `wts://` one on a page without WebTransport, is skipped.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 

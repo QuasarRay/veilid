@@ -131,6 +131,25 @@ pub fn is_secure_context() -> bool {
     res
 }
 
+/// Whether the JS environment offers WebTransport. A browser exposes it to a secure context
+/// only, and some browsers not at all.
+///
+/// Result is cached after the first call.
+#[must_use]
+pub fn has_webtransport() -> bool {
+    static CACHE: AtomicI8 = AtomicI8::new(-1);
+    let cache = CACHE.load(Ordering::Acquire);
+    if cache != -1 {
+        return cache != 0;
+    }
+
+    let res = global_property(&["WebTransport"]).is_some();
+
+    CACHE.store(res as i8, Ordering::Release);
+
+    res
+}
+
 static IPV6_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
 /// Whether IPv6 is usable in this wasm environment. Cached after the first call.

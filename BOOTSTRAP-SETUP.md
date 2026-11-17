@@ -40,6 +40,11 @@ over WSS or WebTransport. See "CA-signed mode" under
 for their file names. veilid-server re-reads the certificate files when they change, so a
 renewal needs no restart.
 
+Browsers do not accept every IP literal over WebTransport. Chrome rejects the certificate of
+a session to an IPv6 literal, and Safari rejects the one of a session to an IPv4 literal on a
+network that reaches IPv4 through NAT64, as IPv6-only mobile carriers do. WSS by address works
+in both, and so does either protocol by name, so a browser app lists its bootstraps by name.
+
 ## Install Veilid
 
 Follow instructions in [INSTALL.md](./INSTALL.md)
@@ -176,7 +181,9 @@ with `bootstrap_keys: []` accepts. The command prints the payload line:
   in time; with `none` the payload is re-signed only when the bootstrap set changes.
 - `--bootstrap-cache-ttl-hours` (default 24) is advisory: a node that learned the payload
   over the network re-checks its source after that long, so a newer payload reaches the
-  network within about a day of being pasted into the bootstraps.
+  network within about a day of being pasted into the bootstraps. A node that answers
+  bootstrap requests while holding no payload, or an expired one, asks its bootstraps for
+  one when a request arrives, at most once in that time.
 
 ### Paste the payload line into every bootstrap
 

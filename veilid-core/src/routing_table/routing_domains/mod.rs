@@ -298,7 +298,7 @@ impl RoutingTable {
             .payload_timestamp()
     }
 
-    /// Note that a served payload is past its cache ttl, for the bootstrap task to re-check
+    /// Note that the served payload has come due, for the bootstrap task to re-check
     pub fn request_bootstrap_recheck(&self, routing_domain: RoutingDomain) {
         self.get_routing_domain_controller(routing_domain)
             .request_bootstrap_recheck();

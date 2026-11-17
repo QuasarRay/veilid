@@ -170,6 +170,117 @@ pub fn test_validate_accepts_webtransport_off_without_udp() {
     assert!(cfg.validate().is_ok());
 }
 
+/// WSS reaches bootstraps but no peer, so a node that dials nothing else must not start
+#[cfg(feature = "enable-protocol-wss")]
+pub fn test_validate_rejects_wss_as_only_outbound_protocol() {
+    let mut cfg = valid_test_config();
+    cfg.network.protocol.udp.enabled = false;
+    cfg.network.protocol.tcp.connect = false;
+    cfg.network.protocol.ws.connect = false;
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        cfg.network.protocol.webtransport.connect = false;
+    }
+    cfg.network.protocol.wss.connect = true;
+    let err = cfg.validate().expect_err("WSS alone reaches no peer");
+    assert!(
+        err.to_string().contains("WSS is the only protocol"),
+        "{err}"
+    );
+
+    cfg.network.protocol.ws.connect = true;
+    assert!(cfg.validate().is_ok());
+}
+
+/// A node that dials out over nothing reaches no peer and must not start
+pub fn test_validate_rejects_no_outbound_protocol() {
+    let mut cfg = valid_test_config();
+    cfg.network.routing_table.bootstrap_protocols = vec![VeilidConfigBootstrapProtocol::Ws];
+    cfg.network.protocol.udp.enabled = false;
+    cfg.network.protocol.tcp.connect = false;
+    cfg.network.protocol.ws.connect = false;
+    #[cfg(feature = "enable-protocol-wss")]
+    {
+        cfg.network.protocol.wss.connect = false;
+    }
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        cfg.network.protocol.webtransport.connect = false;
+    }
+    let err = cfg.validate().expect_err("no outbound protocol");
+    assert!(
+        err.to_string()
+            .contains("no protocol is enabled for outbound connections"),
+        "{err}"
+    );
+
+    cfg.network.protocol.ws.connect = true;
+    assert!(cfg.validate().is_ok());
+}
+
+/// A browser node starts only where its page lets it reach peers: over a clear websocket
+/// unless the page is https, over WebTransport where the browser offers it
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub fn test_browser_page_peer_reach() {
+    let insecure = PageContext {
+        https: false,
+        secure: false,
+        webtransport: false,
+    };
+    let localhost = PageContext {
+        https: false,
+        secure: true,
+        webtransport: true,
+    };
+    let https = PageContext {
+        https: true,
+        secure: true,
+        webtransport: true,
+    };
+    let https_without_webtransport = PageContext {
+        https: true,
+        secure: true,
+        webtransport: false,
+    };
+
+    // The default config falls back to a clear websocket off a secure context
+    let default = valid_test_config();
+    assert!(default.peer_reach_error_on(&insecure).is_none());
+    assert!(default.peer_reach_error_on(&localhost).is_none());
+    assert!(default.outbound_protocols_on(&insecure).ws);
+    assert!(default
+        .peer_reach_error_on(&https_without_webtransport)
+        .is_some());
+
+    // An https page dials no clear websocket, so none is in its outbound set
+    assert!(default.outbound_protocols_on(&localhost).ws);
+    assert!(!default.outbound_protocols_on(&https).ws);
+    assert!(
+        !default
+            .outbound_protocols_on(&https_without_webtransport)
+            .ws
+    );
+
+    let mut no_ws = valid_test_config();
+    no_ws.network.protocol.ws.connect = false;
+    assert!(no_ws.peer_reach_error_on(&insecure).is_some());
+
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        // WebTransport is dropped where the page does not offer it, and carries an https page
+        assert!(!default.outbound_protocols_on(&insecure).webtransport);
+        assert!(default.outbound_protocols_on(&https).webtransport);
+        assert!(default.peer_reach_error_on(&https).is_none());
+        assert!(no_ws.peer_reach_error_on(&localhost).is_none());
+
+        let mut no_webtransport = valid_test_config();
+        no_webtransport.network.protocol.webtransport.connect = false;
+        assert!(no_webtransport.peer_reach_error_on(&https).is_some());
+        assert!(no_webtransport.peer_reach_error_on(&localhost).is_none());
+        assert!(no_webtransport.peer_reach_error_on(&insecure).is_none());
+    }
+}
+
 pub fn test_all() {
     test_protocol_config_without_webtransport_deserializes();
     test_webtransport_listen_address_and_path_defaults();
@@ -186,4 +297,9 @@ pub fn test_all() {
     test_validate_rejects_normalization_unstable_webtransport_paths();
     test_validate_accepts_webtransport_listen_without_udp();
     test_validate_accepts_webtransport_off_without_udp();
+    #[cfg(feature = "enable-protocol-wss")]
+    test_validate_rejects_wss_as_only_outbound_protocol();
+    test_validate_rejects_no_outbound_protocol();
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    test_browser_page_peer_reach();
 }

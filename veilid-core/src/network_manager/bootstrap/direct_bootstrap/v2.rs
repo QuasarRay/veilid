@@ -48,7 +48,8 @@ impl NetworkManager {
 
     /// Build the B02T reply: the held payload as its bytes, then peers within the message cap.
     /// Answers an unauthenticated packet, so this touches no resolver, does no I/O and signs
-    /// nothing; a stale learned copy is served as is and its re-check left to the bootstrap task
+    /// nothing; what is held is served as is, and a re-check that has come due, for a stale
+    /// learned copy or for having nothing to serve, is left to the bootstrap task
     pub fn boot_v2_response(&self) -> Result<Bytes, RPCError> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;

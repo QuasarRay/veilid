@@ -90,7 +90,7 @@ fn spawn_echo_server(
     registry: VeilidComponentRegistry,
     cert: &ManagedCertificate,
 ) -> io::Result<(SocketAddr, quinn::Endpoint)> {
-    let server_config = build_server_config(cert, QuicMtuSeed::default())?;
+    let server_config = build_server_config(cert, QuicMtuLimit::default())?;
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -166,7 +166,7 @@ pub async fn serve_wt_echo_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).expect("server config");
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -245,7 +245,7 @@ pub async fn serve_wt_stress_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).expect("server config");
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -526,7 +526,7 @@ pub async fn test_shared_port_demux_coexistence() {
 
     let endpoint = quinn::Endpoint::new_with_abstract_socket(
         webtransport_endpoint_config(),
-        Some(build_server_config(&cert, QuicMtuSeed::default()).unwrap()),
+        Some(build_server_config(&cert, QuicMtuLimit::default()).unwrap()),
         demux,
         veilid_quinn_runtime(),
     )
@@ -605,7 +605,7 @@ pub async fn test_accept_session_classifies_and_roundtrips() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -696,7 +696,7 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -726,7 +726,7 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
     });
 
     let client_config =
-        build_client_config(vec![cert.hash], QuicMtuSeed::default()).expect("client config");
+        build_client_config(vec![cert.hash], QuicMtuLimit::default()).expect("client config");
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
     let client = web_transport_quinn::Client::new(client_ep, client_config);
@@ -771,7 +771,7 @@ pub async fn test_connect_reuses_supplied_client_endpoint() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -861,7 +861,7 @@ pub async fn test_accept_wildcard_bind_resolves_local_ip() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
@@ -951,7 +951,7 @@ pub async fn test_flush_and_close_delivers_before_drop() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuSeed::default()).unwrap();
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -1047,7 +1047,7 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
     ];
     let leaf_key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
     let server_config =
-        build_server_config_from_chain(cert_chain, leaf_key_der, QuicMtuSeed::default())
+        build_server_config_from_chain(cert_chain, leaf_key_der, QuicMtuLimit::default())
             .expect("server config");
 
     let endpoint = test_server_endpoint(
@@ -1083,7 +1083,7 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
     root_store
         .add(CertificateDer::from(ca_cert.der().to_vec()))
         .expect("add ca root");
-    let client_config = build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+    let client_config = build_client_config_with_root_store(root_store, QuicMtuLimit::default())
         .expect("ca client config");
 
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
@@ -1182,7 +1182,7 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
             let mut root_store = RootCertStore::empty();
             root_store.add(ca_root).expect("add ca root");
             let client_config =
-                build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+                build_client_config_with_root_store(root_store, QuicMtuLimit::default())
                     .expect("ca client config");
             let client_ep =
                 veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
@@ -1194,14 +1194,14 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
         }
     };
 
-    let with_ip = build_ca_server_config(hostname_ck.clone(), Some(ip_ck), QuicMtuSeed::default())
+    let with_ip = build_ca_server_config(hostname_ck.clone(), Some(ip_ck), QuicMtuLimit::default())
         .expect("config with ip");
     assert!(
         connect_ip_literal(with_ip).await,
         "IP-literal handshake should succeed when the IP-SAN cert is served for no-SNI"
     );
 
-    let without_ip = build_ca_server_config(hostname_ck, None, QuicMtuSeed::default())
+    let without_ip = build_ca_server_config(hostname_ck, None, QuicMtuLimit::default())
         .expect("config hostname only");
     assert!(
         !connect_ip_literal(without_ip).await,
@@ -1249,7 +1249,7 @@ pub async fn test_webtransport_live_cert_swap() {
     .expect("cert B");
     assert_ne!(cert_a.hash, cert_b.hash, "test needs distinct certs");
     endpoint.set_server_config(Some(
-        build_server_config(&cert_b, QuicMtuSeed::default()).expect("server config B"),
+        build_server_config(&cert_b, QuicMtuLimit::default()).expect("server config B"),
     ));
 
     let di_b =
@@ -1337,7 +1337,7 @@ pub async fn test_webtransport_ca_cert_file_reload() {
         let cert_chain = NativeNetwork::load_certs(cert_path).expect("read cert chain");
         let mut keys = NativeNetwork::load_keys(key_path).expect("read keys");
         assert!(!keys.is_empty(), "no private key in {}", key_path.display());
-        build_server_config_from_chain(cert_chain, keys.remove(0), QuicMtuSeed::default())
+        build_server_config_from_chain(cert_chain, keys.remove(0), QuicMtuLimit::default())
             .expect("server config from files")
     }
 
@@ -1396,7 +1396,7 @@ pub async fn test_webtransport_ca_cert_file_reload() {
             return false;
         }
         let Ok(client_config) =
-            build_client_config_with_root_store(root_store, QuicMtuSeed::default())
+            build_client_config_with_root_store(root_store, QuicMtuLimit::default())
         else {
             return false;
         };
@@ -1497,7 +1497,7 @@ pub async fn test_webtransport_shared_server_endpoint_connects_out() {
     )
     .expect("cert A");
     let a_endpoint = test_server_endpoint(
-        build_server_config(&cert_a, QuicMtuSeed::default()).expect("server config A"),
+        build_server_config(&cert_a, QuicMtuLimit::default()).expect("server config A"),
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
     )
     .expect("server endpoint A");
@@ -1536,7 +1536,7 @@ fn spawn_parking_server(
     cert: &ManagedCertificate,
     transport: quinn::TransportConfig,
 ) -> io::Result<SocketAddr> {
-    let mut server_config = build_server_config(cert, QuicMtuSeed::default())?;
+    let mut server_config = build_server_config(cert, QuicMtuLimit::default())?;
     server_config.transport_config(Arc::new(transport));
     let endpoint = test_server_endpoint(
         server_config,
@@ -1746,7 +1746,7 @@ fn spawn_demux_echo(
 
     let server_config = build_server_config(
         cert,
-        QuicMtuSeed::for_address_type(&registry, AddressType::IPV4),
+        QuicMtuLimit::for_address_type(&registry, AddressType::IPV4),
     )?;
     let endpoint = quinn::Endpoint::new_with_abstract_socket(
         webtransport_endpoint_config(),
@@ -1837,55 +1837,127 @@ pub async fn test_shared_endpoint_discovers_with_the_df_twin() {
     mock_registry::terminate(registry).await;
 }
 
-/// A seed that equals its bound (RawUDP already settled the family size) needs no probe: both
-/// ends report that size from the first message and the server side never changes.
-pub async fn test_shared_endpoint_seed_needs_no_probe() {
-    let registry = mock_registry::init("wt_seed_no_probe").await;
-    registry
-        .network_manager()
-        .own_mtus()
-        .set(udp_v4_llt(), 1300, 1300);
-    let cert = CertificateManager::generate_certificate(
-        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
-        Timestamp::now(),
-    )
-    .expect("generate cert");
-
-    let Ok((server_addr, server_mtu)) = spawn_demux_echo(registry.clone(), &cert, true) else {
-        mock_registry::terminate(registry).await;
-        return;
+/// Whatever the family's limit, a handshake goes out in datagrams of QUIC's 1200 minimum, which
+/// every path carries. Sized for the interface instead, the first flight is lost whole on a path
+/// with a smaller MTU, as a client behind NAT64 or PPPoE has
+pub async fn test_handshake_flight_stays_at_the_quic_minimum() {
+    use rcgen::{
+        BasicConstraints, CertificateParams, IsCa, KeyPair, KeyUsagePurpose, SanType,
+        PKCS_ECDSA_P256_SHA256,
     };
-    let conn = connect_value(registry.clone(), wts_di(server_addr, &cert)).await;
 
-    for _ in 0..10 {
-        let msg = Bytes::from_static(b"seeded, no probe");
-        assert!(matches!(
-            conn.send(msg.clone(), SAFE_TRANSPORT_MTU)
-                .await
-                .expect("send io"),
-            NetworkResult::Value(())
-        ));
-        match conn.recv().await.expect("recv io") {
-            NetworkResult::Value(echo) => assert_eq!(echo, msg),
-            other => panic!("echo failed: {other:?}"),
+    // A three-certificate chain, so the server's flight needs more than one datagram
+    let ca_usages = vec![
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::DigitalSignature,
+    ];
+    let root_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("root key");
+    let mut root_params = CertificateParams::default();
+    root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    root_params.key_usages = ca_usages.clone();
+    let root_cert = root_params.self_signed(&root_key).expect("root");
+    let issuer_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("issuer key");
+    let mut issuer_params = CertificateParams::default();
+    issuer_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    issuer_params.key_usages = ca_usages;
+    let issuer_cert = issuer_params
+        .signed_by(&issuer_key, &root_cert, &root_key)
+        .expect("issuer");
+    let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("leaf key");
+    let mut leaf_params = CertificateParams::default();
+    leaf_params.subject_alt_names = vec![SanType::IpAddress(Ipv4Addr::LOCALHOST.into())];
+    let leaf_cert = leaf_params
+        .signed_by(&leaf_key, &issuer_cert, &issuer_key)
+        .expect("leaf");
+    let cert_chain = vec![
+        CertificateDer::from(leaf_cert.der().to_vec()),
+        CertificateDer::from(issuer_cert.der().to_vec()),
+        CertificateDer::from(root_cert.der().to_vec()),
+    ];
+    let leaf_key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
+
+    // Both ends may grow to a full ethernet payload
+    let mtu_limit = QuicMtuLimit(1472);
+    let server_config =
+        build_server_config_from_chain(cert_chain, leaf_key_der, mtu_limit).expect("server config");
+    let endpoint = test_server_endpoint(
+        server_config,
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+    )
+    .expect("server endpoint");
+    let server_addr = endpoint.local_addr().expect("server addr");
+    spawn_detached("wt flight accept", async move {
+        while let Some(incoming) = endpoint.accept().await {
+            spawn_detached("wt flight session", async move {
+                if let Ok(connection) = incoming.await {
+                    connection.closed().await;
+                }
+            });
         }
-        assert_eq!(
-            conn.path_mtu(),
-            Some(1300),
-            "a seed that equals its bound needs no probe"
-        );
-        sleep(30).await;
-    }
-    assert_eq!(
-        *server_mtu.lock(),
-        Some(1300),
-        "the server side also holds the seed with no probe"
+    });
+
+    // A relay in the path records the size of every datagram the server sends
+    let relay = Arc::new(
+        bind_udp_socket_io(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+            .unwrap()
+            .unwrap(),
     );
-    mock_registry::terminate(registry).await;
+    let relay_addr = relay.local_addr().expect("relay addr");
+    let server_sizes: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
+    let relay_sizes = server_sizes.clone();
+    spawn_detached("wt flight relay", async move {
+        let mut client_addr = None;
+        let mut buf = vec![0u8; 65536];
+        while let Ok((len, from)) = relay.recv_from(&mut buf).await {
+            let to = if from == server_addr {
+                relay_sizes.lock().push(len);
+                client_addr
+            } else {
+                client_addr = Some(from);
+                Some(server_addr)
+            };
+            if let Some(to) = to {
+                let _ = relay.send_to(&buf[..len], to).await;
+            }
+        }
+    });
+
+    let mut root_store = RootCertStore::empty();
+    root_store
+        .add(CertificateDer::from(root_cert.der().to_vec()))
+        .expect("add root");
+    let client_config =
+        build_client_config_with_root_store(root_store, mtu_limit).expect("client config");
+    let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        .expect("client endpoint");
+    let connecting = client_ep
+        .connect_with(client_config, relay_addr, "127.0.0.1")
+        .expect("connect");
+    let connection = match timeout(10_000, connecting).await {
+        Ok(Ok(connection)) => connection,
+        other => panic!(
+            "handshake through the relay failed: {:?}",
+            other.map(|r| r.err())
+        ),
+    };
+
+    // The flight's first full datagram: path MTU probes come only once the handshake is done
+    let first_full = server_sizes
+        .lock()
+        .iter()
+        .copied()
+        .find(|len| *len >= 1000)
+        .expect("a three-certificate flight fills a datagram");
+    assert_eq!(
+        first_full,
+        usize::from(SAFE_TRANSPORT_MTU),
+        "the handshake flight goes out at QUIC's minimum, not the interface size"
+    );
+    connection.close(0u32.into(), b"done");
 }
 
-/// A client endpoint with RawUDP absent (seed 1200) discovers its own path MTU, and the
-/// interface limit stops it, never climbing past the family's limit.
+/// A client endpoint discovers its own path MTU from the 1200 floor, and the interface limit
+/// stops it, never climbing past the family's limit.
 pub async fn test_client_endpoint_discovery_stops_at_the_udp_limit() {
     let registry = mock_registry::init("wt_client_limit").await;
     registry
@@ -2035,7 +2107,7 @@ pub async fn test_all() {
     Box::pin(test_webtransport_loopback()).await;
     Box::pin(test_webtransport_datagram_fragmentation()).await;
     Box::pin(test_shared_endpoint_discovers_with_the_df_twin()).await;
-    Box::pin(test_shared_endpoint_seed_needs_no_probe()).await;
+    Box::pin(test_handshake_flight_stays_at_the_quic_minimum()).await;
     Box::pin(test_client_endpoint_discovery_stops_at_the_udp_limit()).await;
     Box::pin(test_webtransport_listens_and_punches_without_raw_udp()).await;
     #[cfg(feature = "debug-api")]

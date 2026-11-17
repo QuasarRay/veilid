@@ -197,7 +197,7 @@ network:
     secret_keys: null
     address_types: []
     upnp: true
-    detect_address_changes: true
+    detect_address_changes: null
     bind_retry_ms: 10000
     enable_local_peer_scope: false
     restricted_nat_retries: 0
@@ -205,6 +205,7 @@ network:
 
 | Parameter                                   | Description |
 | ------------------------------------------- | ----------- |
+| detect\_address\_changes                    | `true` finds this node's public dial info by asking other nodes, `false` never does, and `null` does so only for an address family with no global address on an interface and no `public_address` (or `url`) configured for every listening protocol. A bootstrap, or any of the first nodes of a network, needs `null` with such addresses or `false`: there is no one to ask yet |
 | [routing\_table](#corenetworkrouting_table) |             |
 | [rpc](#corenetworkrpc)                      |             |
 | [dht](#corenetworkdht)                      |             |
@@ -367,6 +368,8 @@ protocol:
         path: 'wt'
         # url: ''
 ```
+
+WSS reaches a bootstrap and little else, because a node listens on WSS only with a CA-signed certificate. A node whose only outbound protocol is WSS fails to start.
 
 #### core:network:protocol:webtransport
 

@@ -908,6 +908,13 @@ impl PlatformNetwork for NativeNetwork {
             return false;
         };
 
+        // Config that rules detection out leaves the dial info as it was set at startup
+        if routing_domain == RoutingDomain::PublicInternet
+            && self.public_internet_detection_ruled_out()
+        {
+            return false;
+        }
+
         let routing_table = self.routing_table();
         let rdc = routing_table.get_routing_domain_controller(routing_domain);
         // Already unconfirmed; a detection cycle is already pending or in progress
@@ -965,6 +972,13 @@ impl NativeNetwork {
 }
 
 impl NativeNetwork {
+    /// Whether config forbids detecting PublicInternet dial info, whatever the network does
+    fn public_internet_detection_ruled_out(&self) -> bool {
+        let config = self.config();
+        config.network.privacy.require_inbound_relay
+            || config.network.detect_address_changes == Some(false)
+    }
+
     /// Dial info is known good on the current interface state
     fn record_confirmed_interface_generation(&self) {
         self.confirmed_interface_address_generation.store(
@@ -1129,14 +1143,11 @@ impl NativeNetwork {
     /// Assigns the routing_domain_detect_address_changes settings and also returns it.
     fn set_up_detect_address_changes(
         &self,
-        interface_address_state: &NetworkInterfaceAddressState,
+        network_state: &NetworkState,
     ) -> BTreeSet<RoutingDomain> {
         let config = self.config();
         // Resolve 'auto'/None config fo detect_address_changes
         let mut inner = self.inner.lock();
-
-        // Get the address config because we'll need that for this autodetection
-        let address_config = self.make_address_config();
 
         // Process the detect_address_changes 'auto' mode
         let detect_address_changes = config.network.detect_address_changes;
@@ -1153,50 +1164,41 @@ impl NativeNetwork {
             }
             detect_address_changes
         } else {
-            // Check for publicly routable IPv4 and IPv6 addresses on the local interfaces
-            let mut global_ipv4_needed = address_config.ipv4_global;
-            let mut global_ipv6_needed = address_config.ipv6_global;
-            for intf_addr in interface_address_state.interface_addresses.iter() {
-                if Address::from_ip_addr(intf_addr.ip()).is_global() {
-                    match intf_addr {
-                        IfAddr::V4(_) => {
-                            global_ipv4_needed = false;
-                        }
-                        IfAddr::V6(_) => {
-                            global_ipv6_needed = false;
-                        }
-                    }
-                }
-            }
-
-            // If either IPV4 or IPV6 global static addresses are supported but not provided, then turn on detect_address_changes
-            let enable_public_internet_detect_address_changes =
-                global_ipv4_needed || global_ipv6_needed;
-
-            // Print log message about this action
-            let mut supports = Vec::new();
+            // Detect only what this host cannot state itself: a family with no global address
+            // on an interface and no configured public address for every inbound protocol
+            let address_config = &network_state.address_config;
+            let mut in_use = AddressTypeSet::new();
             if address_config.ipv4_global {
-                supports.push("IPv4");
+                in_use.insert(AddressType::IPV4);
             }
             if address_config.ipv6_global {
-                supports.push("IPv6");
+                in_use.insert(AddressType::IPV6);
             }
+            let needed = families_needing_detection(
+                in_use,
+                &network_state.interface_address_state.interface_addresses,
+                network_state.protocol_config.inbound,
+                &network_state.static_dial_info_details(RoutingDomain::PublicInternet),
+            );
+            let family_names = |families: AddressTypeSet| {
+                families
+                    .iter()
+                    .map(|family| match family {
+                        AddressType::IPV4 => "IPv4",
+                        AddressType::IPV6 => "IPv6",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            };
 
-            let mut needed = Vec::new();
-            if global_ipv4_needed {
-                needed.push("IPv4");
-            }
-            if global_ipv6_needed {
-                needed.push("IPv6");
-            }
-
+            let enable_public_internet_detect_address_changes = !needed.is_empty();
             if enable_public_internet_detect_address_changes {
-                veilid_log!(self info "Auto-enabled detection of PublicInternet address changes because this node supports {}, but does not have publicly routable addresses for {}",
-                    supports.join(" and "),
-                    needed.join(" and "));
+                veilid_log!(self info "Auto-enabled detection of PublicInternet address changes because this node supports {}, but has no static public address for {}",
+                    family_names(in_use),
+                    family_names(needed));
             } else {
-                veilid_log!(self info "Auto-disabled detection of PublicInternet address changes because this node has globally routable addresses for {}",
-                    supports.join(" and "));
+                veilid_log!(self info "Auto-disabled detection of PublicInternet address changes because this node has static public addresses for {}",
+                    family_names(in_use));
             }
             enable_public_internet_detect_address_changes
         };
@@ -1257,6 +1259,11 @@ impl NativeNetwork {
         )?;
 
         editor_public_internet.commit();
+        // Dial info this host states itself is confirmed as it stands, so an emptied
+        // connection table has nothing to ask for
+        if auto_confirm_dial_info {
+            self.record_confirmed_interface_generation();
+        }
         if opt_last_network_state.is_none() {
             self.restore_routing_domain(&*controller_public_internet);
         }

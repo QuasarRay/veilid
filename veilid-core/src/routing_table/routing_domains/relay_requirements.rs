@@ -56,7 +56,7 @@ impl RelayRequirements {
         let mut need_relay_transports = HashSet::<TransportType>::new();
         let mut need_relay_orderings = HashSet::<(SequenceOrdering, AddressType)>::new();
         for at in AddressTypeSet::all() {
-            for pt in ProtocolTypeSet::all() {
+            for pt in relayed_protocol_types() {
                 need_relay_transports.insert(TransportType::new(pt, at));
                 need_relay_orderings.insert((pt.sequence_ordering(), at));
             }
@@ -123,6 +123,16 @@ impl RelayRequirements {
             relays: vec![],
         }
     }
+}
+
+/// The protocols a relay is wanted for. WSS is not one: a peer listens on it only with a CA
+/// certificate, so none depends on it to reach this node
+fn relayed_protocol_types() -> ProtocolTypeSet {
+    #[allow(unused_mut)]
+    let mut out = ProtocolTypeSet::all();
+    #[cfg(feature = "enable-protocol-wss")]
+    out.remove(ProtocolType::WSS);
+    out
 }
 
 /// Builder for a list of relays that satisfy the requirements

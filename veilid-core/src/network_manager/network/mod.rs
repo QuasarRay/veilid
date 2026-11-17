@@ -186,6 +186,35 @@ pub(crate) fn is_clat_egress(egress: &EgressIdentity) -> bool {
     matches!(egress.source, Some(IpAddr::V4(v4)) if ipv4addr_is_ietf_protocol_assignment(&v4))
 }
 
+/// The address families in use whose PublicInternet dial info this host cannot state itself,
+/// which leaves detection to find it: no interface holds a global address of the family, and
+/// config names no public address of it for some inbound protocol
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn families_needing_detection(
+    in_use: AddressTypeSet,
+    interface_addresses: &[IfAddr],
+    inbound_protocols: ProtocolTypeSet,
+    static_dial_info_details: &BTreeSet<DialInfoDetail>,
+) -> AddressTypeSet {
+    let mut needed = AddressTypeSet::new();
+    for address_type in in_use {
+        let on_interface = interface_addresses.iter().any(|interface_address| {
+            let address = Address::from_ip_addr(interface_address.ip());
+            address.address_type() == address_type && address.is_global()
+        });
+        let configured: ProtocolTypeSet = static_dial_info_details
+            .iter()
+            .filter(|did| did.dial_info.address_type() == address_type)
+            .map(|did| did.dial_info.protocol_type())
+            .collect();
+        let in_config = !inbound_protocols.is_empty() && inbound_protocols.is_subset(configured);
+        if !on_interface && !in_config {
+            needed.insert(address_type);
+        }
+    }
+    needed
+}
+
 /// The set of address types enabled by config; an empty `network.address_types`
 /// list means all address types are enabled.
 pub(crate) fn configured_address_type_set(config: &VeilidConfig) -> AddressTypeSet {
