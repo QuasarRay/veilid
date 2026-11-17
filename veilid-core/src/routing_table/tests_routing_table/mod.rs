@@ -14,10 +14,7 @@ pub mod test_persisted_reset;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod test_publish_peer_info;
 pub mod test_relay_info;
-#[cfg(all(
-    feature = "enable-protocol-wss",
-    not(all(target_arch = "wasm32", target_os = "unknown"))
-))]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod test_relay_requirements;
 pub mod test_restore_point;
 pub mod test_route_stats;
@@ -70,6 +67,8 @@ pub async fn test_all() {
         not(all(target_arch = "wasm32", target_os = "unknown"))
     ))]
     test_relay_requirements::test_relay_requirements_leave_out_wss().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_relay_requirements::test_keepalives_reach_one_relay_address().await;
     test_bootstrap_target::test_bootstrap_url_follows_outbound_protocols().await;
     test_bootstrap_target::test_bootstrap_round_is_announced_once_per_peer_set();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
