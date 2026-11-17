@@ -11,6 +11,8 @@ mod tasks;
 
 use super::*;
 
+#[cfg(any(test, feature = "test-util"))]
+pub(in crate::routing_table) use bootstrap::bootstrap_peers_are_news;
 use bootstrap::BootstrapStandoff;
 pub use state::*;
 
@@ -88,11 +90,13 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
 
     /// Bootstrap wait detector (to prevent spamming logs)
     bootstrap_wait_detector: AtomicOptionTimestamp,
+    /// The bootstrap peers the last round announced, while the node stays short of peers
+    bootstrap_announced_via: Mutex<Option<String>>,
     /// Set by a round that found only this node; holds off rounds and silence-driven rebootstrap
     bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
     /// This node appeared among its own bootstraps in the last round that resolved any
     own_bootstrap: AtomicBool,
-    /// When a served payload past its cache ttl gets re-checked, set once per cache period
+    /// When the served payload gets re-checked, set once per cache period
     bootstrap_recheck_at: Mutex<Option<Timestamp>>,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
@@ -181,6 +185,7 @@ impl PublicInternetRoutingDomainController {
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
+            bootstrap_announced_via: Mutex::new(None),
             bootstrap_standoff: Mutex::new(None),
             own_bootstrap: AtomicBool::new(false),
             bootstrap_recheck_at: Mutex::new(None),
@@ -304,24 +309,26 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     }
 
     /// A served copy past its ttl is re-checked once, after a delay inside the ttl's first
-    /// half, so many nodes asked at once do not all ask the bootstraps at once
+    /// half, so many nodes asked at once do not all ask the bootstraps at once. With nothing
+    /// to serve no copy covers a delay, and the re-check runs on the next tick
     fn request_bootstrap_recheck(&self) {
         let mut recheck_at = self.bootstrap_recheck_at.lock();
         if recheck_at.is_some() {
             return;
         }
-        let ttl = self
-            .read_dyn()
-            .get_served_bootstrap_cache()
+        let cur_ts = Timestamp::now();
+        let cache = self.read_dyn().get_served_bootstrap_cache();
+        let half = cache
             .cache_ttl()
-            .unwrap_or(DEFAULT_BOOTSTRAP_CACHE_TTL);
-        let half = ttl.as_u64() / 2;
-        let jitter = TimestampDuration::new(if half == 0 {
-            0
-        } else {
+            .unwrap_or(DEFAULT_BOOTSTRAP_CACHE_TTL)
+            .as_u64()
+            / 2;
+        let jitter = if cache.serves_payload(cur_ts) && half != 0 {
             get_random_u64() % half
-        });
-        *recheck_at = Some(Timestamp::now().later(jitter));
+        } else {
+            0
+        };
+        *recheck_at = Some(cur_ts.later(TimestampDuration::new(jitter)));
     }
 
     fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {

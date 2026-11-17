@@ -1,4 +1,5 @@
 pub mod mocks;
+pub mod test_bootstrap_target;
 pub mod test_bucket_entry_state;
 pub mod test_cache_validity;
 #[cfg(feature = "enable-protocol-webtransport")]
@@ -13,6 +14,11 @@ pub mod test_persisted_reset;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod test_publish_peer_info;
 pub mod test_relay_info;
+#[cfg(all(
+    feature = "enable-protocol-wss",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+pub mod test_relay_requirements;
 pub mod test_restore_point;
 pub mod test_route_stats;
 pub mod test_routing_metrics;
@@ -59,6 +65,13 @@ pub async fn test_all() {
     );
     test_signed_node_info::test_signed_node_info().await;
     test_relay_info::test_relay_info_equivalent();
+    #[cfg(all(
+        feature = "enable-protocol-wss",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    test_relay_requirements::test_relay_requirements_leave_out_wss().await;
+    test_bootstrap_target::test_bootstrap_url_follows_outbound_protocols().await;
+    test_bootstrap_target::test_bootstrap_round_is_announced_once_per_peer_set();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_transport_mtus::test_publish_waits_for_transport_mtus().await;
     test_peer_info_expiration::test_expired_peer_info_is_not_returned_to_askers().await;

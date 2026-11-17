@@ -140,9 +140,120 @@ pub fn test_resolve_all_condemned_defers() {
     );
 }
 
+pub fn test_probe_round_goes_by_what_the_peer_saw() {
+    info!("--- test_probe_round_goes_by_what_the_peer_saw ---");
+
+    let seen_from = |address_type| FamilyProbeAnswer::Answered(Some(address_type));
+
+    // A peer that saw us from the family settles it at once
+    let mut round = FamilyProbeRound::new(AddressType::IPV6);
+    assert_eq!(
+        round.record(seen_from(AddressType::IPV6)),
+        Some(FamilyProbeDisposition::Supported)
+    );
+
+    // An answer over a named url the browser resolved to IPv4 says nothing about IPv6,
+    // for or against
+    let mut round = FamilyProbeRound::new(AddressType::IPV6);
+    for _ in 0..ADDR_FAMILY_FAILURE_THRESHOLD + 1 {
+        assert_eq!(round.record(seen_from(AddressType::IPV4)), None);
+    }
+
+    // Nor does an answer that rode another node's flow
+    assert_eq!(round.record(FamilyProbeAnswer::Answered(None)), None);
+
+    // Unanswered probes condemn the family at the threshold, whatever was answered between
+    for _ in 0..ADDR_FAMILY_FAILURE_THRESHOLD - 1 {
+        assert_eq!(round.record(FamilyProbeAnswer::Unanswered), None);
+    }
+    assert_eq!(round.record(seen_from(AddressType::IPV4)), None);
+    assert_eq!(
+        round.record(FamilyProbeAnswer::Unanswered),
+        Some(FamilyProbeDisposition::Unsupported)
+    );
+}
+
+pub fn test_named_urls_carry_no_family() {
+    info!("--- test_named_urls_carry_no_family ---");
+
+    let v4 = SocketAddress::new(Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)), 5150);
+    let v6 = SocketAddress::new(
+        Address::IPV6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        5150,
+    );
+
+    // Dialed at the socket address
+    let udp = DialInfo::udp(v4);
+    let ws = DialInfo::try_ws(v4, "ws://1.2.3.4:5150/ws".to_owned()).expect("ws");
+    assert!(dial_info_names_its_address(&udp));
+    assert!(dial_info_names_its_address(&DialInfo::tcp(v6)));
+    assert!(dial_info_names_its_address(&ws));
+
+    // Traffic over an address-dialed transport proves its family
+    assert!(transport_names_its_address(
+        [&udp, &ws],
+        TransportType::new(ProtocolType::WS, AddressType::IPV4)
+    ));
+    // A transport the node does not offer proves nothing
+    assert!(!transport_names_its_address(
+        [&udp, &ws],
+        TransportType::new(ProtocolType::WS, AddressType::IPV6)
+    ));
+
+    #[cfg(feature = "enable-protocol-wss")]
+    {
+        // The same url under both families: the browser picks the one it resolves
+        let named = "wss://bootstrap.example.com:5150/ws".to_owned();
+        let named_v4 = DialInfo::try_wss(v4, named.clone()).expect("wss");
+        let named_v6 = DialInfo::try_wss(v6, named).expect("wss");
+        let literal = DialInfo::try_wss(v4, "wss://1.2.3.4:5150/ws".to_owned()).expect("wss");
+        assert!(!dial_info_names_its_address(&named_v4));
+        assert!(!dial_info_names_its_address(&named_v6));
+        assert!(dial_info_names_its_address(&literal));
+
+        // Traffic over the named transport proves neither family
+        let dial_infos = [udp, ws, named_v4, named_v6];
+        assert!(!transport_names_its_address(
+            &dial_infos,
+            TransportType::new(ProtocolType::WSS, AddressType::IPV6)
+        ));
+        assert!(!transport_names_its_address(
+            &dial_infos,
+            TransportType::new(ProtocolType::WSS, AddressType::IPV4)
+        ));
+        // Traffic over the address-dialed one beside it still does
+        assert!(transport_names_its_address(
+            &dial_infos,
+            TransportType::new(ProtocolType::WS, AddressType::IPV4)
+        ));
+    }
+
+    #[cfg(feature = "enable-protocol-webtransport")]
+    {
+        let literal = DialInfo::try_webtransport_stream(
+            v6,
+            "https://[2001:db8::1]:5150/wt".to_owned(),
+            vec![],
+            None,
+        )
+        .expect("wts");
+        let named = DialInfo::try_webtransport_datagram(
+            v6,
+            "https://bootstrap.example.com:5150/wt".to_owned(),
+            vec![],
+            None,
+        )
+        .expect("wtd");
+        assert!(dial_info_names_its_address(&literal));
+        assert!(!dial_info_names_its_address(&named));
+    }
+}
+
 pub fn test_all() {
     test_state_classification();
     test_resolve_confirms_probe_survivors();
     test_resolve_cancelled_defers();
     test_resolve_all_condemned_defers();
+    test_probe_round_goes_by_what_the_peer_saw();
+    test_named_urls_carry_no_family();
 }

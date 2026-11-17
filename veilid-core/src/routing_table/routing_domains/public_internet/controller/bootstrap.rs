@@ -17,11 +17,24 @@ impl BootstrapStandoff {
 }
 
 /// The dial infos one bootstrap entry expands to, grouped by protocol in the order to try them
-struct BootstrapTarget {
+pub(in crate::routing_table) struct BootstrapTarget {
     /// What the config said
-    entry: String,
+    pub entry: String,
     /// One group per protocol, in `bootstrap_protocols` order; a url is one group
-    groups: Vec<Vec<DialInfo>>,
+    pub groups: Vec<Vec<DialInfo>>,
+}
+
+/// Whether a round that finished through `via` is worth announcing: a node short of peers
+/// bootstraps every tick, and the same peers again are no news. Records `via` as announced
+pub(in crate::routing_table) fn bootstrap_peers_are_news(
+    announced: &mut Option<String>,
+    via: &str,
+) -> bool {
+    if announced.as_deref() == Some(via) {
+        return false;
+    }
+    *announced = Some(via.to_owned());
+    true
 }
 
 impl PublicInternetRoutingDomainController {
@@ -32,7 +45,7 @@ impl PublicInternetRoutingDomainController {
         _last_ts: Timestamp,
         _cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        // A round runs to fill the table, or to re-check a served payload past its cache ttl
+        // A round runs to fill the table, or to re-check the payload this node serves
         let nodes_needed = self.nodes_needed();
         let recheck = self.take_bootstrap_recheck();
         if nodes_needed.needs_bootstrap.is_empty() && !recheck {
@@ -41,22 +54,22 @@ impl PublicInternetRoutingDomainController {
         let refresh_only = nodes_needed.needs_bootstrap.is_empty();
         let crypto_kinds = nodes_needed.needs_bootstrap;
 
-        // Don't bother if nothing to bootstrap from is configured
+        // Don't bother if nothing to bootstrap from is configured, and stand off while this
+        // node is the only bootstrap it knows of
         let routing_table = self.routing_table();
         let network_manager = self.network_manager();
         let bootstraps = self.config().network.routing_table.bootstrap.clone();
         let config_peers = network_manager.config_bootstrap();
-        if bootstraps.is_empty() && config_peers.unanswered.is_empty() {
-            return Ok(());
-        }
-
-        // Stand off while this node is the only bootstrap it knows of
         let epoch = routing_table.loss_epoch(None);
-        if self
+        let standing_off = self
             .bootstrap_standoff
             .lock()
-            .is_some_and(|standoff| standoff.holds(&epoch))
-        {
+            .is_some_and(|standoff| standoff.holds(&epoch));
+        if standing_off || (bootstraps.is_empty() && config_peers.unanswered.is_empty()) {
+            // A re-check with no one to ask still uses up its cache period
+            if recheck {
+                self.record_bootstrap_cache(BootstrapCache::default(), true);
+            }
             return Ok(());
         }
 
@@ -223,7 +236,12 @@ impl PublicInternetRoutingDomainController {
             })
             .is_ok()
         {
-            veilid_log!(self info "Waiting for bootstrap...");
+            // A node short of peers bootstraps every tick, and only its first wait is news
+            if self.bootstrap_announced_via.lock().is_none() {
+                veilid_log!(self info "Waiting for bootstrap...");
+            } else {
+                veilid_log!(self debug "Waiting for bootstrap...");
+            }
         }
         let valid_bootstraps = self
             .bootstrap_with_peer_list(bootstrapped_peers.clone(), crypto_kinds.clone(), stop_token)
@@ -284,7 +302,17 @@ impl PublicInternetRoutingDomainController {
             } else {
                 "signed"
             };
-            veilid_log!(self info "Bootstrap finished ({}) in {:#} via {}", signed, duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
+            let mut via = valid_bootstraps
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>();
+            via.sort();
+            let via = via.join(",");
+            if bootstrap_peers_are_news(&mut self.bootstrap_announced_via.lock(), &via) {
+                veilid_log!(self info "Bootstrap finished ({}) in {:#} via {}", signed, duration, via);
+            } else {
+                veilid_log!(self debug "Bootstrap finished ({}) in {:#} via {}", signed, duration, via);
+            }
         }
 
         Ok(())
@@ -330,10 +358,20 @@ impl PublicInternetRoutingDomainController {
     }
 
     /// What a config entry expands to: a url as itself, a bare `host` or `host:port` as one dial
-    /// info per configured protocol on every address it resolves to
-    async fn bootstrap_target(&self, entry: String) -> Option<BootstrapTarget> {
+    /// info per configured protocol on every address it resolves to. A url over a protocol this
+    /// node does not dial expands to nothing
+    pub(in crate::routing_table) async fn bootstrap_target(
+        &self,
+        entry: String,
+    ) -> Option<BootstrapTarget> {
         let dial_info_converter = BootstrapDialInfoConverter::default();
-        if let Ok(dial_infos) = dial_info_converter.try_vec_from_url(&entry).await {
+        if let Ok(mut dial_infos) = dial_info_converter.try_vec_from_url(&entry).await {
+            let outbound_protocols = self.read_dyn().outbound_protocols();
+            dial_infos.retain(|dial_info| outbound_protocols.contains(dial_info.protocol_type()));
+            if dial_infos.is_empty() {
+                veilid_log!(self debug "Bootstrap entry is over a protocol this node does not dial: {}", entry);
+                return None;
+            }
             return Some(BootstrapTarget {
                 groups: vec![dial_infos],
                 entry,
@@ -360,33 +398,13 @@ impl PublicInternetRoutingDomainController {
         Some(BootstrapTarget { entry, groups })
     }
 
-    /// The protocols this node bootstraps over, in order, dropping the ones it cannot dial here
+    /// The protocols this node bootstraps over, in order
     fn bootstrap_protocols(&self) -> Vec<ProtocolType> {
-        let config = self.config();
-        let protocol = &config.network.protocol;
-        let mut out = Vec::new();
-        for bp in &config.network.routing_table.bootstrap_protocols {
-            let pt = match bp {
-                VeilidConfigBootstrapProtocol::Udp if protocol.udp.enabled => ProtocolType::UDP,
-                VeilidConfigBootstrapProtocol::Tcp if protocol.tcp.connect => ProtocolType::TCP,
-                VeilidConfigBootstrapProtocol::Ws if protocol.ws.connect && !ws_blocked_here() => {
-                    ProtocolType::WS
-                }
-                #[cfg(feature = "enable-protocol-wss")]
-                VeilidConfigBootstrapProtocol::Wss if protocol.wss.connect => ProtocolType::WSS,
-                #[cfg(feature = "enable-protocol-webtransport")]
-                VeilidConfigBootstrapProtocol::Wts
-                    if protocol.webtransport.connect && !webtransport_blocked_here() =>
-                {
-                    ProtocolType::WTS
-                }
-                _ => continue,
-            };
-            if !out.contains(&pt) {
-                out.push(pt);
-            }
-        }
-        out
+        self.config()
+            .dialable_bootstrap_protocols()
+            .into_iter()
+            .filter_map(|bootstrap_protocol| bootstrap_protocol.protocol_type())
+            .collect()
     }
 
     /// One url per bootstrap protocol for a bare name, with this node's own paths as the
@@ -438,22 +456,25 @@ impl PublicInternetRoutingDomainController {
             .collect()
     }
 
-    /// Whether a served payload's re-check has come due
-    pub(super) fn bootstrap_recheck_pending(&self) -> bool {
+    /// Whether a requested re-check has come due
+    pub(crate) fn bootstrap_recheck_pending(&self) -> bool {
         self.bootstrap_recheck_at
             .lock()
             .is_some_and(|at| Timestamp::now() >= at)
     }
 
-    /// Take a due re-check, so the round that runs it is the only one
+    /// Take a due re-check, so the round that runs it is the only one. A request made while
+    /// the last round ran finds nothing left due
     fn take_bootstrap_recheck(&self) -> bool {
         let mut recheck_at = self.bootstrap_recheck_at.lock();
-        if recheck_at.is_some_and(|at| Timestamp::now() >= at) {
-            *recheck_at = None;
-            true
-        } else {
-            false
+        let cur_ts = Timestamp::now();
+        if !recheck_at.is_some_and(|at| cur_ts >= at) {
+            return false;
         }
+        *recheck_at = None;
+        self.read_dyn()
+            .get_served_bootstrap_cache()
+            .recheck_due(cur_ts)
     }
 
     /// Record what this bootstrap produced, so a restart can serve it without a lookup. A
@@ -629,28 +650,5 @@ impl PublicInternetRoutingDomainController {
             }
         }
         Ok(valid_bootstraps)
-    }
-}
-
-/// Browsers refuse a clear websocket from a secure page
-fn ws_blocked_here() -> bool {
-    cfg_if::cfg_if! {
-        if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-            is_browser_https()
-        } else {
-            false
-        }
-    }
-}
-
-/// Browsers offer WebTransport only to a secure context
-#[cfg(feature = "enable-protocol-webtransport")]
-fn webtransport_blocked_here() -> bool {
-    cfg_if::cfg_if! {
-        if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-            !is_secure_context()
-        } else {
-            false
-        }
     }
 }

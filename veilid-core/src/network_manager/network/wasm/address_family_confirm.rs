@@ -6,8 +6,30 @@ use super::*;
 
 /// Maximum number of probes per family
 const ADDR_FAMILY_MAX_PROBES: usize = 8;
-/// Maximum number of failures to tolerate before declaring an address family unsupported
-const ADDR_FAMILY_FAILURE_THRESHOLD: usize = 3;
+
+/// A node to probe for an address family
+struct FamilyProbeCandidate {
+    node_ref: NodeRef,
+    /// The node's own addresses: an answer over a flow to any other address rode a relay
+    addresses: Vec<SocketAddress>,
+    /// The node offers the family at a named url, which answers whatever family works
+    named: bool,
+}
+
+impl FamilyProbeCandidate {
+    /// The family of the address the node reports having seen us from, when its answer came
+    /// over a flow to the node itself
+    fn seen_from(
+        &self,
+        flow_remote: Option<SocketAddress>,
+        reported: Option<SocketAddress>,
+    ) -> Option<AddressType> {
+        if !self.addresses.contains(&flow_remote?) {
+            return None;
+        }
+        Some(reported?.address_type())
+    }
+}
 
 impl WasmNetwork {
     // Reset address family confirmation state
@@ -217,8 +239,7 @@ impl WasmNetwork {
                         .probe_address_family(routing_domain, at, cands, stop_token)
                         .await;
                     if matches!(disposition, FamilyProbeDisposition::Inconclusive) {
-                        // Unreachable when state() guaranteed enough candidates
-                        veilid_log!(self error "inconclusive result confirming address type {:#} for routing domain {:#}", at, routing_domain);
+                        veilid_log!(self debug "no verdict on address type {:#} for routing domain {:#}: every answer came over another family", at, routing_domain);
                     }
                     let cancelled = matches!(disposition, FamilyProbeDisposition::Cancelled);
                     dispositions.push((at, disposition));
@@ -241,17 +262,17 @@ impl WasmNetwork {
         Ok(())
     }
 
-    /// Per family, nodes with a WS/WSS dial info in that family that are live over another
-    /// family (so a probe failure is our egress, not a dead node). Returns map + node count.
+    /// Per family, nodes with a dialable dial info in that family that are live over another
+    /// family (so a probe failure is our egress, not a dead node), those with a named url first.
     fn collect_family_probe_candidates(
         &self,
         routing_domain: RoutingDomain,
-    ) -> EyreResult<AddressFamilyConfirmCandidates<NodeRef>> {
+    ) -> EyreResult<AddressFamilyConfirmCandidates<FamilyProbeCandidate>> {
         // All possible configured address types we can confirm
         let configured_address_types = configured_address_type_set(&self.config());
 
         // List of candidates that can be pinged for positive confirmation of missing address types
-        let mut candidates: BTreeMap<AddressType, Vec<NodeRef>> = BTreeMap::new();
+        let mut candidates: BTreeMap<AddressType, Vec<FamilyProbeCandidate>> = BTreeMap::new();
 
         // All address types we have positively seen since the last confirm request
         let mut confirmed_address_types = AddressTypeSet::empty();
@@ -284,12 +305,21 @@ impl WasmNetwork {
             let Some(pi) = snap.get_peer_info(routing_domain) else {
                 continue;
             };
+            let ni = pi.node_info();
+            let dial_info_details = ni.dial_info_detail_list();
 
             // Families we've received answers over since the last confirm request
             let mut snap_live_families = AddressTypeSet::empty();
             for (tt, st) in snap.per_transport_stats.iter() {
                 // Skip any address types that are not configured for this routing domain
                 if !configured_address_types.contains(tt.address_type()) {
+                    continue;
+                }
+                // A flow to a named url carries the dial info's family, not the one in use
+                if !transport_names_its_address(
+                    dial_info_details.iter().map(|did| &did.dial_info),
+                    *tt,
+                ) {
                     continue;
                 }
                 if let Some(last_seen_ts) = st.last_seen_ts.as_ref().copied() {
@@ -303,16 +333,17 @@ impl WasmNetwork {
                 }
             }
 
-            let ni = pi.node_info();
-
             for at in configured_address_types {
                 // Skip address type if no directly dialable address for it
-                let has_dialable_in_at = ni.dial_info_detail_list().iter().any(|did| {
-                    !did.class.requires_signal()
-                        && did.dial_info.address_type() == at
-                        && outbound_protocols.contains(did.dial_info.protocol_type())
-                });
-                if !has_dialable_in_at {
+                let mut dialable_in_at = dial_info_details
+                    .iter()
+                    .filter(|did| {
+                        !did.class.requires_signal()
+                            && did.dial_info.address_type() == at
+                            && outbound_protocols.contains(did.dial_info.protocol_type())
+                    })
+                    .peekable();
+                if dialable_in_at.peek().is_none() {
                     continue;
                 }
 
@@ -326,13 +357,26 @@ impl WasmNetwork {
                 candidates
                     .entry(at)
                     .or_default()
-                    .push(snap.node_ref.clone());
+                    .push(FamilyProbeCandidate {
+                        node_ref: snap.node_ref.clone(),
+                        addresses: dial_info_details
+                            .iter()
+                            .map(|did| did.dial_info.socket_address())
+                            .collect(),
+                        named: dialable_in_at
+                            .any(|did| !dial_info_names_its_address(&did.dial_info)),
+                    });
             }
         }
 
         // Remove any candidate address types that have already been confirmed
         for at in confirmed_address_types.iter() {
             candidates.remove(&at);
+        }
+
+        // A named url answers when UDP is blocked and every address-dialed url fails
+        for family_candidates in candidates.values_mut() {
+            family_candidates.sort_by_key(|candidate| !candidate.named);
         }
 
         // Return the candidates
@@ -343,17 +387,18 @@ impl WasmNetwork {
         })
     }
 
-    /// >=1 answer => Supported; N controlled failures => Unsupported; else Inconclusive
+    /// A peer that saw us from the family => Supported; N unanswered probes => Unsupported;
+    /// else Inconclusive
     async fn probe_address_family(
         &self,
         routing_domain: RoutingDomain,
         at: AddressType,
-        candidates: Vec<NodeRef>,
+        candidates: Vec<FamilyProbeCandidate>,
         stop_token: &StopToken,
     ) -> FamilyProbeDisposition {
-        let mut failures = 0usize;
-        for nr in candidates.into_iter().take(ADDR_FAMILY_MAX_PROBES) {
-            let fnr = nr.custom_filtered(
+        let mut round = FamilyProbeRound::new(at);
+        for candidate in candidates.into_iter().take(ADDR_FAMILY_MAX_PROBES) {
+            let fnr = candidate.node_ref.custom_filtered(
                 NodeRefFilter::new()
                     .with_routing_domain(routing_domain)
                     .with_address_type(at),
@@ -367,14 +412,24 @@ impl WasmNetwork {
                 Ok(res) => res,
                 Err(_) => return FamilyProbeDisposition::Cancelled,
             };
-            match res {
-                Ok(StatusResult::Sent(_)) => return FamilyProbeDisposition::Supported,
-                _ => {
-                    failures += 1;
-                    if failures >= ADDR_FAMILY_FAILURE_THRESHOLD {
-                        return FamilyProbeDisposition::Unsupported;
-                    }
-                }
+            let answer = match res {
+                Ok(StatusResult::Sent(status_answer)) => FamilyProbeAnswer::Answered(
+                    candidate.seen_from(
+                        status_answer
+                            .send_data_result
+                            .unique_flow()
+                            .map(|unique_flow| *unique_flow.flow.remote_address()),
+                        status_answer
+                            .answer
+                            .answer
+                            .opt_sender_info
+                            .map(|sender_info| sender_info.socket_address),
+                    ),
+                ),
+                _ => FamilyProbeAnswer::Unanswered,
+            };
+            if let Some(disposition) = round.record(answer) {
+                return disposition;
             }
         }
         FamilyProbeDisposition::Inconclusive

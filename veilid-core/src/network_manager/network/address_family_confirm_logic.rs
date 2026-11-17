@@ -6,23 +6,97 @@
 //! no traffic no network-change event re-arms confirmation, so the node stays
 //! dark until restart. Only a domain with no configured address types confirms
 //! empty.
+//!
+//! Evidence of a family is an answer over a flow dialed at an address of that
+//! family, or a peer's report of the address it saw us from. A flow to a named url
+//! has no family of its own: the browser picks one when it resolves the name.
 
 use super::*;
 
 /// Minimum number of candidate nodes to probe an address family
 pub(crate) const ADDR_FAMILY_MIN_NODES_TO_CONFIRM: usize = 4;
+/// Unanswered probes that condemn an address family
+pub(crate) const ADDR_FAMILY_FAILURE_THRESHOLD: usize = 3;
 
 /// Address family probe result
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum FamilyProbeDisposition {
-    /// A probe got an answer over this family
+    /// A peer saw us from an address of this family
     Supported,
     /// Enough probe failures to condemn this family
     Unsupported,
-    /// Probes ran out before either conclusion
+    /// Probes ran out before either conclusion: every answer came over another family
     Inconclusive,
     /// The stop token fired mid-round
     Cancelled,
+}
+
+/// What one probe of an address family brought back
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FamilyProbeAnswer {
+    /// No answer came
+    Unanswered,
+    /// The peer answered. Holds the family of the address it saw us from, when the answer
+    /// came over a flow to the peer itself
+    Answered(Option<AddressType>),
+}
+
+/// The probes of one address family, folded in order into its disposition
+#[derive(Debug)]
+pub(crate) struct FamilyProbeRound {
+    address_type: AddressType,
+    failures: usize,
+}
+
+impl FamilyProbeRound {
+    pub(crate) fn new(address_type: AddressType) -> Self {
+        Self {
+            address_type,
+            failures: 0,
+        }
+    }
+
+    /// Fold one probe in, returning the disposition once it is settled. An answer the peer
+    /// saw from another family settles nothing: the dial went to a named url, which a
+    /// browser reaches over whichever family it resolves
+    pub(crate) fn record(&mut self, answer: FamilyProbeAnswer) -> Option<FamilyProbeDisposition> {
+        match answer {
+            FamilyProbeAnswer::Answered(Some(seen_from)) if seen_from == self.address_type => {
+                Some(FamilyProbeDisposition::Supported)
+            }
+            FamilyProbeAnswer::Answered(_) => None,
+            FamilyProbeAnswer::Unanswered => {
+                self.failures += 1;
+                (self.failures >= ADDR_FAMILY_FAILURE_THRESHOLD)
+                    .then_some(FamilyProbeDisposition::Unsupported)
+            }
+        }
+    }
+}
+
+/// True when a flow to this dial info runs over the dial info's own address family. A browser
+/// dials WSS and WebTransport at the url, and reaches a named host over whichever family it
+/// resolves
+pub(crate) fn dial_info_names_its_address(dial_info: &DialInfo) -> bool {
+    let dialed_at_the_socket_address = ProtocolType::UDP | ProtocolType::TCP | ProtocolType::WS;
+    dialed_at_the_socket_address.contains(dial_info.protocol_type())
+        || dial_info
+            .request()
+            .and_then(|request| SplitUrl::from_str(&request).ok())
+            .is_some_and(|url| matches!(url.host, SplitUrlHost::IpAddr(_)))
+}
+
+/// True when traffic seen over a transport of a node proves the transport's address family:
+/// the node offers the transport, and every dial info it offers on it names its address
+pub(crate) fn transport_names_its_address<'a>(
+    dial_infos: impl IntoIterator<Item = &'a DialInfo>,
+    transport_type: TransportType,
+) -> bool {
+    let mut on_transport = dial_infos
+        .into_iter()
+        .filter(|dial_info| dial_info.transport_type() == transport_type)
+        .peekable();
+    on_transport.peek().is_some() && on_transport.all(dial_info_names_its_address)
 }
 
 /// Address family confirmation state

@@ -200,10 +200,10 @@ impl NativeNetwork {
         if !self.config().network.protocol.webtransport.listen {
             return Ok(None);
         }
-        let seed_v4 =
-            webtransport::QuicMtuSeed::for_address_type(&self.registry(), AddressType::IPV4);
-        let seed_v6 =
-            webtransport::QuicMtuSeed::for_address_type(&self.registry(), AddressType::IPV6);
+        let limit_v4 =
+            webtransport::QuicMtuLimit::for_address_type(&self.registry(), AddressType::IPV4);
+        let limit_v6 =
+            webtransport::QuicMtuLimit::for_address_type(&self.registry(), AddressType::IPV6);
         if let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() {
             let cfg = self.config();
             let certs = Self::load_certs(std::path::Path::new(&cfg.network.tls.certificate_path))
@@ -221,9 +221,9 @@ impl NativeNetwork {
 
             let v4_ip = self.load_webtransport_ip_certified_key("ipv4");
             let v6_ip = self.load_webtransport_ip_certified_key("ipv6");
-            let v4 = webtransport::build_ca_server_config(hostname_ck.clone(), v4_ip, seed_v4)
+            let v4 = webtransport::build_ca_server_config(hostname_ck.clone(), v4_ip, limit_v4)
                 .wrap_err("failed to build CA-signed webtransport server config (ipv4)")?;
-            let v6 = webtransport::build_ca_server_config(hostname_ck, v6_ip, seed_v6)
+            let v6 = webtransport::build_ca_server_config(hostname_ck, v6_ip, limit_v6)
                 .wrap_err("failed to build CA-signed webtransport server config (ipv6)")?;
             return Ok(Some(WebTransportServerConfigs { v4, v6 }));
         }
@@ -234,10 +234,10 @@ impl NativeNetwork {
         let Some(cert) = cert else {
             return Ok(None);
         };
-        // One certificate, but each family starts from its own size
-        let v4 = webtransport::build_server_config(&cert, seed_v4)
+        // One certificate, but each family discovers up to its own limit
+        let v4 = webtransport::build_server_config(&cert, limit_v4)
             .wrap_err("failed to build self-signed webtransport server config (ipv4)")?;
-        let v6 = webtransport::build_server_config(&cert, seed_v6)
+        let v6 = webtransport::build_server_config(&cert, limit_v6)
             .wrap_err("failed to build self-signed webtransport server config (ipv6)")?;
         Ok(Some(WebTransportServerConfigs { v4, v6 }))
     }

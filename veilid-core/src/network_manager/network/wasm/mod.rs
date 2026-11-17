@@ -657,20 +657,18 @@ impl WasmNetwork {
         let protocol_config = {
             let config = self.config();
             let inbound = ProtocolTypeSet::new();
-            let mut outbound = ProtocolTypeSet::new();
+            let outbound = config.outbound_protocols().protocol_types();
 
             let secure = is_secure_context();
 
-            if config.network.protocol.ws.connect {
-                outbound.insert(ProtocolType::WS);
-            }
-            #[cfg(feature = "enable-protocol-wss")]
-            if config.network.protocol.wss.connect {
-                outbound.insert(ProtocolType::WSS);
-            }
             #[cfg(feature = "enable-protocol-webtransport")]
-            if config.network.protocol.webtransport.connect && (!is_browser() || secure) {
-                outbound.insert_all(WEBTRANSPORT_PROTOCOL_TYPES);
+            if config.network.protocol.webtransport.connect && !outbound.contains(ProtocolType::WTS)
+            {
+                if is_browser() && !secure {
+                    veilid_log!(self warn "WebTransport is disabled: this page is not a secure context");
+                } else {
+                    veilid_log!(self warn "WebTransport is disabled: this browser does not offer it");
+                }
             }
 
             veilid_log!(self debug

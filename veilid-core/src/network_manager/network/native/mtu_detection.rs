@@ -97,7 +97,7 @@ impl NativeNetwork {
         let family_mtus = self.inner.lock().family_mtus.clone();
         let network_manager = self.network_manager();
         let own_mtus = network_manager.own_mtus();
-        let mut udp_changed = false;
+        let mut udp_limit_changed = false;
         for address_type in AddressTypeSet::all() {
             let safe = (SAFE_TRANSPORT_MTU, SAFE_TRANSPORT_MTU);
             let ((udp, tcp), (udp_limit, tcp_limit)) = family_mtus
@@ -113,7 +113,7 @@ impl NativeNetwork {
                 low_level_protocol_type: LowLevelProtocolType::UDP,
                 address_type,
             };
-            udp_changed |= (own_mtus.get(udp_llt), own_mtus.limit(udp_llt)) != (udp, udp_limit);
+            udp_limit_changed |= own_mtus.limit(udp_llt) != udp_limit;
             own_mtus.set(udp_llt, udp, udp_limit);
             own_mtus.set(
                 LowLevelTransportType {
@@ -132,9 +132,9 @@ impl NativeNetwork {
             }
         }
 
-        // QUIC sessions start from the family's size, applied to later handshakes only
+        // QUIC sessions discover up to the family's limit, applied to later handshakes only
         #[cfg(feature = "enable-protocol-webtransport")]
-        if udp_changed {
+        if udp_limit_changed {
             match self.webtransport_server_configs() {
                 Ok(Some(configs)) => self.swap_webtransport_server_configs(configs),
                 Ok(None) => {}
@@ -144,7 +144,7 @@ impl NativeNetwork {
             }
         }
         #[cfg(not(feature = "enable-protocol-webtransport"))]
-        let _ = udp_changed;
+        let _ = udp_limit_changed;
     }
 
     /// What our peer info says we take; None while any family is still detecting

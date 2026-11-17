@@ -1,3 +1,5 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_address_detection;
 mod test_address_family_confirm;
 mod test_bootstrap;
 #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
@@ -66,6 +68,7 @@ pub async fn test_all() {
     test_bootstrap::test_boot_v2_response_round_trip().await;
     test_bootstrap::test_boot_v2_accept_rules().await;
     test_bootstrap::test_bootstrap_cache().await;
+    test_bootstrap::test_bootstrap_recheck_with_nothing_to_serve().await;
     test_bootstrap::test_record_lifetime_parse();
     test_bootstrap::test_bootstrap_entry_forms().await;
     #[cfg(all(
@@ -101,6 +104,8 @@ pub async fn test_all() {
     #[cfg(not(target_arch = "wasm32"))]
     test_dial_info_validators::test_expired_peer_info_is_not_a_dial_info_validator().await;
     test_online_detector::test_all();
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_address_detection::test_all().await;
     test_protected_reconnect::test_all();
     test_protocol_type::test_protocol_type_set_persisted_width();
     test_protocol_type::test_webtransport_and_udp_are_low_level_udp();
@@ -119,8 +124,6 @@ pub async fn test_all() {
     test_address_family_confirm::test_all();
     #[cfg(not(target_arch = "wasm32"))]
     test_udp_protocol::test_demuxed_recv_reassembles_from_channel().await;
-    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-    test_ws_mixed_content::test_ws_target_is_local();
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     test_ws_mixed_content::test_ws_allowed_from_a_secure_http_page();
     #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]

@@ -20,6 +20,64 @@ cfg_if::cfg_if! {
     }
 }
 
+/// What the page a browser node runs in lets it dial
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PageContext {
+    /// Served over https, so a clear websocket to a peer is refused as mixed content
+    pub https: bool,
+    /// A secure context
+    pub secure: bool,
+    /// The browser offers WebTransport to this page
+    pub webtransport: bool,
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+impl PageContext {
+    /// The page this node runs in
+    pub fn current() -> Self {
+        Self {
+            https: is_browser_https(),
+            secure: is_secure_context(),
+            webtransport: has_webtransport(),
+        }
+    }
+}
+
+/// The protocols a node dials out over
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OutboundProtocols {
+    /// Raw UDP
+    pub udp: bool,
+    /// Raw TCP
+    pub tcp: bool,
+    /// WebSocket, in the clear
+    pub ws: bool,
+    /// WebSocket over TLS
+    pub wss: bool,
+    /// WebTransport, streams and datagrams
+    pub webtransport: bool,
+}
+
+impl OutboundProtocols {
+    /// Whether any of these reaches a peer. WSS does not count: a peer listens on it only
+    /// with a CA certificate
+    fn reaches_peers(&self) -> bool {
+        self.udp || self.tcp || self.ws || self.webtransport
+    }
+
+    /// Whether a bootstrap can be dialed over this protocol
+    fn dials(&self, bootstrap_protocol: VeilidConfigBootstrapProtocol) -> bool {
+        match bootstrap_protocol {
+            VeilidConfigBootstrapProtocol::Udp => self.udp,
+            VeilidConfigBootstrapProtocol::Tcp => self.tcp,
+            VeilidConfigBootstrapProtocol::Ws => self.ws,
+            VeilidConfigBootstrapProtocol::Wss => self.wss,
+            VeilidConfigBootstrapProtocol::Wts => self.webtransport,
+        }
+    }
+}
+
 /// Enable and configure UDP.
 ///
 /// ```yaml
@@ -1525,6 +1583,98 @@ impl VeilidConfig {
         Ok(())
     }
 
+    /// The protocols enabled for outbound connections
+    fn enabled_outbound_protocols(&self) -> OutboundProtocols {
+        let protocol = &self.network.protocol;
+        OutboundProtocols {
+            udp: protocol.udp.enabled,
+            tcp: protocol.tcp.connect,
+            ws: protocol.ws.connect,
+            #[cfg(feature = "enable-protocol-wss")]
+            wss: protocol.wss.connect,
+            #[cfg(not(feature = "enable-protocol-wss"))]
+            wss: false,
+            #[cfg(feature = "enable-protocol-webtransport")]
+            webtransport: protocol.webtransport.connect,
+            #[cfg(not(feature = "enable-protocol-webtransport"))]
+            webtransport: false,
+        }
+    }
+
+    /// The protocols this node dials: the ones enabled for outbound connections, which in a
+    /// browser leaves the websockets and, where the browser offers it, WebTransport
+    pub(crate) fn outbound_protocols(&self) -> OutboundProtocols {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+                self.outbound_protocols_on(&PageContext::current())
+            } else {
+                self.enabled_outbound_protocols()
+            }
+        }
+    }
+
+    /// The protocols a node on this page dials: the enabled ones the page can use
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    pub(crate) fn outbound_protocols_on(&self, page: &PageContext) -> OutboundProtocols {
+        let enabled = self.enabled_outbound_protocols();
+        OutboundProtocols {
+            udp: false,
+            tcp: false,
+            ws: enabled.ws && !page.https,
+            webtransport: enabled.webtransport && page.webtransport,
+            ..enabled
+        }
+    }
+
+    /// Why a node on this page would reach no peer, if it would not
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    pub(crate) fn peer_reach_error_on(&self, page: &PageContext) -> Option<&'static str> {
+        if self.outbound_protocols_on(page).reaches_peers() {
+            return None;
+        }
+        Some(if page.https {
+            "a page served over https reaches peers only over WebTransport, which is off in 'network.protocol.webtransport.connect' or missing from this browser"
+        } else if page.secure {
+            "no protocol that reaches peers can be dialed from this page: enable 'network.protocol.ws.connect', or 'network.protocol.webtransport.connect' in a browser that has WebTransport"
+        } else {
+            "a page that is not a secure context reaches peers only over a clear websocket: enable 'network.protocol.ws.connect'"
+        })
+    }
+
+    /// The configured bootstrap protocols this node can dial, in order
+    pub(crate) fn dialable_bootstrap_protocols(&self) -> Vec<VeilidConfigBootstrapProtocol> {
+        let dialable = self.outbound_protocols();
+        let mut out = Vec::new();
+        for bootstrap_protocol in &self.network.routing_table.bootstrap_protocols {
+            if dialable.dials(*bootstrap_protocol) && !out.contains(bootstrap_protocol) {
+                out.push(*bootstrap_protocol);
+            }
+        }
+        out
+    }
+
+    /// A node needs a protocol that reaches its peers, and WSS is not one: a peer listens on
+    /// it only with a CA certificate, so a node left with WSS alone would bootstrap and then
+    /// wait for peers that never come. A browser page narrows the choice further
+    fn validate_outbound_protocols(&self) -> VeilidAPIResult<()> {
+        let enabled = self.enabled_outbound_protocols();
+        if !enabled.reaches_peers() {
+            if enabled.wss {
+                apibail_generic!(
+                    "WSS is the only protocol enabled for outbound connections under 'network.protocol', and it reaches bootstraps but no other peer"
+                );
+            }
+            apibail_generic!(
+                "no protocol is enabled for outbound connections under 'network.protocol', so this node could reach no peer"
+            );
+        }
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        if let Some(error) = self.peer_reach_error_on(&PageContext::current()) {
+            apibail_generic!(error);
+        }
+        Ok(())
+    }
+
     /// A node with bootstraps to reach must be able to dial at least one of the protocols it
     /// would reach them over, or it would start and never bootstrap
     fn validate_bootstrap_protocols(&self) -> VeilidAPIResult<()> {
@@ -1537,23 +1687,9 @@ impl VeilidConfig {
         if !has_bootstraps {
             return Ok(());
         }
-        let protocol = &self.network.protocol;
-        let dialable = rt.bootstrap_protocols.iter().any(|bp| match bp {
-            VeilidConfigBootstrapProtocol::Udp => protocol.udp.enabled,
-            VeilidConfigBootstrapProtocol::Tcp => protocol.tcp.connect,
-            VeilidConfigBootstrapProtocol::Ws => protocol.ws.connect,
-            #[cfg(feature = "enable-protocol-wss")]
-            VeilidConfigBootstrapProtocol::Wss => protocol.wss.connect,
-            #[cfg(not(feature = "enable-protocol-wss"))]
-            VeilidConfigBootstrapProtocol::Wss => false,
-            #[cfg(feature = "enable-protocol-webtransport")]
-            VeilidConfigBootstrapProtocol::Wts => protocol.webtransport.connect,
-            #[cfg(not(feature = "enable-protocol-webtransport"))]
-            VeilidConfigBootstrapProtocol::Wts => false,
-        });
-        if !dialable {
+        if self.dialable_bootstrap_protocols().is_empty() {
             apibail_generic!(
-                "no protocol in 'network.routing_table.bootstrap_protocols' is enabled for outbound connections, so this node could not bootstrap"
+                "no protocol in 'network.routing_table.bootstrap_protocols' can be dialed by this node, so it could not bootstrap"
             );
         }
         Ok(())
@@ -1677,6 +1813,7 @@ impl VeilidConfig {
                 self.validate_webtransport_url(url)?;
             }
         }
+        self.validate_outbound_protocols()?;
         self.validate_bootstrap_protocols()?;
         if self.internal().network.rpc.max_route_hop_count == 0 {
             apibail_generic!(
