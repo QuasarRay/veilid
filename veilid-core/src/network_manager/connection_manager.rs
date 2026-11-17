@@ -342,10 +342,10 @@ impl ConnectionManager {
                 .routing_table()
                 .relays(routing_domain)
             {
-                for did in relay.relay_node.dial_info_details() {
+                // Only what the keepalives ping: the relay closes an unpinged connection as idle
+                for protected_address in relay.keepalive_addresses() {
                     // SocketAddress are distinct per routing domain, so they should not collide
                     // and two nodes should never have the same SocketAddress
-                    let protected_address = did.dial_info.socket_address();
 
                     // Update the protection, note the protected address is not dead
                     dead_addresses.remove(&protected_address);

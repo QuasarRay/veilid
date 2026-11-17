@@ -154,33 +154,6 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
 
-    fn dial_info_details(&self) -> Vec<DialInfoDetail> {
-        let routing_domain_set = self.routing_domain_set();
-        let dial_info_filter = self.dial_info_filter();
-        let sequencing = self.sequencing();
-        let (ordering, dial_info_filter) = dial_info_filter.apply_sequencing(sequencing);
-        let sort = DialInfoDetail::get_ordering_sort(ordering);
-
-        let mut out = Vec::new();
-
-        if dial_info_filter.is_dead() {
-            return out;
-        }
-
-        let filter = |did: &DialInfoDetail| did.matches_filter(&dial_info_filter);
-
-        self.operate(|e| {
-            for routing_domain in routing_domain_set {
-                if let Some(ni) = e.node_info(routing_domain) {
-                    let mut dids = ni.filtered_dial_info_details(sort.as_deref(), &filter);
-                    out.append(&mut dids);
-                }
-            }
-        });
-        out.remove_duplicates();
-        out
-    }
-
     /// Get the most recent 'last connection' to this node matching the node ref filter
     /// Filtered first and then sorted by ordering preference and then by most recent
     fn last_flow(&self) -> Option<Flow> {

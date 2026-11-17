@@ -35,6 +35,7 @@
   - `network.detect_address_changes` left unset turns PublicInternet address detection off for a node with a configured public address for every inbound protocol, as it does for one with a global address on an interface.
   - A node that states its own PublicInternet dial info keeps it confirmed when its connection table empties, so the first nodes of a network come up without validators, and `detect_address_changes: false` rules detection out for good.
   - A browser node counts an answer over a named WSS or WebTransport url toward the address family the peer saw it from, so a name the browser resolved to IPv4 does not confirm IPv6.
+  - A node protects only the relay connections its keepalives ping, so a dual-stack node does not reopen the relay's other-family connection each time the relay closes it as idle.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
