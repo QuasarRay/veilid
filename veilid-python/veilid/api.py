@@ -1278,7 +1278,7 @@ class VeilidAPI(ABC):
         pass
 
     @abstractmethod
-    async def generate_key_pair(self, kind: types.CryptoKind) -> list[types.KeyPair]:
+    async def generate_key_pair(self, kind: types.CryptoKind) -> types.KeyPair:
         """Generate a signing key pair for the given crypto kind. Does not require startup.
 
         Raises VeilidAPIErrorGeneric if kind is not a supported cryptosystem.

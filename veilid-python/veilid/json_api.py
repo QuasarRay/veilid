@@ -562,15 +562,12 @@ class _JsonVeilidAPI(VeilidAPI):
             )
         )
 
-    async def generate_key_pair(self, kind: CryptoKind) -> list[KeyPair]:
+    async def generate_key_pair(self, kind: CryptoKind) -> KeyPair:
         assert isinstance(kind, CryptoKind)
 
-        return list(
-            map(
-                lambda x: KeyPair(x),
-                raise_api_result(
-                    await self.send_ndjson_request(Operation.GENERATE_KEY_PAIR, kind=kind)
-                ),
+        return KeyPair(
+            raise_api_result(
+                await self.send_ndjson_request(Operation.GENERATE_KEY_PAIR, kind=kind)
             )
         )
 

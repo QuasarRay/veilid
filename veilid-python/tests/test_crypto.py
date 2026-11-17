@@ -30,6 +30,18 @@ async def test_get_crypto_system_invalid(api_connection: veilid.VeilidAPI):
 
 
 @pytest.mark.asyncio
+async def test_generate_key_pair(api_connection: veilid.VeilidAPI):
+    for kind in await api_connection.valid_crypto_kinds():
+        kp = await api_connection.generate_key_pair(kind)
+        assert isinstance(kp, veilid.KeyPair)
+        assert kp.kind() == kind
+
+        cs = await api_connection.get_crypto_system(kind)
+        async with cs:
+            assert await cs.validate_key_pair(kp.key(), kp.secret())
+
+
+@pytest.mark.asyncio
 async def test_hash_and_verify_password(api_connection: veilid.VeilidAPI):
     for kind in await api_connection.valid_crypto_kinds():
         cs = await api_connection.get_crypto_system(kind)

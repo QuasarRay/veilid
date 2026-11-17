@@ -22,6 +22,7 @@
   - `VeilidConfigAppLifecycle.autoDetectState`, so a Dart app can turn off the platform's own lifecycle reports and drive the node with `reportAppLifecycleState`.
 - veilid-python:
   - **Breaking** A config's `to_json()` leaves out `None` fields, so `change_config` lets veilid-core apply its own defaults.
+  - **Breaking** `VeilidAPI.generate_key_pair(kind)` returns one `KeyPair`, not a list holding the key pair's string one character at a time.
   - `VeilidConfigWSS`, `VeilidConfigWebTransport`, `VeilidConfigVirtualNetwork`, `VeilidConfigAppLifecycle` and `VeilidConfigPrivacy.country_code_denylist` model the sections a cargo feature adds to the config, each `None` when veilid-core is built without that feature, so a `change_config` round trip keeps them.
   - An optional config section loads as its config class rather than a dict.
 - veilid-server:
