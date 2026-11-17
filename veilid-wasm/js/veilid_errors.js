@@ -4,8 +4,9 @@
 // wasm glue reaches it through js/veilid_errors_bridge.js. Both routes resolve to this
 // same module, which is what makes `instanceof` hold for errors raised inside wasm.
 //
-// The variants mirror veilid_core::VeilidAPIError; adding one there means adding a class
-// here. An unrecognized kind still throws a VeilidAPIError, just not a subclass of one.
+// The variants mirror veilid_core::VeilidAPIError; adding one there means adding a class here,
+// named `VeilidAPIError` plus the kind, and an ERROR_CLASSES entry, which also sets its name.
+// An unrecognized kind still throws a VeilidAPIError, just not a subclass of one.
 
 /// Base class of every error thrown by veilid-wasm.
 export class VeilidAPIError extends Error {
@@ -72,6 +73,12 @@ const ERROR_CLASSES = {
   Generic: VeilidAPIErrorGeneric,
   TransactionNotFound: VeilidAPIErrorTransactionNotFound,
 };
+
+// An app's minifier renames these classes, so each class's `name` is set from a string literal.
+Object.defineProperty(VeilidAPIError, 'name', { value: 'VeilidAPIError' });
+for (const [kind, cls] of Object.entries(ERROR_CLASSES)) {
+  Object.defineProperty(cls, 'name', { value: `VeilidAPIError${kind}` });
+}
 
 /// Build the error instance for one serialized VeilidAPIError. Called from Rust, with
 /// `message` holding the Rust Display text.

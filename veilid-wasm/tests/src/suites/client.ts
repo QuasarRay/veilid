@@ -262,7 +262,9 @@ export const clientSuite: Suite = {
           expect(typeof e.message).toBe('string');
           expect(e.message.length).toBeGreaterThan(0);
           expect(typeof e.stack).toBe('string');
-          expect(e.name).toBe(e.constructor.name);
+          // The service worker and extension contexts run minified bundles, which rename classes
+          expect(e.name).toBe(`VeilidAPIError${e.kind}`);
+          expect(e.constructor.name).toBe(e.name);
         }
       },
     },

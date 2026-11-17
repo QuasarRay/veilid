@@ -37,6 +37,7 @@
   - Browser WebTransport client, outbound only.
   - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
+  - In a minified app bundle, a thrown error's `name` and `constructor.name` are its class name, such as `VeilidAPIErrorTryAgain`, instead of the short name the minifier gave the class.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 
