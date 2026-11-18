@@ -44,15 +44,20 @@ PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF=$(mktemp) || exit 2
 # Ensure cleanup happens on exit, interruption, or termination
 trap "rm -f $PUBLIC_API_TMP_FILE_VEILID_CORE $PUBLIC_API_TMP_FILE_VEILID_CORE_DIFF $PUBLIC_API_TMP_FILE_VEILID_TOOLS $PUBLIC_API_TMP_FILE_VEILID_TOOLS_DIFF $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED_DIFF $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF" EXIT
 
+# rustdoc swaps a dyn type's Send and Sync between nightlies, so print them in one order
+normalize_bounds() {
+    sed -e 's/core::marker::Sync + core::marker::Send/core::marker::Send + core::marker::Sync/g'
+}
+
 # Run cargo public-api and save the output to the temporary file
 echo "Checking public API for 'veilid-core'..."
-cargo public-api -sss -p veilid-core --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE > $PUBLIC_API_TMP_FILE_VEILID_CORE
+cargo public-api -sss -p veilid-core --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE | normalize_bounds > $PUBLIC_API_TMP_FILE_VEILID_CORE
 echo "Checking public API for 'veilid-tools'..."
-cargo public-api -sss -p veilid-tools --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_TOOLS > $PUBLIC_API_TMP_FILE_VEILID_TOOLS
+cargo public-api -sss -p veilid-tools --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_TOOLS | normalize_bounds > $PUBLIC_API_TMP_FILE_VEILID_TOOLS
 echo "Checking public API for 'veilid-core-optimized'..."
-cargo public-api -sss -p veilid-core-optimized --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED > $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED
+cargo public-api -sss -p veilid-core-optimized --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED | normalize_bounds > $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED
 echo "Checking public API for 'veilid-remote-api'..."
-cargo public-api -sss -p veilid-remote-api --target $PUBLIC_API_TARGET --color never > $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API
+cargo public-api -sss -p veilid-remote-api --target $PUBLIC_API_TARGET --color never | normalize_bounds > $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API
 
 # Define diff and print function
 diff_and_print() {
