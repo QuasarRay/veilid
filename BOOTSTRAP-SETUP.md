@@ -1,7 +1,7 @@
 # Creating a Veilid Bootstrap Server
 
 A bootstrap server is a node that other nodes join the network from. One payload, signed by
-the network's operator, lists every bootstrap node's ids and dial infos. Every bootstrap holds
+the bootstrap operator, lists every bootstrap node's ids and dial infos. Every bootstrap holds
 that same payload in its `bootstrap_records` and answers bootstrap requests with it and with its
 own peers. While it can answer, it advertises the `BOOT` capability.
 
@@ -262,7 +262,7 @@ lines:
    (Android below API 29) resolves only A and AAAA records and contacts each address on port
    5150 over UDP or TCP, so every bootstrap server listens on 5150 for at least one of them.
 3. Publish the lines as TXT records at the names 0.5.x nodes have in their `bootstrap`
-   setting (the Veilid network uses `bootstrap-v1`):
+   setting (the Veilid network's 0.5.x nodes use `bootstrap-v1`, its 0.6.0 nodes `bootstrap`):
 
    V1:
    | Record       | Value                        | Record Type |
