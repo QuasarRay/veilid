@@ -596,7 +596,7 @@ pub struct VeilidConfigRoutingTable {
 impl Default for VeilidConfigRoutingTable {
     fn default() -> Self {
         // A bare host expands over `bootstrap_protocols`, so browsers dial WSS and WebTransport
-        let bootstrap = vec!["bootstrap-v1.veilid.net".to_string()];
+        let bootstrap = vec!["bootstrap.veilid.net".to_string()];
         let bootstrap_keys = vec![
             // Primary Veilid Foundation bootstrap signing key
             PublicKey::from_str("VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k").unwrap_or_log(),

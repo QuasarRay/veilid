@@ -2328,7 +2328,7 @@ mod tests {
         //
         assert_eq!(
             s.core.network.routing_table.bootstrap,
-            vec!["bootstrap-v1.veilid.net".to_owned()]
+            vec!["bootstrap.veilid.net".to_owned()]
         );
         assert!(s.core.network.routing_table.bootstrap_records.is_empty());
         assert_eq!(

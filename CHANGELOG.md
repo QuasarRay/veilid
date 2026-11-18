@@ -5,6 +5,7 @@
   - **Breaking** The `default`, `default-async-std` and `default-wasm` feature sets include `enable-protocol-wss` and `enable-protocol-webtransport`, so a node connects out over WSS and listens and connects over WebTransport. A `wasm32` build needs `--cfg=web_sys_unstable_apis` in its rustflags, which the veilid workspace's `.cargo/config.toml` sets.
   - **Breaking** TXT-record bootstrap is removed; a bare bootstrap name resolves by A/AAAA and expands over `network.routing_table.bootstrap_protocols`, which defaults to WSS and WebTransport.
   - **Breaking** Nodes bootstrap only over B02T; bootstrap servers must run 0.6.0 before their clients.
+  - **Breaking** The default bootstrap is `bootstrap.veilid.net`, so a node on the default config empties its routing table once and bootstraps again when it upgrades.
   - **Breaking** A node with bootstraps configured but no dialable protocol in `bootstrap_protocols` fails to start.
   - **Breaking** A node with no outbound protocol, or with WSS as its only one, fails to start, because WSS reaches bootstraps but no other peer.
   - **Breaking** A browser node fails to start on a page that gives it no protocol reaching peers: WS unless the page is https, WebTransport where the browser offers it.
