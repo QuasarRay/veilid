@@ -330,6 +330,7 @@ impl VeilidLayerFilter {
     /// If no log keys are provided, the facilities are added to the default empty log key `""`
     /// To specify the default log key, use an empty string as the log key
     /// All provided facility names are added to all provided tags, for all provided log keys
+    /// A name ending in `*` covers every target that starts with the rest of it, such as `my_app::*`
     ///
     /// Example:
     /// ```rust,no_run
@@ -350,7 +351,9 @@ impl VeilidLayerFilter {
         let tags = tags.into_iter().map(|x| x.to_owned()).collect::<Vec<_>>();
 
         for name in names.iter() {
-            VeilidLogDirective::check_valid_log_facility_name(name.as_str())?;
+            VeilidLogDirective::check_valid_log_facility_name(
+                name.strip_suffix('*').unwrap_or(name),
+            )?;
         }
         for tag in tags.iter() {
             VeilidLogDirective::check_valid_log_facility_tag(tag.as_str())?;

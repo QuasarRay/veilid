@@ -59,6 +59,13 @@ impl Logs {
     pub fn setup(settings: Settings) -> EyreResult<Logs> {
         let settingsr = settings.read();
 
+        // The server's own lines follow the configured level, like core's
+        VeilidLayerFilter::add_facilities(
+            [],
+            ["veilid_server", "veilid_server::*", "client_api"],
+            ["#common", "#veilid"],
+        )?;
+
         // Set up subscriber and layers
         let subscriber = Registry::default();
         let mut layers = Vec::new();

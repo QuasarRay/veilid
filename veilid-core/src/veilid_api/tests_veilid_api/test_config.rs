@@ -116,3 +116,117 @@ pub fn test_feature_sections_default_when_absent() {
         VeilidConfigAppLifecycle::default()
     );
 }
+
+// A config saved before the storage settings existed still deserializes, with the defaults
+pub fn test_storage_defaults_when_absent() {
+    let mut json = serde_json::to_value(fake_veilid_config()).expect("serialize");
+    assert!(
+        object_at(&mut json, &[]).remove("storage").is_some(),
+        "the section is serialized"
+    );
+    let block_store_key = if json.get("block_store").is_some() {
+        "block_store"
+    } else {
+        "blockStore"
+    };
+    let block_store = object_at(&mut json, &[block_store_key]);
+    let removed = block_store
+        .remove("remote_max_storage_space_mb")
+        .or_else(|| block_store.remove("remoteMaxStorageSpaceMb"));
+    assert!(removed.is_some(), "the field is serialized");
+
+    let cfg: VeilidConfig = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(cfg.storage, VeilidConfigStorage::default());
+    assert_eq!(cfg.block_store.remote_max_storage_space_mb, 0);
+}
+
+// Unset limits round-trip as unset, so the defaults still apply after a save and load
+pub fn test_storage_unset_limits_round_trip() {
+    let mut cfg = fake_veilid_config();
+    cfg.storage.limit_percent = None;
+    cfg.storage.limit_mb = None;
+    let json = serde_json::to_string(&cfg).expect("serialize");
+    let back: VeilidConfig = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back.storage, cfg.storage);
+    assert_eq!(
+        back.storage.effective_limits(),
+        VeilidConfigStorage::default().effective_limits()
+    );
+}
+
+pub fn test_storage_validation() {
+    let with_storage = |limit_percent, limit_mb, minimum_mb| {
+        let mut cfg = VeilidConfig {
+            program_name: "storage_validation".to_owned(),
+            ..Default::default()
+        };
+        cfg.storage = VeilidConfigStorage {
+            directory: String::new(),
+            limit_percent,
+            limit_mb,
+            minimum_mb,
+        };
+        cfg.validate()
+    };
+    with_storage(None, None, 0).expect("no limits set");
+    with_storage(Some(1), None, 0).expect("1 percent");
+    with_storage(Some(100), Some(1), 1).expect("100 percent, 1 MiB");
+    with_storage(None, None, 64).expect("a minimum without a MiB limit");
+    assert!(with_storage(Some(0), None, 0).is_err(), "0 percent");
+    assert!(
+        with_storage(Some(101), None, 0).is_err(),
+        "over 100 percent"
+    );
+    assert!(with_storage(None, Some(0), 0).is_err(), "0 MiB");
+    assert!(
+        with_storage(None, Some(16), 17).is_err(),
+        "minimum over the MiB limit"
+    );
+}
+
+pub fn test_store_directories() {
+    let mut cfg = VeilidConfig::default();
+    assert_eq!(
+        cfg.table_store_directory(),
+        "",
+        "nothing set: the store's own empty path"
+    );
+
+    let base = std::path::PathBuf::from("base");
+    cfg.storage.directory = base.to_string_lossy().into_owned();
+    assert_eq!(
+        cfg.table_store_directory(),
+        base.join("table_store").to_string_lossy()
+    );
+    assert_eq!(
+        cfg.block_store_directory(),
+        base.join("block_store").to_string_lossy()
+    );
+    assert_eq!(
+        cfg.protected_store_directory(),
+        base.join("protected_store").to_string_lossy()
+    );
+
+    cfg.table_store.directory = "elsewhere".to_owned();
+    assert_eq!(
+        cfg.table_store_directory(),
+        "elsewhere",
+        "a store's own directory wins"
+    );
+}
+
+// The storage directory needs a restart to change; the limits do not
+pub fn test_storage_changeable() {
+    let current = fake_veilid_config();
+    let mut next = current.clone();
+    next.storage.limit_percent = Some(50);
+    next.storage.limit_mb = None;
+    next.storage.minimum_mb = 0;
+    next.ensure_changeable_from(&current)
+        .expect("limits change while running");
+    next.storage.directory = "/somewhere/else".to_owned();
+    assert!(
+        next.ensure_changeable_from(&current).is_err(),
+        "the directory needs a restart"
+    );
+}

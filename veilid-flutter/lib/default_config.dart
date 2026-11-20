@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'veilid.dart';
@@ -8,11 +7,11 @@ import 'veilid.dart';
 /// Build a [VeilidConfig] from veilid-core's defaults, overriding the
 /// program/storage/network fields most callers need to set.
 ///
-/// On non-web platforms the store directories are placed under
-/// [storageDirectory], or under the application support directory when that is
-/// not given. Pass it from an embedder that starts a node off the main isolate:
-/// path_provider is a platform-channel call, and such an isolate has no
-/// messenger bound to make one. [bootstrap] and [bootstrapKeys] are
+/// On non-web platforms the stores are placed under [storageDirectory], or
+/// under the application support directory when that is not given. Pass it
+/// from an embedder that starts a node off the main isolate: path_provider is
+/// a platform-channel call, and such an isolate has no messenger bound to make
+/// one. [bootstrap] and [bootstrapKeys] are
 /// comma-separated; empty strings leave the built-in defaults in place.
 /// [bootstrapRecords] (the network's `2|` payload line and any legacy TXT
 /// lines, which contain commas of their own) and [bootstrapProtocols] are
@@ -40,14 +39,8 @@ Future<VeilidConfig> getDefaultVeilidConfig({
   return defaultConfig.copyWith(
     programName: programName,
     namespace: namespace,
-    tableStore: defaultConfig.tableStore.copyWith(
-      directory: isWeb ? '' : p.join(storageDir, 'table_store'),
-    ),
-    blockStore: defaultConfig.blockStore.copyWith(
-      directory: isWeb ? '' : p.join(storageDir, 'block_store'),
-    ),
+    storage: defaultConfig.storage.copyWith(directory: storageDir),
     protectedStore: defaultConfig.protectedStore.copyWith(
-      directory: isWeb ? '' : p.join(storageDir, 'protected_store'),
       deviceEncryptionKeyPassword: deviceEncryptionKeyPassword,
       newDeviceEncryptionKeyPassword: newDeviceEncryptionKeyPassword,
     ),

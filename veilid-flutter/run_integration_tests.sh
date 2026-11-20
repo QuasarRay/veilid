@@ -38,7 +38,12 @@ case " $* " in
 esac
 
 parse_integration_test_flags "$@"
-set -- ${INTEGRATION_TEST_ARGS[@]+"${INTEGRATION_TEST_ARGS[@]}"}
+# flutter test reads anything after a `--` as test paths, so the separator stops here
+FLUTTER_TEST_ARGS=()
+for arg in ${INTEGRATION_TEST_ARGS[@]+"${INTEGRATION_TEST_ARGS[@]}"}; do
+    [ "$arg" = "--" ] || FLUTTER_TEST_ARGS+=("$arg")
+done
+set -- ${FLUTTER_TEST_ARGS[@]+"${FLUTTER_TEST_ARGS[@]}"}
 select_veilid_build "$LIVE"
 set_integration_test_device_args "$HEADLESS" "$@" || exit 1
 

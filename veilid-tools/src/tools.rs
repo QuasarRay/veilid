@@ -442,6 +442,70 @@ cfg_if::cfg_if! {
     }
 }
 
+/// Free space on the filesystem that holds a path
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilesystemSpace {
+    /// Identifies the filesystem: paths on the same filesystem report the same id
+    pub id: u64,
+    /// Bytes this process can still allocate there
+    pub available: u64,
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        /// Measure the filesystem holding `path`, which must exist.
+        ///
+        /// Errors with the `io::Error` from the metadata read or `statvfs`.
+        pub fn filesystem_space<P: AsRef<Path>>(path: P) -> io::Result<FilesystemSpace> {
+            use std::os::unix::ffi::OsStrExt;
+            use std::os::unix::fs::MetadataExt;
+
+            let path = path.as_ref();
+            let id = std::fs::metadata(path)?.dev();
+            let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
+            // SAFETY: all-zero is a valid statvfs: plain integers
+            let mut buf: libc::statvfs = unsafe { std::mem::zeroed() };
+            // SAFETY: cpath is NUL-terminated and buf is a writable statvfs for the call
+            if unsafe { libc::statvfs(cpath.as_ptr(), &mut buf) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            #[allow(clippy::useless_conversion, reason = "statvfs field widths differ by platform")]
+            let available = u64::from(buf.f_bavail).saturating_mul(u64::from(buf.f_frsize));
+            Ok(FilesystemSpace { id, available })
+        }
+    } else if #[cfg(windows)] {
+        /// Measure the filesystem holding `path`, which must exist.
+        ///
+        /// Errors with the `io::Error` from `GetVolumePathNameW` or `GetDiskFreeSpaceExW`.
+        pub fn filesystem_space<P: AsRef<Path>>(path: P) -> io::Result<FilesystemSpace> {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+            use std::os::windows::ffi::OsStrExt;
+            use windows::core::PCWSTR;
+            use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetVolumePathNameW};
+
+            let wide: Vec<u16> = path.as_ref().as_os_str().encode_wide().chain(Some(0)).collect();
+            let mut volume = vec![0u16; wide.len().max(261)];
+            // SAFETY: wide is NUL-terminated and volume is a writable buffer of its own length
+            unsafe { GetVolumePathNameW(PCWSTR(wide.as_ptr()), &mut volume) }.map_err(io::Error::other)?;
+            let volume_len = volume.iter().position(|c| *c == 0).unwrap_or(volume.len());
+            let mut hasher = DefaultHasher::new();
+            volume[..volume_len].hash(&mut hasher);
+            let id = hasher.finish();
+
+            let mut available = 0u64;
+            // SAFETY: wide is NUL-terminated and available is a writable u64 for the call
+            unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut available), None, None) }
+                .map_err(io::Error::other)?;
+            Ok(FilesystemSpace { id, available })
+        }
+    } else {
+        /// Measure the filesystem holding `path`. Unsupported on this platform.
+        pub fn filesystem_space<P: AsRef<Path>>(_path: P) -> io::Result<FilesystemSpace> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+    }
+}
+
 /// A zeroed byte buffer for output that is written in full before it is read
 #[must_use]
 pub fn zeroed_u8_vec(n_bytes: usize) -> Vec<u8> {

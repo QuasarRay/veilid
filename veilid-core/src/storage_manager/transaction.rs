@@ -2165,4 +2165,53 @@ impl StorageManager {
                 .await;
         });
     }
+
+    /// Roll back every open transaction while the network can still carry the rollbacks, sent but
+    /// not awaited, then drop it. A transaction whose records an app call holds is left for
+    /// terminate to drop.
+    pub(crate) async fn roll_back_transactions_for_shutdown(&self) {
+        let Ok(_guard) = self.startup_lock.enter() else {
+            return;
+        };
+        let transaction_handles = {
+            let mut inner = self.inner.lock();
+            let otm = &mut inner.outbound_transaction_manager;
+            // These rollbacks are the last delivery; retries would outlive the network
+            otm.clear_terminal_delivery_spawner();
+            otm.transaction_handles()
+        };
+
+        for transaction_handle in transaction_handles {
+            let Some(transaction_keys) = self
+                .inner
+                .lock()
+                .outbound_transaction_manager
+                .get_transaction_keys(transaction_handle)
+            else {
+                continue;
+            };
+            let Some(records_lock) = self.record_lock_table.try_lock_records(
+                transaction_keys,
+                StorageManagerRecordLockPurpose::TransactRollback,
+            ) else {
+                continue;
+            };
+            if self.dht_is_online() {
+                if let Err(e) = self
+                    .rollback_transaction_locked(&records_lock, transaction_handle)
+                    .await
+                {
+                    veilid_log!(self debug "Shutdown rollback of {} not sent: {}", transaction_handle, e);
+                }
+            }
+            let opt_state = self
+                .inner
+                .lock()
+                .outbound_transaction_manager
+                .drop_transaction(transaction_handle);
+            if let Some(state) = opt_state {
+                drop(state.into_transaction_cleanup());
+            }
+        }
+    }
 }

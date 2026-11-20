@@ -193,6 +193,10 @@ where
         self.record_index.total_storage_space()
     }
 
+    pub fn set_storage_limit(&self, opt_limit: Option<u64>) {
+        self.record_index.set_storage_limit(opt_limit);
+    }
+
     pub fn prepare_get_load_action(
         &mut self,
         opaque_record_key: &OpaqueRecordKey,

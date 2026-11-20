@@ -58,6 +58,11 @@ impl NativeNetwork {
                         }
                     }
                     Ok(Err(e)) => {
+                        // A stopped handler's receive can fail at once every time (a closed
+                        // demux), which beats the stop token in the race above
+                        if ph.is_stopped() {
+                            return UdpListenerEvent::HandlerExited(None);
+                        }
                         consecutive_errors += 1;
                         if consecutive_errors >= UDP_LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS {
                             return UdpListenerEvent::HandlerExited(Some(e));

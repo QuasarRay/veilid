@@ -5175,6 +5175,16 @@
           "description": "Configuring the protected store (keychain/keyring/etc)",
           "$ref": "#/$defs/VeilidConfigProtectedStore"
         },
+        "storage": {
+          "description": "Where the stores live and the disk budget for data held for other nodes",
+          "$ref": "#/$defs/VeilidConfigStorage",
+          "default": {
+            "directory": "",
+            "limit_mb": null,
+            "limit_percent": null,
+            "minimum_mb": 0
+          }
+        },
         "table_store": {
           "description": "Configuring the table store (persistent encrypted database)",
           "$ref": "#/$defs/VeilidConfigTableStore"
@@ -5218,8 +5228,15 @@
           "type": "boolean"
         },
         "directory": {
-          "description": "Directory holding the block store (empty = platform default).",
+          "description": "Directory holding the block store (empty = `<storage.directory>/block_store`).",
           "type": "string"
+        },
+        "remote_max_storage_space_mb": {
+          "description": "Disk limit for blocks stored for other nodes, in MiB (0 = a share of the storage budget).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
         }
       },
       "required": [
@@ -5303,7 +5320,7 @@
           "minimum": 0
         },
         "remote_max_storage_space_mb": {
-          "description": "Disk cap for remote DHT record storage, in megabytes.",
+          "description": "Disk limit for remote DHT record storage, in MiB (0 = a share of the storage budget).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -5859,7 +5876,7 @@
           "type": "string"
         },
         "directory": {
-          "description": "Directory for insecure-fallback storage (empty = platform default).",
+          "description": "Directory for insecure-fallback storage (empty = `<storage.directory>/protected_store`).",
           "type": "string"
         },
         "new_device_encryption_key_password": {
@@ -6029,6 +6046,44 @@
         "bootstrap_records"
       ]
     },
+    "VeilidConfigStorage": {
+      "description": "Where the stores live and the disk budget of the stores that hold data for other nodes.\n\nA store directory left empty is `<directory>/<store>`. The shared stores (the remote record\nstore, and later the block store's remote cache) split one budget per filesystem:\n`limit_percent` of its free space plus what the shared stores already use there, and\n`limit_mb` across all of them. Setting one limit drops the other's default; with neither set\nboth defaults apply. Each shared store may always grow to an equal share of each budget it\ndraws on, or to `minimum_mb` if larger, and may borrow what the others leave unused.",
+      "type": "object",
+      "properties": {
+        "directory": {
+          "description": "Base directory for the stores (empty = each store's own directory).",
+          "type": "string"
+        },
+        "limit_mb": {
+          "description": "Total the shared stores may use, in MiB.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "limit_percent": {
+          "description": "Share of each filesystem the shared stores may use, in percent.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "minimum_mb": {
+          "description": "Size each shared store may always grow to, in MiB.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "directory",
+        "minimum_mb"
+      ]
+    },
     "VeilidConfigTCP": {
       "description": "Enable and configure TCP.\n\n```yaml\ntcp:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    public_address: ''",
       "type": "object",
@@ -6093,7 +6148,7 @@
           "type": "boolean"
         },
         "directory": {
-          "description": "Directory holding the table store database (empty = platform default).",
+          "description": "Directory holding the table store database (empty = `<storage.directory>/table_store`).",
           "type": "string"
         },
         "max_value_size_mb": {

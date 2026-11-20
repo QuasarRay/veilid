@@ -447,6 +447,10 @@ pub async fn run_veilid_server(
     // Now that logging is initialized, surface any unrecognized or deprecated config keys
     settings.warn_unknown_config_keys();
     settings.warn_deprecated_config();
+    info!(
+        "Storage settings: {}",
+        settings.read().core.storage.describe_limits()
+    );
 
     let (subnode_index, subnode_count) = {
         let settingsr = settings.read();

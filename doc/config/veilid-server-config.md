@@ -145,10 +145,34 @@ testing:
 
 | Parameter                                | Description |
 | ---------------------------------------- | ----------- |
+| [storage](#corestorage)                  | Where the stores live and how much disk they may use |
 | [protected\_store](#coreprotected_store) |             |
 | [table\_store](#coretable_store)         |             |
 | [block\_store](#block_store)             |             |
 | [network](#corenetwork)                  |             |
+
+#### core:storage
+
+```yaml
+storage:
+    directory: '%STORAGE_DIRECTORY%'
+    limit_percent: null
+    limit_mb: null
+    minimum_mb: 0
+```
+
+| Parameter       | Description |
+| --------------- | ----------- |
+| `directory`     | Base directory for the stores. Defaults to `/var/db/veilid-server` where it exists, otherwise the platform's local data directory. A store whose own `directory` is empty uses `<directory>/<store>` (`table_store`, `block_store`, `protected_store`). The IPC directory does not follow it. |
+| `limit_percent` | Share of each filesystem's free space, plus what the shared stores already use there, that the shared stores may use. 1 to 100. |
+| `limit_mb`      | Total the shared stores may use across all filesystems, in MiB. |
+| `minimum_mb`    | Size each shared store may always grow to, in MiB, whatever the limits allow. |
+
+The shared stores hold data for other nodes: the remote DHT record store (when `network.dht.remote_max_storage_space_mb` is 0) and, later, the block store's remote cache (when `block_store.remote_max_storage_space_mb` is 0). With neither limit set, both defaults apply: 25% and 10240 MiB. Setting only one of them drops the other's default, and setting both applies both.
+
+Each filesystem holding a shared store gets its own `limit_percent` budget, so a `table_store.directory` or `block_store.directory` on another disk is limited by that disk's free space. A store's own files count toward its filesystem's budget, so its growth never shrinks its limit. Each shared store may always grow to an equal share of every budget it draws on, and may borrow what the others leave unused. veilid-server measures free space once a second and adjusts the limits.
+
+Store files do not shrink: freed space inside them is reused. A store at or over its limit keeps its records and replaces the least recently used ones instead of growing. At startup, veilid-server logs each store's directory, its size and its limit.
 
 #### core:protected\_store
 
@@ -156,7 +180,7 @@ testing:
 protected_store:
     allow_insecure_fallback: true
     always_use_insecure_storage: true
-    directory: '%DIRECTORY%'
+    directory: ''
     delete: false
 ```
 
@@ -164,7 +188,7 @@ protected_store:
 
 ```yaml
 table_store:
-    directory: '%TABLE_STORE_DIRECTORY%'
+    directory: ''
     delete: false
 ```
 
@@ -172,8 +196,9 @@ table_store:
 
 ```yaml
 block_store:
-    directory: '%BLOCK_STORE_DIRECTORY%'
+    directory: ''
     delete: false
+    remote_max_storage_space_mb: 0
 ```
 
 #### core:network

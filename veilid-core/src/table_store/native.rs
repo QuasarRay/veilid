@@ -96,7 +96,7 @@ impl TableStoreDriver {
 
     fn get_dbpath(&self, table: &str) -> VeilidAPIResult<PathBuf> {
         let config = self.config();
-        let tablestoredir = config.table_store.directory.clone();
+        let tablestoredir = config.table_store_directory();
         std::fs::create_dir_all(&tablestoredir).map_err(VeilidAPIError::from)?;
 
         let namespace = config.namespace.clone();
@@ -213,7 +213,7 @@ impl TableStoreDriver {
     #[expect(clippy::unused_async)]
     pub async fn delete_all_in_namespace(&self) -> VeilidAPIResult<usize> {
         let config = self.config();
-        let tablestoredir = config.table_store.directory.clone();
+        let tablestoredir = config.table_store_directory();
         let namespace = config.namespace.clone();
         let dir = std::path::PathBuf::from(&tablestoredir);
         if !dir.exists() {

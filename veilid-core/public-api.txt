@@ -2889,14 +2889,18 @@ pub veilid_core::VeilidConfig::namespace: alloc::string::String
 pub veilid_core::VeilidConfig::network: veilid_core::VeilidConfigNetwork
 pub veilid_core::VeilidConfig::program_name: alloc::string::String
 pub veilid_core::VeilidConfig::protected_store: veilid_core::VeilidConfigProtectedStore
+pub veilid_core::VeilidConfig::storage: veilid_core::VeilidConfigStorage
 pub veilid_core::VeilidConfig::table_store: veilid_core::VeilidConfigTableStore
 impl veilid_core::VeilidConfig
+pub fn veilid_core::VeilidConfig::block_store_directory(&self) -> alloc::string::String
 pub fn veilid_core::VeilidConfig::ensure_changeable_from(&self, &veilid_core::VeilidConfig) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidConfig::fill_secrets_from(&mut self, &veilid_core::VeilidConfig)
 pub fn veilid_core::VeilidConfig::get_key_json(&self, &str, bool) -> veilid_core::VeilidAPIResult<alloc::string::String>
 pub fn veilid_core::VeilidConfig::internal(&self) -> &veilid_core::VeilidConfigInternal
 pub fn veilid_core::VeilidConfig::new(&str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> Self
+pub fn veilid_core::VeilidConfig::protected_store_directory(&self) -> alloc::string::String
 pub fn veilid_core::VeilidConfig::safe(&self) -> alloc::rcs::arc::Arc<veilid_core::VeilidConfig>
+pub fn veilid_core::VeilidConfig::table_store_directory(&self) -> alloc::string::String
 pub fn veilid_core::VeilidConfig::validate(&self) -> veilid_core::VeilidAPIResult<()>
 pub struct veilid_core::VeilidConfigAppLifecycle
 pub veilid_core::VeilidConfigAppLifecycle::auto_detect_state: bool
@@ -2908,6 +2912,7 @@ pub veilid_core::VeilidConfigAttachment::app_lifecycle: veilid_core::VeilidConfi
 pub struct veilid_core::VeilidConfigBlockStore
 pub veilid_core::VeilidConfigBlockStore::delete: bool
 pub veilid_core::VeilidConfigBlockStore::directory: alloc::string::String
+pub veilid_core::VeilidConfigBlockStore::remote_max_storage_space_mb: u32
 impl core::default::Default for veilid_core::VeilidConfigBlockStore
 pub fn veilid_core::VeilidConfigBlockStore::default() -> Self
 pub struct veilid_core::VeilidConfigCapabilities
@@ -3037,6 +3042,13 @@ pub veilid_core::VeilidConfigRoutingTable::secret_keys: veilid_core::SecretKeyGr
 pub veilid_core::VeilidConfigRoutingTable::serve_direct_bootstrap: bool
 impl core::default::Default for veilid_core::VeilidConfigRoutingTable
 pub fn veilid_core::VeilidConfigRoutingTable::default() -> Self
+pub struct veilid_core::VeilidConfigStorage
+pub veilid_core::VeilidConfigStorage::directory: alloc::string::String
+pub veilid_core::VeilidConfigStorage::limit_mb: core::option::Option<u32>
+pub veilid_core::VeilidConfigStorage::limit_percent: core::option::Option<u32>
+pub veilid_core::VeilidConfigStorage::minimum_mb: u32
+impl veilid_core::VeilidConfigStorage
+pub fn veilid_core::VeilidConfigStorage::effective_limits(&self) -> (core::option::Option<u32>, core::option::Option<u32>)
 pub struct veilid_core::VeilidConfigTCP
 pub veilid_core::VeilidConfigTCP::connect: bool
 pub veilid_core::VeilidConfigTCP::listen: bool

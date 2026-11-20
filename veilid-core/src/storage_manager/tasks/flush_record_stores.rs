@@ -1,7 +1,7 @@
 use super::*;
 
 impl StorageManager {
-    // Flush records stores to disk and remove dead records
+    // Flush records stores to disk, remove dead records and follow the storage budget
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err)
@@ -21,6 +21,9 @@ impl StorageManager {
             if let Err(e) = remote_record_store.flush().await {
                 veilid_log!(self error "Error flushing remote record store during flush task: {}", e);
             }
+        }
+        if let Err(e) = self.update_storage_limits().await {
+            veilid_log!(self debug "Unable to update the remote record store's limit: {}", e);
         }
         Ok(())
     }

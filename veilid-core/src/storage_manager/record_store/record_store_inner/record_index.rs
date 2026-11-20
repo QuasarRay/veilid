@@ -141,15 +141,25 @@ where
             record_cache_space: LimitedSize::try_new(
                 unlocked_inner.registry.clone(),
                 "total_storage_space",
-                limit_max_storage_space,
+                None,
                 0,
             )?,
             unlocked_inner,
         };
 
         record_index.load_db().await?;
+        record_index.set_storage_limit(limit_max_storage_space);
 
         Ok(record_index)
+    }
+
+    /// Limit stored bytes to `opt_limit`. An index already over it keeps its records and stops
+    /// growing: each new record then evicts least recently used ones to fit.
+    pub fn set_storage_limit(&self, opt_limit: Option<u64>) {
+        let current = self.total_storage_space();
+        self.record_cache_space
+            .set_limit(opt_limit.map(|limit| limit.max(current)))
+            .unwrap_or_log();
     }
 
     /// Create a new record
@@ -1134,7 +1144,7 @@ where
 
         rt_xact.commit().await?;
 
-        // Make new transactions for the subkey cleanup and space purge
+        // Make new transactions for the record count and unreadable record purges
         let rt_xact = self.unlocked_inner.record_table.transact();
         let st_xact = self.unlocked_inner.subkey_table.transact();
 
@@ -1153,9 +1163,9 @@ where
             record_index_sorted.truncate(record_index_limit);
         }
 
-        // Figure out which records might overflow any of our limits
+        // Total the storage space; the storage limit applies after the load
         let mut dead_records = HashSet::new();
-        for (n, (rtk, record)) in record_index_sorted.iter().enumerate() {
+        for (rtk, record) in record_index_sorted.iter() {
             // If we can't get the record size, drop it
             let record_size = match record_size_estimator.estimate(rtk, record) {
                 Ok(v) => v,
@@ -1168,34 +1178,9 @@ where
                 }
             };
 
-            // Total the storage space
-            let hit_limit = {
-                let mut space = self.record_cache_space.modify()?;
-                space = self.add_to_record_cache_space(space, record_size)?;
-                let hit_limit = !space.check_limit();
-                if hit_limit {
-                    // Revert from the storage total
-                    space = self.sub_from_record_cache_space(space, record_size)?;
-                }
-                space.commit().unwrap_or_log();
-
-                hit_limit
-            };
-
-            // See if we need to drop records to fit
-            if hit_limit {
-                // Drop excess records
-                let excess_records = &record_index_sorted[n..];
-
-                veilid_log!(self info "  Purging {} excess records", excess_records.len());
-
-                for (rtk, record) in excess_records.iter() {
-                    self.delete_record_from_db_transaction(rtk, record, &rt_xact, &st_xact)
-                        .await?;
-                }
-                record_index_sorted.truncate(n);
-                break;
-            }
+            let mut space = self.record_cache_space.modify()?;
+            space = self.add_to_record_cache_space(space, record_size)?;
+            space.commit().unwrap_or_log();
         }
 
         // Commit purges
@@ -1751,7 +1736,7 @@ where
         let record_size_estimator = self.record_size_estimator();
 
         // Get starting size and limit
-        let Some(storage_size_limit) = self.record_cache_space.limit() else {
+        let Some(storage_size_limit) = self.record_cache_space.limit()? else {
             // No limit, just go for it
             return Ok(0);
         };

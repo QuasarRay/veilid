@@ -13,6 +13,12 @@ pub fn fake_veilid_config() -> VeilidConfig {
         capabilities: VeilidConfigCapabilities {
             disable: Vec::new(),
         },
+        storage: VeilidConfigStorage {
+            directory: "/var/db/bob".to_string(),
+            limit_percent: Some(20),
+            limit_mb: Some(21),
+            minimum_mb: 4,
+        },
         protected_store: VeilidConfigProtectedStore {
             allow_insecure_fallback: true,
             always_use_insecure_storage: false,
@@ -31,6 +37,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
         block_store: VeilidConfigBlockStore {
             directory: "C:\\Program Files".to_string(),
             delete: true,
+            remote_max_storage_space_mb: 23,
         },
         network: VeilidConfigNetwork {
             max_connections: 32,

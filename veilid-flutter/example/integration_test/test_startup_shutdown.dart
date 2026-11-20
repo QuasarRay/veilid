@@ -2,7 +2,7 @@
 // ignore_for_file: do_not_use_environment
 
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, Platform;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -12,7 +12,10 @@ import 'package:veilid_test/veilid_test.dart';
 const _programName = 'veilid_flutter startup test';
 const _updateTimeout = Duration(seconds: 60);
 
-Future<VeilidConfig> _testConfig(String programName) async {
+Future<VeilidConfig> _testConfig(
+  String programName,
+  String? storageDirectory,
+) async {
   var config = await getDefaultVeilidConfig(
     isWeb: kIsWeb,
     programName: programName,
@@ -22,30 +25,13 @@ Future<VeilidConfig> _testConfig(String programName) async {
         ? const String.fromEnvironment('BOOTSTRAP_KEYS')
         : null,
     networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'),
+    storageDirectory: storageDirectory,
   );
-
-  if (!kIsWeb) {
-    config = config.copyWith(
-      tableStore: config.tableStore.copyWith(
-        directory: p.join(config.tableStore.directory, programName),
-        delete: true,
-      ),
-      protectedStore: config.protectedStore.copyWith(
-        directory: p.join(config.protectedStore.directory, programName),
-        delete: true,
-      ),
-      blockStore: config.blockStore.copyWith(
-        directory: p.join(config.blockStore.directory, programName),
-        delete: true,
-      ),
-    );
-  } else {
-    config = config.copyWith(
-      tableStore: config.tableStore.copyWith(delete: true),
-      protectedStore: config.protectedStore.copyWith(delete: true),
-      blockStore: config.blockStore.copyWith(delete: true),
-    );
-  }
+  config = config.copyWith(
+    tableStore: config.tableStore.copyWith(delete: true),
+    protectedStore: config.protectedStore.copyWith(delete: true),
+    blockStore: config.blockStore.copyWith(delete: true),
+  );
 
   return config.copyWith(
     capabilities:
@@ -100,10 +86,26 @@ class _UpdateCollector {
 class TestStartupShutdown {
   late final VeilidConfig config;
   late final VeilidConfig otherConfig;
+  Directory? _storageRoot;
 
   Future<void> setUpAll() async {
-    config = await _testConfig(_programName);
-    otherConfig = await _testConfig('$_programName other');
+    // Stores go in a fresh temp directory, apart from the host app's stores
+    final root = _storageRoot = kIsWeb
+        ? null
+        : await Directory.systemTemp.createTemp('veilid_startup_test.');
+    config = await _testConfig(
+      _programName,
+      root == null ? null : p.join(root.path, 'node'),
+    );
+    otherConfig = await _testConfig(
+      '$_programName other',
+      root == null ? null : p.join(root.path, 'other'),
+    );
+  }
+
+  Future<void> tearDownAll() async {
+    await _storageRoot?.delete(recursive: true);
+    _storageRoot = null;
   }
 
   /// Release anything a failed test left running, so the next test starts from

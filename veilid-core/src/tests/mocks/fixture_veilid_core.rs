@@ -286,6 +286,7 @@ pub fn fixture_veilid_config() -> VeilidConfig {
         block_store: VeilidConfigBlockStore {
             directory: get_block_store_path(test_instance.clone()),
             delete: true,
+            ..Default::default()
         },
         protected_store: VeilidConfigProtectedStore {
             allow_insecure_fallback: true,

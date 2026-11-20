@@ -34,6 +34,7 @@ mod schema;
 mod set_value;
 #[cfg(feature = "stats")]
 mod stats;
+mod storage_budget;
 mod storage_manager_locks;
 mod tasks;
 mod transaction;
@@ -57,6 +58,7 @@ use super::*;
 use hashlink::{LinkedHashMap, LruCache};
 
 use crate::network_manager::{failure_backoff, OnlineState};
+use crate::table_store::TableStorageUsage;
 use constants::*;
 use freeze_recovery::*;
 use gated_operation::*;
@@ -230,6 +232,9 @@ pub(crate) struct StorageManager {
     background_save_time: Mutex<Option<BackgroundTimeGuard>>,
     /// When a freeze is worth change inspecting every watch
     freeze_recovery: Mutex<FreezeRecovery>,
+    /// The table store's free space failed to measure last time, so the failure is logged once
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    storage_pool_unmeasured: AtomicBool,
 
     // Background processes
     /// Persists the manager metadata when its schedule says so
@@ -360,6 +365,8 @@ impl StorageManager {
             #[cfg(feature = "app-lifecycle")]
             background_save_time: Mutex::new(None),
             freeze_recovery: Mutex::new(FreezeRecovery::new(platform_may_freeze())),
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+            storage_pool_unmeasured: AtomicBool::new(false),
 
             save_metadata_task: TickTask::new(
                 "save_metadata_task",
@@ -465,7 +472,11 @@ impl StorageManager {
             max_subkey_cache_memory_mb: Some(
                 c.network.dht.remote_max_subkey_cache_memory_mb as usize,
             ),
-            max_storage_space_mb: Some(c.network.dht.remote_max_storage_space_mb as usize),
+            // 0 is the storage budget's share, set once the store is open
+            max_storage_space_mb: match c.network.dht.remote_max_storage_space_mb {
+                0 => None,
+                mb => Some(mb as usize),
+            },
             public_watch_limit: c.internal().network.dht.public_watch_limit as usize,
             member_watch_limit: c.internal().network.dht.member_watch_limit as usize,
             max_watch_expiration: TimestampDuration::new_ms(
@@ -553,6 +564,13 @@ impl StorageManager {
                 }));
         }
 
+        match self.update_storage_limits().await {
+            Ok(remote) => self.log_storage_summary(remote).await,
+            Err(e) => {
+                veilid_log!(self error "Unable to set the remote record store's limit: {}", e)
+            }
+        }
+
         self.load_metadata().await?;
 
         // Start deferred results processors
@@ -607,9 +625,8 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    #[allow(clippy::unused_async)]
     async fn pre_terminate_async(&self) {
-        // Unsubscribe from tickers and shut down outbound transaction manager
+        // Unsubscribe from tickers
         {
             let mut inner = self.inner.lock();
             if let Some(sub) = inner.routing_domain_ready_subscription.take() {
@@ -629,6 +646,12 @@ impl StorageManager {
                 self.event_bus().unsubscribe(sub);
             }
         }
+
+        // Stop the work that holds other components, before any of them terminates
+        self.cancel_tasks().await;
+        let cleanup = { self.inner.lock().outbound_transaction_manager.terminate() };
+        cleanup.await;
+        self.background_operation_processor.terminate().await;
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all))]
@@ -642,15 +665,11 @@ impl StorageManager {
             .await
             .expect_or_log("should be started up");
 
-        // Stop the tick tasks and the expiry timers
-        self.cancel_tasks().await;
-
-        // Shutdown keepalive processor
-        let cleanup = { self.inner.lock().outbound_transaction_manager.terminate() };
-        cleanup.await;
-
-        // Stop deferred result processor
-        self.background_operation_processor.terminate().await;
+        // Whatever the shutdown rollback left open goes through the normal drop
+        self.inner
+            .lock()
+            .outbound_transaction_manager
+            .drop_all_transactions();
 
         // Terminate and release the storage manager
         let (opt_local_record_store, opt_remote_record_store) = {

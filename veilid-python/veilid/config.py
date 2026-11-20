@@ -117,6 +117,22 @@ class VeilidConfigProtectedStore(ConfigBase):
 
 
 @dataclass
+class VeilidConfigStorage(ConfigBase):
+    """Where the stores live and the disk budget for data held for other nodes.
+
+    A store directory left empty is `<directory>/<store>`. The shared stores split
+    `limit_percent` of each filesystem's free space plus what they already use there,
+    and `limit_mb` in total. Setting one limit drops the other's default; with neither
+    set both defaults apply. Each shared store may always grow to `minimum_mb`.
+    """
+
+    directory: str = ""
+    limit_percent: Optional[int] = None
+    limit_mb: Optional[int] = None
+    minimum_mb: int = 0
+
+
+@dataclass
 class VeilidConfigTableStore(ConfigBase):
     """Table store: the encrypted key-value database backing node state."""
 
@@ -132,6 +148,7 @@ class VeilidConfigBlockStore(ConfigBase):
 
     directory: str
     delete: bool
+    remote_max_storage_space_mb: int = 0
 
 
 @dataclass
@@ -431,6 +448,7 @@ class VeilidConfig(ConfigBase):
     program_name: str
     namespace: str
     capabilities: VeilidConfigCapabilities
+    storage: VeilidConfigStorage
     protected_store: VeilidConfigProtectedStore
     table_store: VeilidConfigTableStore
     block_store: VeilidConfigBlockStore

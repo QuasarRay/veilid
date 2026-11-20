@@ -881,6 +881,21 @@ where
         self.inner.lock().total_storage_space()
     }
 
+    /// Limit stored bytes; a store already over the limit stops growing instead of shrinking
+    pub fn set_storage_limit(&self, opt_limit: Option<u64>) {
+        self.inner.lock().set_storage_limit(opt_limit);
+    }
+
+    /// What the store's tables take on disk; None where the backend keeps no files
+    pub async fn storage_usage(&self) -> VeilidAPIResult<Option<TableStorageUsage>> {
+        let records = self.unlocked_inner.record_table.storage_usage().await?;
+        let subkeys = self.unlocked_inner.subkey_table.storage_usage().await?;
+        Ok(records.zip(subkeys).map(|(r, s)| TableStorageUsage {
+            file_bytes: r.file_bytes.saturating_add(s.file_bytes),
+            live_bytes: r.live_bytes.saturating_add(s.live_bytes),
+        }))
+    }
+
     //////////////////////////////////////////////////////////////////////////////////
 
     async fn process_commit_action(
