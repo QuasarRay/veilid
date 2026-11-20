@@ -334,6 +334,10 @@ impl RPCProcessor {
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn shutdown(&self) {
         veilid_log!(self debug "starting rpc processor shutdown");
+
+        // Shutdown never waits out an answer: release the callers waiting on one, then wait for
+        // them to leave
+        let mut cancelled = self.cancel_all_op_waiters();
         let guard = self
             .startup_context
             .startup_lock
@@ -341,9 +345,8 @@ impl RPCProcessor {
             .await
             .expect_or_log("should be started up");
 
-        // Cancel answer waiters now: the network is down, so the drain below would wait out each timeout
-        let cancelled = self.waiting_rpc_table.cancel_all_op_waiters()
-            + self.waiting_app_call_table.cancel_all_op_waiters();
+        // And any question asked while they left, which the drain below would wait out
+        cancelled += self.cancel_all_op_waiters();
         if cancelled > 0 {
             veilid_log!(self debug "cancelled {} rpc operations waiting for a reply", cancelled);
         }
@@ -370,6 +373,11 @@ impl RPCProcessor {
 
         guard.success();
         veilid_log!(self debug "finished rpc processor shutdown");
+    }
+
+    fn cancel_all_op_waiters(&self) -> usize {
+        self.waiting_rpc_table.cancel_all_op_waiters()
+            + self.waiting_app_call_table.cancel_all_op_waiters()
     }
 
     //////////////////////////////////////////////////////////////////////

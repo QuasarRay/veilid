@@ -465,7 +465,7 @@ pub struct VeilidConfigDHT {
     pub remote_max_records: u32,
     /// Memory cap for the remote subkey cache, in megabytes.
     pub remote_max_subkey_cache_memory_mb: u32,
-    /// Disk cap for remote DHT record storage, in megabytes.
+    /// Disk limit for remote DHT record storage, in MiB (0 = a share of the storage budget).
     pub remote_max_storage_space_mb: u32,
     /// Max concurrent DHT network operations in flight (local-only ops exempt).
     #[serde(default = "default_dht_max_concurrent_operations")]
@@ -492,7 +492,6 @@ impl Default for VeilidConfigDHT {
                 let remote_subkey_cache_size = 64;
                 let remote_max_records = 64;
                 let remote_max_subkey_cache_memory_mb = 256;
-                let remote_max_storage_space_mb = 128;
             } else {
                 let local_subkey_cache_size = 1024;
                 let local_max_subkey_cache_memory_mb = match total_memory_bytes() {
@@ -505,7 +504,6 @@ impl Default for VeilidConfigDHT {
                     Some(mem) => (mem / 32u64 / (1024u64 * 1024u64)) as u32,
                     None => 256,
                 };
-                let remote_max_storage_space_mb = 256;
             }
         }
 
@@ -517,7 +515,7 @@ impl Default for VeilidConfigDHT {
             remote_subkey_cache_size,
             remote_max_records,
             remote_max_subkey_cache_memory_mb,
-            remote_max_storage_space_mb,
+            remote_max_storage_space_mb: 0,
             max_concurrent_operations,
         }
     }
@@ -770,11 +768,84 @@ fn default_bind_retry_ms() -> u32 {
     10_000
 }
 
+/// Default share of a filesystem the shared stores may use, when neither limit is set.
+const DEFAULT_STORAGE_LIMIT_PERCENT: u32 = 25;
+
+/// Default total for the shared stores in MiB, when neither limit is set.
+pub(crate) fn default_storage_limit_mb() -> u32 {
+    cfg_if::cfg_if! {
+        if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+            128
+        } else {
+            256
+        }
+    }
+}
+
+/// Where the stores live and the disk budget of the stores that hold data for other nodes.
+///
+/// A store directory left empty is `<directory>/<store>`. The shared stores (the remote record
+/// store, and later the block store's remote cache) split one budget per filesystem:
+/// `limit_percent` of its free space plus what the shared stores already use there, and
+/// `limit_mb` across all of them. Setting one limit drops the other's default; with neither set
+/// both defaults apply. Each shared store may always grow to an equal share of each budget it
+/// draws on, or to `minimum_mb` if larger, and may borrow what the others leave unused.
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
+pub struct VeilidConfigStorage {
+    /// Base directory for the stores (empty = each store's own directory).
+    pub directory: String,
+    /// Share of each filesystem the shared stores may use, in percent.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub limit_percent: Option<u32>,
+    /// Total the shared stores may use, in MiB.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub limit_mb: Option<u32>,
+    /// Size each shared store may always grow to, in MiB.
+    pub minimum_mb: u32,
+}
+
+impl VeilidConfigStorage {
+    /// The percent and MiB limits in force: both defaults when neither is set, else as set.
+    #[must_use]
+    pub fn effective_limits(&self) -> (Option<u32>, Option<u32>) {
+        if self.limit_percent.is_none() && self.limit_mb.is_none() {
+            (
+                Some(DEFAULT_STORAGE_LIMIT_PERCENT),
+                Some(default_storage_limit_mb()),
+            )
+        } else {
+            (self.limit_percent, self.limit_mb)
+        }
+    }
+
+    fn validate(&self) -> VeilidAPIResult<()> {
+        if let Some(limit_percent) = self.limit_percent {
+            if !(1..=100).contains(&limit_percent) {
+                apibail_generic!(
+                    "storage limit percent must be from 1 to 100 in 'storage.limit_percent'"
+                );
+            }
+        }
+        if let Some(limit_mb) = self.limit_mb {
+            if limit_mb == 0 {
+                apibail_generic!("storage limit must be >= 1 in 'storage.limit_mb'");
+            }
+            if self.minimum_mb > limit_mb {
+                apibail_generic!(
+                    "storage minimum must be <= the storage limit in 'storage.minimum_mb <= storage.limit_mb'"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Table store configuration: the encrypted key-value database backing node state.
 #[apply(api_data_struct!)]
 #[api(eq, ts)]
 pub struct VeilidConfigTableStore {
-    /// Directory holding the table store database (empty = platform default).
+    /// Directory holding the table store database (empty = `<storage.directory>/table_store`).
     pub directory: String,
     /// Delete the table store on startup.
     pub delete: bool,
@@ -800,11 +871,10 @@ impl Default for VeilidConfigTableStore {
     allow(unused_variables)
 )]
 #[must_use]
-fn get_default_store_path(
+fn get_default_storage_directory(
     program_name: &str,
     organization: &str,
     qualifier: &str,
-    store_type: &str,
 ) -> String {
     cfg_if::cfg_if! {
         if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
@@ -814,7 +884,6 @@ fn get_default_store_path(
             ProjectDirs::from(qualifier, organization, program_name)
                 .map(|dirs| dirs.data_local_dir().to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("./"))
-                .join(store_type)
                 .to_string_lossy()
                 .into()
         }
@@ -825,10 +894,13 @@ fn get_default_store_path(
 #[apply(api_data_struct!)]
 #[api(eq, ts)]
 pub struct VeilidConfigBlockStore {
-    /// Directory holding the block store (empty = platform default).
+    /// Directory holding the block store (empty = `<storage.directory>/block_store`).
     pub directory: String,
     /// Delete the block store on startup.
     pub delete: bool,
+    /// Disk limit for blocks stored for other nodes, in MiB (0 = a share of the storage budget).
+    #[serde(default)]
+    pub remote_max_storage_space_mb: u32,
 }
 
 impl Default for VeilidConfigBlockStore {
@@ -836,6 +908,7 @@ impl Default for VeilidConfigBlockStore {
         Self {
             directory: "".to_string(),
             delete: false,
+            remote_max_storage_space_mb: 0,
         }
     }
 }
@@ -870,7 +943,7 @@ pub struct VeilidConfigProtectedStore {
     pub allow_insecure_fallback: bool,
     /// Always use insecure file storage, ignoring any OS keychain/keyring.
     pub always_use_insecure_storage: bool,
-    /// Directory for insecure-fallback storage (empty = platform default).
+    /// Directory for insecure-fallback storage (empty = `<storage.directory>/protected_store`).
     pub directory: String,
     /// Delete the protected store on startup.
     pub delete: bool,
@@ -1371,6 +1444,10 @@ pub struct VeilidConfig {
     pub namespace: String,
     /// Capabilities to enable for your application/node
     pub capabilities: VeilidConfigCapabilities,
+    /// Where the stores live and the disk budget for data held for other nodes
+    #[serde(default)]
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub storage: VeilidConfigStorage,
     /// Configuring the protected store (keychain/keyring/etc)
     pub protected_store: VeilidConfigProtectedStore,
     /// Configuring the table store (persistent encrypted database)
@@ -1434,27 +1511,10 @@ impl VeilidConfig {
             ..Default::default()
         };
 
-        if let Some(storage_directory) = storage_directory {
-            out.protected_store.directory = (std::path::PathBuf::from(storage_directory)
-                .join("protected_store"))
-            .to_string_lossy()
-            .to_string();
-            out.table_store.directory = (std::path::PathBuf::from(storage_directory)
-                .join("table_store"))
-            .to_string_lossy()
-            .to_string();
-            out.block_store.directory = (std::path::PathBuf::from(storage_directory)
-                .join("block_store"))
-            .to_string_lossy()
-            .to_string();
-        } else {
-            out.protected_store.directory =
-                get_default_store_path(program_name, organization, qualifier, "protected_store");
-            out.table_store.directory =
-                get_default_store_path(program_name, organization, qualifier, "table_store");
-            out.block_store.directory =
-                get_default_store_path(program_name, organization, qualifier, "block_store");
-        }
+        out.storage.directory = match storage_directory {
+            Some(storage_directory) => storage_directory.to_owned(),
+            None => get_default_storage_directory(program_name, organization, qualifier),
+        };
 
         if let Some(config_directory) = config_directory {
             out.network.tls.certificate_path = (std::path::PathBuf::from(config_directory)
@@ -1490,6 +1550,46 @@ impl VeilidConfig {
         safe_cfg.protected_store.new_device_encryption_key_password = None;
 
         Arc::new(safe_cfg)
+    }
+
+    /// The table store's directory: its own, else `<storage.directory>/table_store`
+    #[must_use]
+    pub fn table_store_directory(&self) -> String {
+        Self::store_directory(
+            &self.table_store.directory,
+            &self.storage.directory,
+            "table_store",
+        )
+    }
+
+    /// The block store's directory: its own, else `<storage.directory>/block_store`
+    #[must_use]
+    pub fn block_store_directory(&self) -> String {
+        Self::store_directory(
+            &self.block_store.directory,
+            &self.storage.directory,
+            "block_store",
+        )
+    }
+
+    /// The protected store's directory: its own, else `<storage.directory>/protected_store`
+    #[must_use]
+    pub fn protected_store_directory(&self) -> String {
+        Self::store_directory(
+            &self.protected_store.directory,
+            &self.storage.directory,
+            "protected_store",
+        )
+    }
+
+    fn store_directory(own: &str, base: &str, store: &str) -> String {
+        if !own.is_empty() || base.is_empty() {
+            return own.to_owned();
+        }
+        std::path::PathBuf::from(base)
+            .join(store)
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// The RPC reply timeout, the base most other durations derive from
@@ -1759,6 +1859,7 @@ impl VeilidConfig {
     pub fn validate(&self) -> VeilidAPIResult<()> {
         Self::validate_program_name(&self.program_name)?;
         Self::validate_namespace(&self.namespace)?;
+        self.storage.validate()?;
 
         // Total connection cap across all protocols
         Self::validate_max_connections(self.network.max_connections, "network.max_connections")?;
@@ -1941,8 +2042,8 @@ impl VeilidConfig {
 
     /// Check that this config can replace `current` on a node that stays up: the keys a
     /// running node cannot take a new value for must be unchanged. Those are the storage
-    /// identity (`program_name`, `namespace`, `protected_store`, `table_store`,
-    /// `block_store`), the node identity (`network.routing_table.public_keys` and
+    /// identity (`program_name`, `namespace`, `storage.directory`, `protected_store`,
+    /// `table_store`, `block_store`), the node identity (`network.routing_table.public_keys` and
     /// `secret_keys`), the network partition (`network.network_key_password`), the
     /// `network.dht` storage sizing and `internal`.
     ///
@@ -1951,6 +2052,10 @@ impl VeilidConfig {
         let fixed = [
             (self.program_name == current.program_name, "program_name"),
             (self.namespace == current.namespace, "namespace"),
+            (
+                self.storage.directory == current.storage.directory,
+                "storage.directory",
+            ),
             (
                 self.protected_store == current.protected_store,
                 "protected_store",

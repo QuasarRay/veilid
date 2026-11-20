@@ -177,6 +177,40 @@ pub async fn test_record_index() {
         test_record_count_limit(unlocked_inner, &vcrypto).await;
     }
 
+    // A lowered storage limit, at load and at runtime
+    for crypto_kind in VALID_CRYPTO_KINDS {
+        let vcrypto = crypto
+            .get(crypto_kind)
+            .expect("should get valid cryptosystem");
+        let context_name = format!("storage_limit_{}", vcrypto.kind());
+        let record_table_name = format!("records_{}", context_name);
+        let subkey_table_name = format!("subkeys_{}", context_name);
+
+        let _ = table_store.delete(&record_table_name).await;
+        let _ = table_store.delete(&subkey_table_name).await;
+
+        let record_table = table_store
+            .open_pooled(&record_table_name, 1, 1)
+            .await
+            .expect("should open");
+        let subkey_table = table_store
+            .open_pooled(&subkey_table_name, 1, 1)
+            .await
+            .expect("should open");
+
+        let unlocked_inner = RecordStoreUnlockedInner {
+            registry: registry.clone(),
+            name: context_name.clone(),
+            limits: local_config,
+            record_table,
+            subkey_table,
+            opt_inbound_expiry: None,
+        };
+
+        info!("{}: test_storage_limit_freezes", context_name);
+        test_storage_limit_freezes(unlocked_inner, &vcrypto).await;
+    }
+
     mock_registry::terminate(registry).await;
 }
 
@@ -882,6 +916,103 @@ pub async fn test_record_count_limit(
         assert!(
             record_index.contains_record(key),
             "the create itself evicts nothing more"
+        );
+    }
+}
+
+/// A storage limit below what the index holds keeps every record, at load and at runtime: the
+/// index stops growing, each new record replaces least recently used ones, and a raised limit
+/// lets it grow again
+pub async fn test_storage_limit_freezes(
+    unlocked_inner: RecordStoreUnlockedInner,
+    vcrypto: &CryptoSystemGuard<'_>,
+) {
+    const MIB: u64 = 1_048_576;
+    let desc = random_signed_value_descriptor(vcrypto, Some(MAX_SUBKEY));
+    let new_record = || {
+        Record::<LocalRecordDetail>::try_new(
+            Timestamp::now(),
+            desc.clone(),
+            LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
+        )
+        .expect("should create record data")
+    };
+    let fill = |record_index: &mut TestRecordIndex, key: &OpaqueRecordKey| {
+        record_index
+            .create_record(key.clone(), new_record())
+            .expect("should create record");
+        for sk in 0..MAX_SUBKEY {
+            record_index
+                .set_single_subkey(
+                    key,
+                    ValueSubkey::from(sk),
+                    random_signed_value_data(vcrypto, ValueSeqNum::from(0), SUBKEY_SIZE),
+                )
+                .expect("should set subkey");
+        }
+    };
+    let keys: Vec<_> = (0..RECORD_COUNT * 2)
+        .map(|n| nth_opaque_record_key(vcrypto, n))
+        .collect();
+
+    // Session 1: no limit
+    let unlimited = Arc::new(unlocked_inner);
+    let held = {
+        let mut record_index = TestRecordIndex::try_new(unlimited.clone())
+            .await
+            .expect("should make new recordindex");
+        for key in &keys[..RECORD_COUNT] {
+            fill(&mut record_index, key);
+        }
+        commit_all(&mut record_index).await;
+        record_index.total_storage_space()
+    };
+    assert!(held > MIB, "the records outgrow the limit below: {held}");
+
+    // Session 2: a 1 MiB limit at load purges nothing
+    let mut limits = unlimited.limits;
+    limits.max_storage_space_mb = Some(1);
+    let limited = Arc::new(RecordStoreUnlockedInner {
+        registry: unlimited.registry.clone(),
+        name: unlimited.name.clone(),
+        limits,
+        record_table: unlimited.record_table.clone(),
+        subkey_table: unlimited.subkey_table.clone(),
+        opt_inbound_expiry: None,
+    });
+    let mut record_index = TestRecordIndex::try_new(limited)
+        .await
+        .expect("should reopen recordindex");
+    assert_eq!(record_index.total_storage_space(), held);
+    for key in &keys[..RECORD_COUNT] {
+        assert!(
+            record_index.contains_record(key),
+            "no record is purged at load"
+        );
+    }
+
+    // A new record replaces the least recently used one instead of growing the index
+    fill(&mut record_index, &keys[RECORD_COUNT]);
+    commit_all(&mut record_index).await;
+    assert!(
+        record_index.total_storage_space() <= held,
+        "the index does not grow over its limit"
+    );
+    assert!(record_index.contains_record(&keys[RECORD_COUNT]));
+    assert!(
+        !record_index.contains_record(&keys[0]),
+        "the least recently used record makes room"
+    );
+
+    // A raised limit lets it grow at once
+    record_index.set_storage_limit(Some(held * 2));
+    fill(&mut record_index, &keys[RECORD_COUNT + 1]);
+    commit_all(&mut record_index).await;
+    assert!(record_index.total_storage_space() > held);
+    for key in &keys[1..RECORD_COUNT + 2] {
+        assert!(
+            record_index.contains_record(key),
+            "nothing is evicted under the raised limit"
         );
     }
 }

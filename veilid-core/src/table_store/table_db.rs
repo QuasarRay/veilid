@@ -64,6 +64,15 @@ impl fmt::Debug for TableDBUnlockedInner {
     }
 }
 
+/// What a table takes on disk
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TableStorageUsage {
+    /// Size of its files, free pages and write-ahead log included
+    pub file_bytes: u64,
+    /// Bytes in the pages that hold data
+    pub live_bytes: u64,
+}
+
 /// A handle to an opened encrypted key-value table. Cheap to clone; clones share the same underlying database.
 #[derive(Debug, Clone)]
 #[must_use]
@@ -133,6 +142,45 @@ impl TableDB {
     #[must_use]
     pub fn table_name(&self) -> String {
         self.unlocked_inner.table.clone()
+    }
+
+    /// What the table takes on disk; None where the backend keeps no files
+    #[cfg_attr(
+        all(target_arch = "wasm32", target_os = "unknown"),
+        expect(clippy::unused_async)
+    )]
+    pub(crate) async fn storage_usage(&self) -> VeilidAPIResult<Option<TableStorageUsage>> {
+        cfg_if! {
+            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+                Ok(None)
+            } else {
+                let database = &self.unlocked_inner.database;
+                let (page_count, freelist_count, page_size) = database
+                    .conn(|conn| {
+                        let page_count: i64 =
+                            conn.pragma_query_value(None, "page_count", |row| row.get(0))?;
+                        let freelist_count: i64 =
+                            conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+                        let page_size: i64 =
+                            conn.pragma_query_value(None, "page_size", |row| row.get(0))?;
+                        Ok((page_count, freelist_count, page_size))
+                    })
+                    .await
+                    .map_err(VeilidAPIError::internal)?;
+                let live_pages = u64::try_from(page_count.saturating_sub(freelist_count)).unwrap_or(0);
+                let live_bytes = live_pages.saturating_mul(u64::try_from(page_size).unwrap_or(0));
+
+                let path = database.path();
+                let mut wal_path = path.clone().into_os_string();
+                wal_path.push("-wal");
+                let file_bytes = [path.into_os_string(), wal_path]
+                    .iter()
+                    .filter_map(|p| std::fs::metadata(p).ok())
+                    .fold(0u64, |acc, m| acc.saturating_add(m.len()));
+
+                Ok(Some(TableStorageUsage { file_bytes, live_bytes }))
+            }
+        }
     }
 
     /// Get the io stats for the table

@@ -343,6 +343,7 @@ void main() => runWithIntegrationLog(() {
   group('Startup and Shutdown', () {
     setUpAll(testStartupShutdown.setUpAll);
     tearDown(testStartupShutdown.tearDown);
+    tearDownAll(testStartupShutdown.tearDownAll);
 
     test(
       'two startups then two shutdowns keep the node alive until the last',

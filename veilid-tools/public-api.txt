@@ -1198,6 +1198,9 @@ impl veilid_tools::DebugGuard
 pub fn veilid_tools::DebugGuard::new(&'static str, &'static core::sync::atomic::AtomicUsize) -> Self
 impl core::ops::drop::Drop for veilid_tools::DebugGuard
 pub fn veilid_tools::DebugGuard::drop(&mut self)
+pub struct veilid_tools::tools::FilesystemSpace
+pub veilid_tools::tools::FilesystemSpace::available: u64
+pub veilid_tools::tools::FilesystemSpace::id: u64
 pub trait veilid_tools::tools::CmpAssign
 pub fn veilid_tools::tools::CmpAssign::max_assign(&mut self, Self)
 pub fn veilid_tools::tools::CmpAssign::min_assign(&mut self, Self)
@@ -1217,6 +1220,7 @@ pub fn veilid_tools::tools::available_unspecified_addresses() -> alloc::vec::Vec
 pub fn veilid_tools::tools::compatible_unspecified_socket_addr(&core::net::socket_addr::SocketAddr) -> core::net::socket_addr::SocketAddr
 pub fn veilid_tools::tools::ensure_directory_private_owner<P: core::convert::AsRef<std::path::Path>>(P, bool) -> core::result::Result<(), alloc::string::String>
 pub fn veilid_tools::tools::ensure_file_private_owner<P: core::convert::AsRef<std::path::Path>>(P) -> core::result::Result<(), alloc::string::String>
+pub fn veilid_tools::tools::filesystem_space<P: core::convert::AsRef<std::path::Path>>(P) -> core::io::error::Result<veilid_tools::FilesystemSpace>
 pub fn veilid_tools::tools::get_concurrency() -> u32
 pub fn veilid_tools::tools::is_ipv4_supported() -> bool
 pub fn veilid_tools::tools::is_ipv6_supported() -> bool
@@ -1712,6 +1716,9 @@ pub type veilid_tools::EventualValueFuture<T>::Output = veilid_tools::EventualVa
 pub fn veilid_tools::EventualValueFuture<T>::poll(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
 impl<T> core::ops::drop::Drop for veilid_tools::EventualValueFuture<T> where T: core::marker::Unpin
 pub fn veilid_tools::EventualValueFuture<T>::drop(&mut self)
+pub struct veilid_tools::FilesystemSpace
+pub veilid_tools::FilesystemSpace::available: u64
+pub veilid_tools::FilesystemSpace::id: u64
 pub struct veilid_tools::FlapDetector<T: core::cmp::PartialEq>
 impl<T: core::cmp::PartialEq> veilid_tools::FlapDetector<T>
 pub fn veilid_tools::FlapDetector<T>::new(f64, u64) -> Self
@@ -2233,6 +2240,7 @@ pub fn veilid_tools::ensure_directory_private_owner<P: core::convert::AsRef<std:
 pub fn veilid_tools::ensure_file_private_owner<P: core::convert::AsRef<std::path::Path>>(P) -> core::result::Result<(), alloc::string::String>
 pub fn veilid_tools::executor_snapshot() -> core::option::Option<alloc::string::String>
 pub fn veilid_tools::executor_snapshot_suffix() -> alloc::string::String
+pub fn veilid_tools::filesystem_space<P: core::convert::AsRef<std::path::Path>>(P) -> core::io::error::Result<veilid_tools::FilesystemSpace>
 pub fn veilid_tools::get_concurrency() -> u32
 pub fn veilid_tools::get_random_u32() -> u32
 pub fn veilid_tools::get_random_u64() -> u64

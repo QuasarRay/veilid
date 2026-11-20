@@ -2,10 +2,9 @@
 // ignore_for_file: do_not_use_environment, avoid_redundant_argument_values
 
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, Platform;
 
 import 'package:async_tools/async_tools.dart';
-import 'package:path/path.dart' as p;
 import 'package:veilid/veilid.dart';
 
 import 'log_fixture.dart';
@@ -78,6 +77,8 @@ class DefaultVeilidFixture implements VeilidFixture {
   Stream<VeilidUpdate>? _veilidUpdateStream;
 
   late final StreamController<VeilidUpdate> _updateStreamController;
+
+  Directory? _storageDirectory;
 
   static final _fixtureMutex = Mutex();
 
@@ -204,6 +205,10 @@ class DefaultVeilidFixture implements VeilidFixture {
 
     Veilid.instance.initializeVeilidCore(platformConfigJson);
 
+    // Stores go in a fresh temp directory, apart from the host app's stores
+    final storageDirectory = _storageDirectory = kIsWeb
+        ? null
+        : await Directory.systemTemp.createTemp('veilid_test.');
     var config = await getDefaultVeilidConfig(
       isWeb: kIsWeb,
       programName: programName,
@@ -213,31 +218,13 @@ class DefaultVeilidFixture implements VeilidFixture {
           ? const String.fromEnvironment('BOOTSTRAP_KEYS')
           : null,
       networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'),
+      storageDirectory: storageDirectory?.path,
     );
-
-    // Isolate per-programName stores from the host app's stores.
-    if (!kIsWeb) {
-      config = config.copyWith(
-        tableStore: config.tableStore.copyWith(
-          directory: p.join(config.tableStore.directory, programName),
-          delete: true,
-        ),
-        protectedStore: config.protectedStore.copyWith(
-          directory: p.join(config.protectedStore.directory, programName),
-          delete: true,
-        ),
-        blockStore: config.blockStore.copyWith(
-          directory: p.join(config.blockStore.directory, programName),
-          delete: true,
-        ),
-      );
-    } else {
-      config = config.copyWith(
-        tableStore: config.tableStore.copyWith(delete: true),
-        protectedStore: config.protectedStore.copyWith(delete: true),
-        blockStore: config.blockStore.copyWith(delete: true),
-      );
-    }
+    config = config.copyWith(
+      tableStore: config.tableStore.copyWith(delete: true),
+      protectedStore: config.protectedStore.copyWith(delete: true),
+      blockStore: config.blockStore.copyWith(delete: true),
+    );
     config = config.copyWith(
       capabilities:
           // XXX: Remove after https://gitlab.com/veilid/veilid/-/issues/492
@@ -304,6 +291,9 @@ class DefaultVeilidFixture implements VeilidFixture {
 
       _veilidUpdateSubscription = null;
       _veilidUpdateStream = null;
+
+      await _storageDirectory?.delete(recursive: true);
+      _storageDirectory = null;
     } finally {
       // an unreleased static mutex turns one failed test into a hung run
       _fixtureMutex.release();

@@ -178,8 +178,8 @@ pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<Protec
         || config.protected_store.allow_insecure_fallback)
         && keyring_manager.is_none()
     {
-        let directory = Path::new(&config.protected_store.directory);
-        let insecure_keyring_file = directory.to_owned().join(format!(
+        let directory = config.protected_store_directory();
+        let insecure_keyring_file = Path::new(&directory).join(format!(
             "insecure_keyring{}",
             if config.namespace.is_empty() {
                 "".to_owned()

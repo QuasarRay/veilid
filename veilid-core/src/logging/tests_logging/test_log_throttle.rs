@@ -10,7 +10,7 @@ impl Emitter {
 }
 
 /// Counts events reaching a subscriber, which is what the throttle exists to bound
-struct CountingLayer(Arc<AtomicUsize>);
+pub(super) struct CountingLayer(pub(super) Arc<AtomicUsize>);
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CountingLayer {
     fn on_event(
         &self,

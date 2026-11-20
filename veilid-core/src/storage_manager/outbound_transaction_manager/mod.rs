@@ -198,6 +198,11 @@ impl OutboundTransactionManager {
         self.opt_expiry_armer = Some(expiry_armer);
     }
 
+    /// Remove the terminal delivery closure, so a drop at shutdown queues no retries
+    pub fn clear_terminal_delivery_spawner(&mut self) {
+        self.opt_terminal_delivery_spawner = None;
+    }
+
     /// Run the expiry check once `deadline` passes
     fn arm_expiry_check(&self, deadline: Timestamp) {
         if let Some(expiry_armer) = &self.opt_expiry_armer {
@@ -745,6 +750,22 @@ impl OutboundTransactionManager {
         self.transactions
             .get(&transaction_handle)
             .map(|tx| tx.kind())
+    }
+
+    /// Every open transaction's handle
+    pub fn transaction_handles(&self) -> Vec<OutboundTransactionHandle> {
+        self.transactions.keys().copied().collect()
+    }
+
+    /// Drop every open transaction, releasing its routes and keepalives without awaiting its
+    /// background work
+    pub fn drop_all_transactions(&mut self) {
+        self.clear_terminal_delivery_spawner();
+        for transaction_handle in self.transaction_handles() {
+            if let Some(state) = self.drop_transaction(transaction_handle) {
+                drop(state.into_transaction_cleanup());
+            }
+        }
     }
 
     /// Check if any foreground transaction is active

@@ -553,6 +553,28 @@ sealed class VeilidConfigNetwork with _$VeilidConfigNetwork {
 
 ////////////
 
+/// Where the stores live and the disk budget for data held for other nodes.
+///
+/// A store directory left empty is `<directory>/<store>`. The shared stores
+/// split [limitPercent] of each filesystem's free space plus what they already
+/// use there, and [limitMb] in total. Setting one limit drops the other's
+/// default; with neither set both defaults apply. Each shared store may always
+/// grow to [minimumMb].
+@freezed
+sealed class VeilidConfigStorage with _$VeilidConfigStorage {
+  const factory VeilidConfigStorage({
+    @Default('') String directory,
+    int? limitPercent,
+    int? limitMb,
+    @Default(0) int minimumMb,
+  }) = _VeilidConfigStorage;
+
+  factory VeilidConfigStorage.fromJson(dynamic json) =>
+      _$VeilidConfigStorageFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+
 /// Table store configuration: the encrypted key-value database backing node
 /// state.
 @freezed
@@ -576,6 +598,7 @@ sealed class VeilidConfigBlockStore with _$VeilidConfigBlockStore {
   const factory VeilidConfigBlockStore({
     required String directory,
     required bool delete,
+    @Default(0) int remoteMaxStorageSpaceMb,
   }) = _VeilidConfigBlockStore;
 
   factory VeilidConfigBlockStore.fromJson(dynamic json) =>
@@ -837,6 +860,7 @@ sealed class VeilidConfig with _$VeilidConfig {
     required String programName,
     required String namespace,
     required VeilidConfigCapabilities capabilities,
+    @Default(VeilidConfigStorage()) VeilidConfigStorage storage,
     required VeilidConfigProtectedStore protectedStore,
     required VeilidConfigTableStore tableStore,
     required VeilidConfigBlockStore blockStore,

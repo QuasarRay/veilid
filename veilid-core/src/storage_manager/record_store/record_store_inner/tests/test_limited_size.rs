@@ -15,8 +15,41 @@ pub async fn test_limited_size() {
     test_modify_add_sub_no_limit(registry.clone());
     test_modify_add_sub_with_limit(registry.clone());
     test_debug_value(registry.clone());
+    test_set_limit(registry.clone());
 
     mock_registry::terminate(registry).await;
+}
+
+/// A new limit applies to later commits; a value already over it stays until a commit lowers it
+fn test_set_limit(registry: VeilidComponentRegistry) {
+    let ls = LimitedSize::try_new(registry, "set limit", Some(10), 8u32).expect("should succeed");
+
+    ls.set_limit(Some(20)).expect("should set");
+    assert_eq!(ls.limit(), Ok(Some(20)));
+    let mut g = ls.modify().expect("should modify");
+    g.add(12).expect("should add");
+    assert_eq!(g.commit(), Ok(20), "a raised limit admits growth at once");
+
+    ls.set_limit(Some(5)).expect("should set");
+    assert_eq!(ls.with_value(|v| v), Ok(20), "lowering keeps the value");
+    let mut g = ls.modify().expect("should modify");
+    g.sub(1).expect("should sub");
+    assert_eq!(
+        g.commit(),
+        Err(LimitError::OverLimit {
+            value: 19,
+            limit: 5
+        }),
+        "a commit that ends over the new limit fails"
+    );
+    let mut g = ls.modify().expect("should modify");
+    g.sub(16).expect("should sub");
+    assert_eq!(g.commit(), Ok(4));
+
+    ls.set_limit(None).expect("should set");
+    let mut g = ls.modify().expect("should modify");
+    g.add(1000).expect("should add");
+    assert_eq!(g.commit(), Ok(1004), "no limit");
 }
 
 fn test_debug_value(registry: VeilidComponentRegistry) {
@@ -31,7 +64,11 @@ fn test_debug_value(registry: VeilidComponentRegistry) {
         // A held guard never blocks the debug read; it reports busy instead
         assert_eq!(ls.debug_value(), None);
         assert_eq!(format!("{:#}", ls), "<busy>");
-        assert_eq!(format!("{}", ls), "[debug a]:<busy>/16");
+        assert_eq!(format!("{}", ls), "[debug a]:<busy>");
+        assert!(
+            ls.set_limit(None).is_err(),
+            "a held guard owns the limit too"
+        );
         assert_eq!(format!("{}", lsg), "[debug a]:5/16(9 uncommitted)");
         lsg.commit().expect("should commit");
     }
@@ -43,12 +80,12 @@ fn test_debug_value(registry: VeilidComponentRegistry) {
 
 fn test_no_ops(registry: VeilidComponentRegistry) {
     let ls = LimitedSize::try_new(registry.clone(), "new a", None, 0u32).expect("should succeed");
-    assert_eq!(ls.limit(), None);
+    assert_eq!(ls.limit(), Ok(None));
     assert_eq!(ls.with_value(|v| v).unwrap(), 0u32);
 
     let ls =
         LimitedSize::try_new(registry.clone(), "new b", Some(0), 0u32).expect("should succeed");
-    assert_eq!(ls.limit(), Some(0));
+    assert_eq!(ls.limit(), Ok(Some(0)));
     assert_eq!(ls.with_value(|v| v).unwrap(), 0u32);
 
     let _ =
@@ -56,12 +93,12 @@ fn test_no_ops(registry: VeilidComponentRegistry) {
 
     let ls =
         LimitedSize::try_new(registry.clone(), "new d", Some(8), 0u32).expect("should succeed");
-    assert_eq!(ls.limit(), Some(8));
+    assert_eq!(ls.limit(), Ok(Some(8)));
     assert_eq!(ls.with_value(|v| v).unwrap(), 0u32);
 
     let ls =
         LimitedSize::try_new(registry.clone(), "new e", Some(8), 8u32).expect("should succeed");
-    assert_eq!(ls.limit(), Some(8));
+    assert_eq!(ls.limit(), Ok(Some(8)));
     assert_eq!(ls.with_value(|v| v).unwrap(), 8u32);
 
     let _ = LimitedSize::try_new(registry.clone(), "new f", Some(8), u32::MAX)
@@ -69,12 +106,12 @@ fn test_no_ops(registry: VeilidComponentRegistry) {
 
     let ls = LimitedSize::try_new(registry.clone(), "new g", Some(u32::MAX), 256u32)
         .expect("should succeed");
-    assert_eq!(ls.limit(), Some(u32::MAX));
+    assert_eq!(ls.limit(), Ok(Some(u32::MAX)));
     assert_eq!(ls.with_value(|v| v).unwrap(), 256u32);
 
     let ls = LimitedSize::try_new(registry.clone(), "new h", Some(u32::MAX), u32::MAX)
         .expect("should succeed");
-    assert_eq!(ls.limit(), Some(u32::MAX));
+    assert_eq!(ls.limit(), Ok(Some(u32::MAX)));
     assert_eq!(ls.with_value(|v| v).unwrap(), u32::MAX);
 }
 

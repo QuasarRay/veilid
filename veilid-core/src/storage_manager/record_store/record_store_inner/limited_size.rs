@@ -47,18 +47,16 @@ where
     }
 }
 
-struct LimitedSizeUnlockedInner<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> {
+struct LimitedSizeUnlockedInner {
     registry: VeilidComponentRegistry,
     description: String,
-    opt_limit: Option<T>,
 }
 
-impl<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> fmt::Debug for LimitedSizeUnlockedInner<T> {
+impl fmt::Debug for LimitedSizeUnlockedInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LimitedSizeUnlockedInner")
             //.field("registry", &self.registry)
             .field("description", &self.description)
-            .field("opt_limit", &self.opt_limit)
             .finish()
     }
 }
@@ -66,11 +64,12 @@ impl<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> fmt::Debug for LimitedSi
 #[derive(Debug)]
 struct LimitedSizeInner<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> {
     value: T,
+    opt_limit: Option<T>,
 }
 
 #[derive(Clone)]
 pub struct LimitedSize<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> {
-    unlocked_inner: Arc<LimitedSizeUnlockedInner<T>>,
+    unlocked_inner: Arc<LimitedSizeUnlockedInner>,
     inner: Arc<Mutex<LimitedSizeInner<T>>>,
 }
 
@@ -90,7 +89,6 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LimitedSize")
             .field("description", &self.unlocked_inner.description)
-            .field("opt_limit", &self.unlocked_inner.opt_limit)
             .field("inner", &self.inner)
             .finish()
     }
@@ -101,9 +99,10 @@ where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = self
-            .debug_value()
-            .map_or_else(|| "<busy>".to_owned(), |v| v.to_string());
+        let (value, opt_limit) = self.inner.try_lock().map_or_else(
+            || ("<busy>".to_owned(), None),
+            |inner| (inner.value.to_string(), inner.opt_limit),
+        );
 
         if f.alternate() {
             write!(f, "{}", value)
@@ -113,7 +112,7 @@ where
                 "[{}]:{}{}",
                 self.unlocked_inner.description,
                 value,
-                if let Some(limit) = self.unlocked_inner.opt_limit {
+                if let Some(limit) = opt_limit {
                     format!("/{}", limit)
                 } else {
                     "".to_string()
@@ -140,14 +139,35 @@ impl<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> LimitedSize<T> {
             unlocked_inner: Arc::new(LimitedSizeUnlockedInner {
                 registry,
                 description: description.to_owned(),
-                opt_limit,
             }),
-            inner: Arc::new(Mutex::new(LimitedSizeInner { value })),
+            inner: Arc::new(Mutex::new(LimitedSizeInner { value, opt_limit })),
         })
     }
 
-    pub fn limit(&self) -> Option<T> {
-        self.unlocked_inner.opt_limit
+    pub fn limit(&self) -> Result<Option<T>, ConcurrencyError> {
+        let Some(inner) = self.inner.try_lock() else {
+            return Err(ConcurrencyError::ConcurrentAccess {
+                description: format!(
+                    "Concurrent attempt to access LimitedSize({})",
+                    self.unlocked_inner.description
+                ),
+            });
+        };
+        Ok(inner.opt_limit)
+    }
+
+    /// Replace the limit; a value already over it stays, and only commits that end over it fail
+    pub fn set_limit(&self, opt_limit: Option<T>) -> Result<(), ConcurrencyError> {
+        let Some(mut inner) = self.inner.try_lock() else {
+            return Err(ConcurrencyError::ConcurrentAccess {
+                description: format!(
+                    "Concurrent attempt to set limit of LimitedSize({})",
+                    self.unlocked_inner.description
+                ),
+            });
+        };
+        inner.opt_limit = opt_limit;
+        Ok(())
     }
 
     pub fn with_value<R, F: FnOnce(T) -> R>(&self, closure: F) -> Result<R, ConcurrencyError> {
@@ -185,7 +205,7 @@ pub struct LimitedSizeGuard<T>
 where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
-    unlocked_inner: Arc<LimitedSizeUnlockedInner<T>>,
+    unlocked_inner: Arc<LimitedSizeUnlockedInner>,
     inner: ArcMutexGuard<RawMutex, LimitedSizeInner<T>>,
     uncommitted_value: Option<T>,
     positive: bool,
@@ -219,7 +239,7 @@ where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
     fn new(
-        unlocked_inner: Arc<LimitedSizeUnlockedInner<T>>,
+        unlocked_inner: Arc<LimitedSizeUnlockedInner>,
         inner: ArcMutexGuard<RawMutex, LimitedSizeInner<T>>,
     ) -> Self {
         Self {
@@ -293,7 +313,7 @@ where
         if !self.positive {
             return false;
         }
-        if let Some(limit) = self.unlocked_inner.opt_limit {
+        if let Some(limit) = self.inner.opt_limit {
             let uncommitted_value = self.uncommitted_value.as_ref().unwrap_or_log();
             if *uncommitted_value > limit {
                 return false;
@@ -311,7 +331,7 @@ where
                 value: *uncommitted_value,
             });
         }
-        if let Some(limit) = self.unlocked_inner.opt_limit {
+        if let Some(limit) = self.inner.opt_limit {
             if *uncommitted_value > limit {
                 return Err(LimitError::OverLimit {
                     value: *uncommitted_value,
@@ -332,7 +352,7 @@ where
             });
         }
 
-        if let Some(limit) = self.unlocked_inner.opt_limit {
+        if let Some(limit) = self.inner.opt_limit {
             if uncommitted_value > limit {
                 veilid_log!(self debug "Commit over limit failed, rolled back LimitedSize({}): {} > {}", self.unlocked_inner.description, uncommitted_value, limit);
                 return Err(LimitError::OverLimit {
@@ -364,7 +384,7 @@ where
             "[{}]:{}{}{}",
             self.unlocked_inner.description,
             self.inner.value,
-            if let Some(limit) = self.unlocked_inner.opt_limit {
+            if let Some(limit) = self.inner.opt_limit {
                 format!("/{}", limit)
             } else {
                 "".to_string()

@@ -19,16 +19,6 @@ lazy_static! {
             sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::everything()),
         )
     };
-    static ref DISKS: sysinfo::Disks = {
-        let mut disks = sysinfo::Disks::new_with_refreshed_list();
-        disks.sort_by(|a, b| {
-            b.mount_point()
-                .to_string_lossy()
-                .len()
-                .cmp(&a.mount_point().to_string_lossy().len())
-        });
-        disks
-    };
 }
 
 pub const PROGRAM_NAME: &str = "veilid-server";
@@ -64,26 +54,14 @@ pub fn load_default_config() -> EyreResult<config::Config> {
         )?
         .set_default("client_api.listen_address", "localhost:5959")?
         .set_default(
-            "core.protected_store.directory",
-            Settings::get_default_protected_store_directory()
+            "core.storage.directory",
+            Settings::get_default_storage_directory()
                 .to_string_lossy()
                 .to_string(),
         )?
         .set_default(
             "core.protected_store.device_encryption_key_password",
             dek_password,
-        )?
-        .set_default(
-            "core.table_store.directory",
-            Settings::get_default_table_store_directory()
-                .to_string_lossy()
-                .to_string(),
-        )?
-        .set_default(
-            "core.block_store.directory",
-            Settings::get_default_block_store_directory()
-                .to_string_lossy()
-                .to_string(),
         )?
         .set_default(
             "core.network.tls.certificate_path",
@@ -801,7 +779,7 @@ pub struct Dht {
     pub remote_max_records: u32,
     /// Memory cap for the remote subkey cache, in megabytes (0 = computed at load).
     pub remote_max_subkey_cache_memory_mb: u32,
-    /// Disk cap for remote DHT record storage, in megabytes (0 = computed at load).
+    /// Disk limit for remote DHT record storage, in MiB (0 = a share of the storage budget).
     pub remote_max_storage_space_mb: u32,
     /// Max concurrent DHT network operations in flight (local-only ops exempt).
     pub max_concurrent_operations: u32,
@@ -809,7 +787,7 @@ pub struct Dht {
 impl Default for Dht {
     fn default() -> Self {
         // Server-specific (heavier remote caches than core's embedded defaults).
-        // The two memory/storage sizes are computed at load (0 = placeholder).
+        // The remote subkey cache size is computed at load (0 = placeholder).
         Self {
             local_subkey_cache_size: 128,
             local_max_subkey_cache_memory_mb: 256,
@@ -1109,11 +1087,74 @@ impl Default for Testing {
     }
 }
 
+/// Default share of each filesystem the shared stores may use, when neither limit is set.
+const DEFAULT_STORAGE_LIMIT_PERCENT: u32 = 25;
+/// Default total for the shared stores in MiB, when neither limit is set.
+const DEFAULT_STORAGE_LIMIT_MB: u32 = 10_240;
+
+/// Where the stores live and the disk budget of the stores that hold data for other nodes.
+///
+/// Setting one limit drops the other's default; with neither set both defaults apply.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Storage {
+    /// Base directory for the stores (empty = each store's own directory).
+    pub directory: String,
+    /// Share of each filesystem the shared stores may use, in percent.
+    pub limit_percent: Option<u32>,
+    /// Total the shared stores may use, in MiB.
+    pub limit_mb: Option<u32>,
+    /// Size each shared store may always grow to, in MiB.
+    pub minimum_mb: u32,
+}
+impl Default for Storage {
+    fn default() -> Self {
+        let d = VeilidConfigStorage::default();
+        Self {
+            directory: String::new(),
+            limit_percent: d.limit_percent,
+            limit_mb: d.limit_mb,
+            minimum_mb: d.minimum_mb,
+        }
+    }
+}
+impl Storage {
+    /// The percent and MiB limits in force: veilid-server's defaults when neither is set
+    pub fn effective_limits(&self) -> (Option<u32>, Option<u32>) {
+        if self.limit_percent.is_none() && self.limit_mb.is_none() {
+            (
+                Some(DEFAULT_STORAGE_LIMIT_PERCENT),
+                Some(DEFAULT_STORAGE_LIMIT_MB),
+            )
+        } else {
+            (self.limit_percent, self.limit_mb)
+        }
+    }
+
+    /// The limits in force and whether each is a default, for the startup log
+    pub fn describe_limits(&self) -> String {
+        let (limit_percent, limit_mb) = self.effective_limits();
+        let describe = |name: &str, set: Option<u32>, effective: Option<u32>, unit: &str| match (
+            set, effective,
+        ) {
+            (Some(v), _) => format!("{name} {v}{unit}"),
+            (None, Some(v)) => format!("{name} {v}{unit} (default)"),
+            (None, None) => format!("{name} unset"),
+        };
+        format!(
+            "{}, {}, minimum_mb {}",
+            describe("limit_percent", self.limit_percent, limit_percent, "%"),
+            describe("limit_mb", self.limit_mb, limit_mb, ""),
+            self.minimum_mb
+        )
+    }
+}
+
 /// Table store (persistent encrypted database) configuration.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct TableStore {
-    /// Directory holding the table store database (empty = platform default).
+    /// Directory holding the table store database (empty = `<core.storage.directory>/table_store`).
     pub directory: String,
     /// Delete the table store on startup.
     pub delete: bool,
@@ -1139,16 +1180,20 @@ impl Default for TableStore {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BlockStore {
-    /// Directory holding the block store (empty = platform default).
+    /// Directory holding the block store (empty = `<core.storage.directory>/block_store`).
     pub directory: String,
     /// Delete the block store on startup.
     pub delete: bool,
+    /// Disk limit for blocks stored for other nodes, in MiB (0 = a share of the storage budget).
+    pub remote_max_storage_space_mb: u32,
 }
 impl Default for BlockStore {
     fn default() -> Self {
+        let d = VeilidConfigBlockStore::default();
         Self {
             directory: String::new(),
-            delete: VeilidConfigBlockStore::default().delete,
+            delete: d.delete,
+            remote_max_storage_space_mb: d.remote_max_storage_space_mb,
         }
     }
 }
@@ -1161,7 +1206,7 @@ pub struct ProtectedStore {
     pub allow_insecure_fallback: bool,
     /// Always use insecure file storage, ignoring any OS keychain/keyring.
     pub always_use_insecure_storage: bool,
-    /// Directory for insecure-fallback storage (empty = platform default).
+    /// Directory for insecure-fallback storage (empty = `<core.storage.directory>/protected_store`).
     pub directory: String,
     /// Delete the protected store on startup.
     pub delete: bool,
@@ -1201,6 +1246,8 @@ pub struct Capabilities {
 pub struct Core {
     /// Capabilities advertised by this node.
     pub capabilities: Capabilities,
+    /// Where the stores live and the shared storage budget.
+    pub storage: Storage,
     /// Protected store configuration.
     pub protected_store: ProtectedStore,
     /// Table store configuration.
@@ -1280,17 +1327,10 @@ impl Settings {
         // or a setting that moved under 'internal'). We warn about these once logging is up
         // rather than erroring, so an unknown key never blocks startup.
         let mut unknown_keys = Vec::<String>::new();
-        let mut inner: SettingsInner = serde_ignored::deserialize(cfg, |path| {
+        let inner: SettingsInner = serde_ignored::deserialize(cfg, |path| {
             unknown_keys.push(path.to_string());
         })?;
 
-        // Fill in missing defaults
-        if inner.core.network.dht.remote_max_storage_space_mb == 0 {
-            inner.core.network.dht.remote_max_storage_space_mb =
-                Self::get_default_remote_max_storage_space_mb(&inner);
-        }
-
-        //
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),
             unknown_keys: Arc::new(unknown_keys),
@@ -1327,6 +1367,17 @@ impl Settings {
     }
 
     pub fn verify(&self) -> EyreResult<()> {
+        self.get_core_config(0, 0)
+            .and_then(|config| config.validate())
+            .wrap_err("invalid core config")?;
+        {
+            let inner = self.inner.read();
+            let directory = &inner.core.storage.directory;
+            if !directory.is_empty() && std::fs::create_dir_all(directory).is_err() {
+                bail!("unable to create storage directory {:?}", directory);
+            }
+        }
+
         cfg_if! {
             if #[cfg(windows)] {
                 // no ipc setup for windows
@@ -1429,23 +1480,23 @@ impl Settings {
         true
     }
 
-    fn get_default_directory(subpath: &str) -> PathBuf {
+    /// Default base directory for the stores: `/var/db/veilid-server` where it exists, else the
+    /// platform's local data directory
+    pub fn get_default_storage_directory() -> PathBuf {
         #[cfg(unix)]
         {
             let globalpath = PathBuf::from("/var/db/veilid-server");
 
             if globalpath.exists() {
-                return globalpath.join(subpath);
+                return globalpath;
             }
         }
 
-        let mut ts_path = if let Some(my_proj_dirs) = ProjectDirs::from("org", "Veilid", "Veilid") {
+        if let Some(my_proj_dirs) = ProjectDirs::from("org", "Veilid", "Veilid") {
             PathBuf::from(my_proj_dirs.data_local_dir())
         } else {
             PathBuf::from("./")
-        };
-        ts_path.push(subpath);
-        ts_path
+        }
     }
 
     pub fn get_default_ipc_directory() -> PathBuf {
@@ -1453,22 +1504,13 @@ impl Settings {
             if #[cfg(windows)] {
                 PathBuf::from(r"\\.\PIPE\veilid-server")
             } else {
-                Self::get_default_directory("ipc")
+                Self::get_default_storage_directory().join("ipc")
             }
         }
     }
 
     pub fn get_default_veilid_server_conf_path() -> PathBuf {
         Settings::get_default_config_path("veilid-server.conf")
-    }
-    pub fn get_default_table_store_directory() -> PathBuf {
-        Settings::get_default_directory("table_store")
-    }
-    pub fn get_default_block_store_directory() -> PathBuf {
-        Settings::get_default_directory("block_store")
-    }
-    pub fn get_default_protected_store_directory() -> PathBuf {
-        Settings::get_default_directory("protected_store")
     }
     pub fn get_default_tls_certificate_path() -> PathBuf {
         Settings::get_default_config_path("ssl/certs/server.crt")
@@ -1483,28 +1525,6 @@ impl Settings {
         } else {
             256
         }
-    }
-
-    pub fn get_default_remote_max_storage_space_mb(inner: &SettingsInner) -> u32 {
-        let dht_storage_path = inner.core.table_store.directory.clone();
-        // Sort longer mount point paths first since we want the mount point closest to our table store directory
-
-        if sysinfo::IS_SUPPORTED_SYSTEM {
-            for disk in DISKS.list() {
-                if dht_storage_path.starts_with(&*disk.mount_point().to_string_lossy()) {
-                    let available_mb = disk.available_space() / 1_000_000u64;
-                    if available_mb > 40_000 {
-                        // Default to 10GB if more than 40GB is available
-                        return 10_000;
-                    }
-                    // Default to 1/4 of the available space, if less than 40GB is available
-                    return available_mb as u32;
-                }
-            }
-        }
-
-        // If we can't figure out our storage path go with 1GB of space and pray
-        1_000
     }
 
     pub fn set(&self, key: &str, value: &str) -> EyreResult<()> {
@@ -1627,6 +1647,10 @@ impl Settings {
             );
         }
         set_config_value!(inner.core.capabilities.disable, value);
+        set_config_value!(inner.core.storage.directory, value);
+        set_config_value!(inner.core.storage.limit_percent, value);
+        set_config_value!(inner.core.storage.limit_mb, value);
+        set_config_value!(inner.core.storage.minimum_mb, value);
         set_config_value!(inner.core.protected_store.allow_insecure_fallback, value);
         set_config_value!(
             inner.core.protected_store.always_use_insecure_storage,
@@ -1654,6 +1678,7 @@ impl Settings {
         set_config_value!(inner.core.table_store.max_value_size_mb, value);
         set_config_value!(inner.core.block_store.directory, value);
         set_config_value!(inner.core.block_store.delete, value);
+        set_config_value!(inner.core.block_store.remote_max_storage_space_mb, value);
         set_config_value!(inner.core.network.max_connections, value);
         set_config_value!(inner.core.network.network_key_password, value);
         set_config_value!(inner.core.network.routing_table.public_keys, value);
@@ -1898,6 +1923,15 @@ impl Settings {
                     caps
                 },
             },
+            storage: {
+                let (limit_percent, limit_mb) = inner.core.storage.effective_limits();
+                VeilidConfigStorage {
+                    directory: inner.core.storage.directory.clone(),
+                    limit_percent,
+                    limit_mb,
+                    minimum_mb: inner.core.storage.minimum_mb,
+                }
+            },
             protected_store: VeilidConfigProtectedStore {
                 allow_insecure_fallback: inner.core.protected_store.allow_insecure_fallback,
                 always_use_insecure_storage: inner.core.protected_store.always_use_insecure_storage,
@@ -1927,6 +1961,7 @@ impl Settings {
             block_store: VeilidConfigBlockStore {
                 directory: inner.core.block_store.directory.clone(),
                 delete: inner.core.block_store.delete,
+                remote_max_storage_space_mb: inner.core.block_store.remote_max_storage_space_mb,
             },
             network: VeilidConfigNetwork {
                 max_connections: inner.core.network.max_connections,
@@ -2257,31 +2292,29 @@ mod tests {
             );
         }
         assert_eq!(
-            s.core.table_store.directory,
-            Settings::get_default_table_store_directory()
+            s.core.storage.directory,
+            Settings::get_default_storage_directory()
                 .to_string_lossy()
                 .to_string()
         );
+        assert_eq!(s.core.storage.limit_percent, None);
+        assert_eq!(s.core.storage.limit_mb, None);
+        assert_eq!(s.core.storage.minimum_mb, 0);
+        assert_eq!(s.core.storage.effective_limits(), (Some(25), Some(10_240)));
+        assert_eq!(s.core.network.dht.remote_max_storage_space_mb, 0);
+
+        assert_eq!(s.core.table_store.directory, "");
         assert!(!s.core.table_store.delete);
         assert!(!s.core.table_store.wipe_on_invalid_device_encryption_key);
         assert_eq!(s.core.table_store.max_value_size_mb, 64);
 
-        assert_eq!(
-            s.core.block_store.directory,
-            Settings::get_default_block_store_directory()
-                .to_string_lossy()
-                .to_string()
-        );
+        assert_eq!(s.core.block_store.directory, "");
         assert!(!s.core.block_store.delete);
+        assert_eq!(s.core.block_store.remote_max_storage_space_mb, 0);
 
         assert!(s.core.protected_store.allow_insecure_fallback);
         assert!(s.core.protected_store.always_use_insecure_storage);
-        assert_eq!(
-            s.core.protected_store.directory,
-            Settings::get_default_protected_store_directory()
-                .to_string_lossy()
-                .to_string()
-        );
+        assert_eq!(s.core.protected_store.directory, "");
         assert!(!s.core.protected_store.delete);
         assert_eq!(s.core.protected_store.device_encryption_key_password, "");
         assert_eq!(
@@ -2523,5 +2556,126 @@ mod tests {
             assert_eq!(s.core.network.virtual_network.enabled, false);
             assert_eq!(s.core.network.virtual_network.server_address, "");
         }
+    }
+
+    /// Settings whose storage and IPC directories sit in a fresh temp directory
+    fn temp_settings(name: &str, yaml: &str) -> (Settings, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "veilid-server-settings-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_log();
+        let file = dir.join("veilid-server.conf");
+        let yaml = yaml.replace("$DIR", &dir.to_string_lossy());
+        std::fs::write(&file, format!("client_api:\n  ipc_enabled: false\n{yaml}")).unwrap_or_log();
+        let settings = Settings::try_new(Some(file.as_os_str())).unwrap_or_log();
+        (settings, dir)
+    }
+
+    #[test]
+    fn test_storage_settings() {
+        let (settings, dir) = temp_settings(
+            "storage",
+            "core:\n  storage:\n    directory: '$DIR/data'\n    limit_percent: 10\n    minimum_mb: 16\n  table_store:\n    directory: '$DIR/tables'\n",
+        );
+        assert!(
+            settings.unknown_keys.is_empty(),
+            "{:?}",
+            settings.unknown_keys
+        );
+        {
+            let s = settings.read();
+            assert_eq!(s.core.storage.limit_percent, Some(10));
+            assert_eq!(s.core.storage.limit_mb, None);
+            assert_eq!(s.core.storage.minimum_mb, 16);
+        }
+
+        let core = settings.get_core_config(0, 0).unwrap_or_log();
+        assert_eq!(
+            (core.storage.limit_percent, core.storage.limit_mb),
+            (Some(10), None),
+            "a set percent drops the MiB default"
+        );
+        assert_eq!(
+            core.table_store_directory(),
+            dir.join("tables").to_string_lossy(),
+            "an overridden store directory stays"
+        );
+        assert_eq!(
+            core.block_store_directory(),
+            dir.join("data").join("block_store").to_string_lossy()
+        );
+        assert_eq!(
+            core.protected_store_directory(),
+            dir.join("data").join("protected_store").to_string_lossy()
+        );
+
+        settings.verify().unwrap_or_log();
+        assert!(
+            dir.join("data").is_dir(),
+            "verify creates the storage directory"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_storage_limit_defaults() {
+        let (settings, dir) = temp_settings(
+            "storage_defaults",
+            "core:\n  storage:\n    directory: '$DIR'\n",
+        );
+        let both = settings.read().core.storage.describe_limits();
+        assert_eq!(
+            both,
+            "limit_percent 25% (default), limit_mb 10240 (default), minimum_mb 0"
+        );
+
+        settings.set("core.storage.limit_mb", "512").unwrap_or_log();
+        assert_eq!(
+            settings.read().core.storage.effective_limits(),
+            (None, Some(512)),
+            "a set MiB limit drops the percent default"
+        );
+        assert_eq!(
+            settings.read().core.storage.describe_limits(),
+            "limit_percent unset, limit_mb 512, minimum_mb 0"
+        );
+
+        settings
+            .set("core.storage.limit_percent", "50")
+            .unwrap_or_log();
+        let core = settings.get_core_config(0, 0).unwrap_or_log();
+        assert_eq!(
+            (core.storage.limit_percent, core.storage.limit_mb),
+            (Some(50), Some(512)),
+            "both set: both apply"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_storage_verify_rejects() {
+        let (settings, dir) = temp_settings(
+            "storage_verify",
+            "core:\n  storage:\n    directory: '$DIR'\n",
+        );
+        settings.verify().unwrap_or_log();
+        for (key, value) in [
+            ("core.storage.limit_percent", "0"),
+            ("core.storage.limit_percent", "101"),
+            ("core.storage.limit_mb", "0"),
+        ] {
+            settings.set(key, value).unwrap_or_log();
+            assert!(settings.verify().is_err(), "{key} = {value}");
+            settings.set(key, "null").unwrap_or_log();
+        }
+        settings.set("core.storage.limit_mb", "16").unwrap_or_log();
+        settings
+            .set("core.storage.minimum_mb", "17")
+            .unwrap_or_log();
+        assert!(settings.verify().is_err(), "minimum over the MiB limit");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

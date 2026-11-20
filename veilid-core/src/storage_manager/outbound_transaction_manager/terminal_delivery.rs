@@ -64,8 +64,9 @@ impl TerminalDelivery {
                     .routing_domain_filtered(RoutingDomain::PublicInternet),
                 Some(self.safety_selection.clone()),
             );
-            let rpc_processor = registry.rpc_processor();
-            let res = rpc_processor
+            // The guard ends with the call, so a delivery asleep in its backoff holds none
+            let res = registry
+                .rpc_processor()
                 .rpc_call_transact_command(
                     dest,
                     self.opaque_record_key.clone(),

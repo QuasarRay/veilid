@@ -146,6 +146,11 @@ impl RawUdpProtocolHandler {
         *self.stop_source.lock() = None;
     }
 
+    /// Whether `stop()` has been called
+    pub fn is_stopped(&self) -> bool {
+        self.stop_source.lock().is_none()
+    }
+
     /// Debug availability override: a suppressed transport must fail like the network broke it
     fn is_transport_disabled(&self, remote_addr: SocketAddr) -> bool {
         let address_type = if remote_addr.is_ipv6() {

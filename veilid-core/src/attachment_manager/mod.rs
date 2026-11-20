@@ -411,6 +411,11 @@ impl AttachmentManager {
     /// one without detaching, so each run is awaited.
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn pre_terminate_async(&self) {
+        // Roll back open transactions while the network can still carry the rollbacks
+        self.storage_manager()
+            .roll_back_transactions_for_shutdown()
+            .await;
+
         // Start attachment shutdown
         let guard = self
             .startup_context

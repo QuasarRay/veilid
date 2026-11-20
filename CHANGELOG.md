@@ -9,6 +9,8 @@
   - **Breaking** A node with bootstraps configured but no dialable protocol in `bootstrap_protocols` fails to start.
   - **Breaking** A node with no outbound protocol, or with WSS as its only one, fails to start, because WSS reaches bootstraps but no other peer.
   - **Breaking** A browser node fails to start on a page that gives it no protocol reaching peers: WS unless the page is https, WebTransport where the browser offers it.
+  - **Breaking** `network.dht.remote_max_storage_space_mb` defaults to 0, a share of the storage budget, instead of 256 MiB (128 MiB in a browser).
+  - **Breaking** `VeilidConfig::new` sets `storage.directory` and leaves the store directories empty, which puts the stores where they were.
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
   - WebTransport sessions start at QUIC's 1200-byte minimum, which every path carries, and discover their path up to the UDP interface limit.
@@ -37,24 +39,45 @@
   - A node that states its own PublicInternet dial info keeps it confirmed when its connection table empties, so the first nodes of a network come up without validators, and `detect_address_changes: false` rules detection out for good.
   - A browser node counts an answer over a named WSS or WebTransport url toward the address family the peer saw it from, so a name the browser resolved to IPv4 does not confirm IPv6.
   - A node protects only the relay connections its keepalives ping, so a dual-stack node does not reopen the relay's other-family connection each time the relay closes it as idle.
+  - The `storage` config section sets the stores' base directory and the remote record store's disk budget: `limit_percent` of its filesystem's free space and `limit_mb` in total, 25% and 256 MiB (128 MiB in a browser) by default.
+  - A browser node in a secure context takes its storage budget from `navigator.storage.estimate()`; elsewhere only `limit_mb` applies.
+  - A record store over its storage limit keeps its records and replaces the least recently used ones instead of deleting the excess when it loads.
+  - `block_store.remote_max_storage_space_mb` is reserved for the block store's remote cache.
+  - Startup logs where the stores live and each record store's size and limit.
+  - `VeilidLayerFilter::add_facilities` takes a name ending in `*` for every target with that prefix.
+  - At shutdown a node sends a rollback for each DHT transaction still open while it can reach the network, and does not wait for the answers.
+  - Detach and shutdown release the RPC calls waiting for answers at once instead of waiting out their timeouts.
+  - Shutdown stops the storage manager's background work before the components it uses terminate, so a transaction's retried commit or rollback no longer keeps the RPC processor referenced.
+  - A UDP receive loop stopped at shutdown exits at once, instead of counting its closed WebTransport demux as errors and asking for a network restart.
+  - A call cancelled before it finishes logs its unfinished duration recording at debug, not error.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
 - veilid-flutter:
+  - **Breaking** `getDefaultVeilidConfig` sets `storage.directory` and leaves the three store directories empty, so a path built from a store's directory must start from `storage.directory` instead.
   - `VeilidConfigWebTransport` under the protocol config.
   - `VeilidConfigAppLifecycle.autoDetectState`, so a Dart app can turn off the platform's own lifecycle reports and drive the node with `reportAppLifecycleState`.
   - `VeilidConfigRoutingTable.bootstrapProtocols`, the protocols a bootstrap request goes out on, in order.
+  - `VeilidConfigStorage` and `VeilidConfigBlockStore.remoteMaxStorageSpaceMb`.
+  - The integration test fixture keeps its stores in a fresh temp directory and deletes it at teardown.
+  - `run_integration_tests.sh` passes on the `flutter test` arguments given after `--`.
 - veilid-python:
   - **Breaking** A config's `to_json()` leaves out `None` fields, so `change_config` lets veilid-core apply its own defaults.
   - **Breaking** `VeilidAPI.generate_key_pair(kind)` returns one `KeyPair`, not a list holding the key pair's string one character at a time.
   - `VeilidConfigWSS`, `VeilidConfigWebTransport`, `VeilidConfigVirtualNetwork`, `VeilidConfigAppLifecycle` and `VeilidConfigPrivacy.country_code_denylist` model the sections a cargo feature adds to the config, each `None` when veilid-core is built without that feature, so a `change_config` round trip keeps them.
   - An optional config section loads as its config class rather than a dict.
   - `VeilidConfigRoutingTable.bootstrap_protocols`, the protocols a bootstrap request goes out on, in order.
+  - `VeilidConfigStorage` and `VeilidConfigBlockStore.remote_max_storage_space_mb`.
 - veilid-server:
+  - **Breaking** `core.network.dht.remote_max_storage_space_mb: 0` gives the remote record store a share of the storage budget, 25% of its filesystem's free space and 10240 MiB at most by default, instead of all free space below 40 GB.
+  - **Breaking** The store directories default to empty, under `core.storage.directory`, which defaults to the base directory they used before.
   - WebTransport settings under `core.network.protocol.webtransport`.
   - Built with WSS and WebTransport, so a node listens for WebTransport on its UDP port and advertises WTS and WTD dial info.
   - `--port` moves the WebTransport listen address along with the others, and the packaged `veilid-server.conf` names it.
   - `--dump-bootstrap-records` (with `--bootstrap-hostname`) and `--sign-bootstrap-payload` generate bootstrap records and the signed payload; `--dump-txt-record` is a deprecated alias.
+  - The `core.storage` settings: `directory`, `limit_percent`, `limit_mb` and `minimum_mb`.
+  - veilid-server checks the core config before it starts, so an invalid config fails before the daemon forks.
+  - veilid-server's own log lines, such as unknown config key warnings, are in the `#common` group and show at the configured log level.
 - veilid-tools:
   - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
   - `UdpDfSender`: a don't-fragment sending socket beside a shared UDP socket, the way `UdpTtlSender` sends hole punches; on Linux and Android it is connected to a documentation address so it never receives.
@@ -62,6 +85,7 @@
   - **Breaking** The `Resolver` (`txt_lookup`, `ptr_lookup`, `supports_txt`) is removed.
   - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
   - `has_webtransport()` reports whether the JS environment offers WebTransport.
+  - `filesystem_space()` reports which filesystem holds a path and its free space.
 - veilid-wasm:
   - Browser WebTransport client, outbound only.
   - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
@@ -70,6 +94,7 @@
   - Bootstraps over B02T, WSS first and WebTransport second by default.
   - **Breaking** Startup fails on a page where the node could reach no peer: an https page without WebTransport, or a page that is not a secure context with `ws.connect` off.
   - A `ws://` bootstrap url on an https page, or a `wts://` one on a page without WebTransport, is skipped.
+  - The TypeScript `VeilidConfig` carries the optional `storage` section.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 

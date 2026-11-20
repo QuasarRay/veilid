@@ -16,6 +16,7 @@ mod test_min_seqnum;
 mod test_record_lock_preemption;
 mod test_record_report_seqs;
 mod test_rehydration_failure_runs;
+mod test_storage_budget;
 mod test_subkey_lock;
 mod test_transaction_quality;
 mod test_transaction_stage_consensus;
@@ -44,6 +45,7 @@ pub async fn test_all() {
     test_record_lock_preemption::test_all().await;
     test_record_report_seqs::test_all();
     test_rehydration_failure_runs::test_all();
+    test_storage_budget::test_all();
     test_transaction_quality::test_all();
     test_transaction_stage_consensus::test_all();
     test_unanswered_inspect::test_all().await;

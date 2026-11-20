@@ -84,9 +84,10 @@ impl<'a> DurationRecorder<'a> {
 impl<'a> Drop for DurationRecorder<'a> {
     fn drop(&mut self) {
         if !self.finished {
+            // A cancelled call drops its recorder: worth knowing, not an error
             // prefer this after switching to task-local for log key
-            // veilid_log!(error "DurationRecorder dropped with no recording: {:?}", self);
-            tracing::error!("DurationRecorder dropped with no recording: {:?}", self);
+            // veilid_log!(debug "DurationRecorder dropped with no recording: {:?}", self);
+            tracing::debug!("DurationRecorder dropped with no recording: {:?}", self);
         }
         #[cfg(feature = "instrument")]
         if let Some(span) = self.span.take() {

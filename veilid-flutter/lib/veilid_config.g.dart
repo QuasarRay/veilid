@@ -531,6 +531,23 @@ Map<String, dynamic> _$VeilidConfigNetworkToJson(
   'networkKeyPassword': instance.networkKeyPassword,
 };
 
+_VeilidConfigStorage _$VeilidConfigStorageFromJson(Map<String, dynamic> json) =>
+    _VeilidConfigStorage(
+      directory: json['directory'] as String? ?? '',
+      limitPercent: (json['limitPercent'] as num?)?.toInt(),
+      limitMb: (json['limitMb'] as num?)?.toInt(),
+      minimumMb: (json['minimumMb'] as num?)?.toInt() ?? 0,
+    );
+
+Map<String, dynamic> _$VeilidConfigStorageToJson(
+  _VeilidConfigStorage instance,
+) => <String, dynamic>{
+  'directory': instance.directory,
+  'limitPercent': instance.limitPercent,
+  'limitMb': instance.limitMb,
+  'minimumMb': instance.minimumMb,
+};
+
 _VeilidConfigTableStore _$VeilidConfigTableStoreFromJson(
   Map<String, dynamic> json,
 ) => _VeilidConfigTableStore(
@@ -555,6 +572,8 @@ _VeilidConfigBlockStore _$VeilidConfigBlockStoreFromJson(
 ) => _VeilidConfigBlockStore(
   directory: json['directory'] as String,
   delete: json['delete'] as bool,
+  remoteMaxStorageSpaceMb:
+      (json['remoteMaxStorageSpaceMb'] as num?)?.toInt() ?? 0,
 );
 
 Map<String, dynamic> _$VeilidConfigBlockStoreToJson(
@@ -562,6 +581,7 @@ Map<String, dynamic> _$VeilidConfigBlockStoreToJson(
 ) => <String, dynamic>{
   'directory': instance.directory,
   'delete': instance.delete,
+  'remoteMaxStorageSpaceMb': instance.remoteMaxStorageSpaceMb,
 };
 
 _VeilidConfigProtectedStore _$VeilidConfigProtectedStoreFromJson(
@@ -811,6 +831,9 @@ _VeilidConfig _$VeilidConfigFromJson(Map<String, dynamic> json) =>
       programName: json['programName'] as String,
       namespace: json['namespace'] as String,
       capabilities: VeilidConfigCapabilities.fromJson(json['capabilities']),
+      storage: json['storage'] == null
+          ? const VeilidConfigStorage()
+          : VeilidConfigStorage.fromJson(json['storage']),
       protectedStore: VeilidConfigProtectedStore.fromJson(
         json['protectedStore'],
       ),
@@ -830,6 +853,7 @@ Map<String, dynamic> _$VeilidConfigToJson(_VeilidConfig instance) =>
       'programName': instance.programName,
       'namespace': instance.namespace,
       'capabilities': instance.capabilities.toJson(),
+      'storage': instance.storage.toJson(),
       'protectedStore': instance.protectedStore.toJson(),
       'tableStore': instance.tableStore.toJson(),
       'blockStore': instance.blockStore.toJson(),

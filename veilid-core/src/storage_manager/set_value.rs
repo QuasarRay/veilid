@@ -644,7 +644,7 @@ impl StorageManager {
             )
         };
 
-        // Call the fanout in a spawned task
+        // Shutdown cancels the fanout through the startup lock's stop token
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
         let shutdown_stop_source = self
             .startup_lock
