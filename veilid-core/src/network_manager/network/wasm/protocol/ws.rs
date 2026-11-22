@@ -51,18 +51,11 @@ impl WebsocketNetworkConnection {
         feature = "verbose-tracing",
         instrument(level = "trace", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn close(&self) -> io::Result<NetworkResult<()>> {
-        let timeout_ms = self
-            .config()
-            .internal()
-            .network
-            .connection_initial_timeout_ms;
-
-        // A close that fails must not report success
-        match timeout(timeout_ms, self.inner.ws_meta.close()).await {
-            Ok(Ok(_)) => Ok(NetworkResult::value(())),
-            Ok(Err(e)) => Err::<(), _>(ws_err_to_io_error(e)).into_network_result(),
-            Err(_) => Ok(NetworkResult::timeout()),
+    pub fn close(&self) -> io::Result<NetworkResult<()>> {
+        // The browser sends queued data before the close frame; its close event waits on the peer
+        match self.inner.ws_meta.wrapped().close() {
+            Ok(()) => Ok(NetworkResult::value(())),
+            Err(e) => Err(io::Error::other(format!("{:?}", e))),
         }
     }
 

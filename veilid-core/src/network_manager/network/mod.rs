@@ -231,6 +231,28 @@ pub(crate) fn configured_address_type_set(config: &VeilidConfig) -> AddressTypeS
     set
 }
 
+/// Runs a connection's flush on a detached task that network shutdown waits for and cuts short
+#[cfg(feature = "enable-protocol-webtransport")]
+pub(in crate::network_manager) fn spawn_tracked_flush(
+    startup_lock: &StartupLock,
+    name: &str,
+    flush: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let Ok(enter_guard) = startup_lock.enter_arc() else {
+        return;
+    };
+    let stop_token = startup_lock.stop_token();
+    spawn_detached(name, async move {
+        let _enter_guard = enter_guard;
+        match stop_token {
+            Some(st) => {
+                let _ = flush.timeout_at(st).await;
+            }
+            None => flush.await,
+        }
+    });
+}
+
 #[cfg(all(
     any(test, feature = "test-util"),
     not(all(target_arch = "wasm32", target_os = "unknown")),

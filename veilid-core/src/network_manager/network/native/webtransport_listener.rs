@@ -877,6 +877,8 @@ impl NativeNetwork {
                             .is_ip_addr_punished(peer_addr.ip())
                         {
                             veilid_log!(log debug "WebTransport: rejecting session from punished address {}", peer_addr);
+                            // A dropped session stays open until it idles out
+                            session.close(0u32, b"close");
                             return;
                         }
                         let Some(address_lock_guard) = connection_manager
@@ -884,6 +886,7 @@ impl NativeNetwork {
                             .await
                         else {
                             veilid_log!(log debug "timed out acquiring inbound address lock for {}", peer_addr);
+                            session.close(0u32, b"close");
                             return;
                         };
                         let session_close = session.clone();
@@ -904,7 +907,7 @@ impl NativeNetwork {
                             Err(_) => {
                                 veilid_log!(log debug "WebTransport: inbound session from {} sent no stream or datagram within {}ms; closing", peer_addr, connection_initial_timeout_ms);
                                 // Closing with a capsule resolves a browser peer's `session.closed()`
-                                // promptly, rather than leaving it on quinn's implicit close-on-drop.
+                                // promptly, rather than leaving it open until it idles out.
                                 // `Session::close` delivers the capsule from a spawned task, so the
                                 // session is held until `closed()` confirms it went out.
                                 session_close.close(0u32, b"no stream or datagram");

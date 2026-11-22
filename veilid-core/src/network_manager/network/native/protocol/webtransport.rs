@@ -24,8 +24,6 @@ const STREAM_LEN_PREFIX: usize = size_of::<u32>();
 
 const MIN_WTD_DATAGRAM_SIZE: usize = 256;
 
-const WT_UNBOUND_FLUSH_GRACE_MS: u32 = 1000;
-
 const WT_DATAGRAM_FLUSH_POLL_INTERVAL_MS: u32 = 5;
 
 /// Peer-initiated bidirectional QUIC streams a conforming WebTransport peer needs: the HTTP/3
@@ -371,9 +369,21 @@ enum WebTransportChannel {
     },
 }
 
-enum FlushWait {
-    Stream(Arc<AsyncMutex<SendStream>>),
-    Datagram(usize),
+/// Closes the session when the last connection handle drops; a dropped `Session` only ends its
+/// CONNECT stream, and its capsule reader holds the `Connection` until the peer answers
+struct CloseSessionOnDrop(Session);
+
+impl core::ops::Deref for CloseSessionOnDrop {
+    type Target = Session;
+    fn deref(&self) -> &Session {
+        &self.0
+    }
+}
+
+impl Drop for CloseSessionOnDrop {
+    fn drop(&mut self) {
+        self.0.close(0u32, b"close");
+    }
 }
 
 /// Clones share the session, so one can carry a send while another flushes it
@@ -382,7 +392,7 @@ pub struct WebTransportNetworkConnection {
     registry: VeilidComponentRegistry,
     flow: Flow,
     direction: Direction,
-    session: Session,
+    session: Arc<CloseSessionOnDrop>,
     channel: WebTransportChannel,
 }
 
@@ -432,7 +442,7 @@ impl WebTransportNetworkConnection {
             registry,
             flow,
             direction,
-            session,
+            session: Arc::new(CloseSessionOnDrop(session)),
             channel: WebTransportChannel::Stream {
                 send: Arc::new(AsyncMutex::new(send)),
                 recv: Arc::new(AsyncMutex::new(recv)),
@@ -452,7 +462,7 @@ impl WebTransportNetworkConnection {
             registry,
             flow,
             direction,
-            session,
+            session: Arc::new(CloseSessionOnDrop(session)),
             channel: WebTransportChannel::Datagram {
                 primed: Arc::new(AsyncMutex::new(primed)),
                 empty_send_buffer_space,
@@ -479,35 +489,40 @@ impl WebTransportNetworkConnection {
         Ok(NetworkResult::value(()))
     }
 
-    pub async fn flush_and_close(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
-        let wait = match &self.channel {
-            WebTransportChannel::Stream { send, .. } => {
-                let _ = send.lock().await.finish();
-                FlushWait::Stream(send.clone())
-            }
-            WebTransportChannel::Datagram {
-                empty_send_buffer_space,
-                ..
-            } => FlushWait::Datagram(*empty_send_buffer_space),
-        };
+    /// Finishes the stream and waits for the peer to acknowledge it, or for the outgoing
+    /// datagram buffer to drain, bounded by `connection_initial_timeout_ms`, then closes
+    pub fn flush_and_close(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let timeout_ms = self
+            .config()
+            .internal()
+            .network
+            .connection_initial_timeout_ms;
         let session = self.session.clone();
+        let channel = self.channel.clone();
         async move {
             let flushed = async {
-                match wait {
-                    FlushWait::Stream(send) => {
-                        let _ = send.lock().await.stopped().await;
+                match &channel {
+                    WebTransportChannel::Stream { send, .. } => {
+                        let mut send = send.lock().await;
+                        let _ = send.finish();
+                        // quinn reports no point between buffered and acknowledged
+                        let _ = send.stopped().await;
                     }
-                    FlushWait::Datagram(empty_space) => {
+                    WebTransportChannel::Datagram {
+                        empty_send_buffer_space,
+                        ..
+                    } => {
                         // quinn offers no wakeup for the outgoing datagram buffer, so poll it.
                         while session.close_reason().is_none()
-                            && session.datagram_send_buffer_space() < empty_space
+                            && session.datagram_send_buffer_space() < *empty_send_buffer_space
                         {
                             sleep(WT_DATAGRAM_FLUSH_POLL_INTERVAL_MS).await;
                         }
                     }
                 }
             };
-            let _ = timeout(WT_UNBOUND_FLUSH_GRACE_MS, flushed).await;
+            let _ = timeout(timeout_ms, flushed).await;
+            session.close(0u32, b"close");
         }
     }
 
@@ -805,7 +820,10 @@ pub(in crate::network_manager) async fn connect_connection(
     let conn = if is_stream {
         let (send, recv) = match session.open_bi().await {
             Ok(v) => v,
-            Err(e) => return Ok(NetworkResult::NoConnection(to_io_error_other(e))),
+            Err(e) => {
+                session.close(0u32, b"close");
+                return Ok(NetworkResult::NoConnection(to_io_error_other(e)));
+            }
         };
         WebTransportNetworkConnection::new_stream(
             registry,

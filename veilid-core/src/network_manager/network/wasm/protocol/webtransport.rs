@@ -62,6 +62,15 @@ struct WebTransportNetworkConnectionInner {
     channel: WebTransportChannel,
 }
 
+/// web-transport-wasm's `Session` leaves the browser transport open on drop, and an unclosed
+/// session holds a WebTransport slot until the browser times it out; enough of them jam every
+/// later WebTransport dial on the page
+impl Drop for WebTransportNetworkConnectionInner {
+    fn drop(&mut self) {
+        self.session.close(0, "close");
+    }
+}
+
 #[derive(Clone)]
 pub struct WebTransportNetworkConnection {
     registry: VeilidComponentRegistry,
@@ -98,6 +107,27 @@ impl WebTransportNetworkConnection {
             Ok(NetworkResult::value(()))
         })
         .await
+    }
+
+    /// Finishes the stream and waits for the peer to acknowledge it, bounded by
+    /// `connection_initial_timeout_ms`, then closes; a browser reports nothing when a datagram
+    /// leaves, so a datagram session closes at once
+    pub fn flush_and_close(&self) -> impl Future<Output = ()> + Send + 'static {
+        let timeout_ms = self
+            .config()
+            .internal()
+            .network
+            .connection_initial_timeout_ms;
+        let inner = self.inner.clone();
+        SendWrapper::new(async move {
+            if let WebTransportChannel::Stream { send, .. } = &inner.channel {
+                let mut send = send.lock().await;
+                let _ = send.finish();
+                // The writer's closed promise settles once the peer acknowledges the FIN
+                let _ = timeout(timeout_ms, send.closed()).await;
+            }
+            inner.session.close(0, "close");
+        })
     }
 
     #[cfg_attr(
@@ -352,7 +382,7 @@ impl WebTransportProtocolHandler {
         ))
     }
 
-    async fn dial(
+    pub(in crate::network_manager) async fn dial(
         registry: VeilidComponentRegistry,
         dial_info: DialInfo,
         timeout_ms: u32,
@@ -466,12 +496,11 @@ impl WebTransportProtocolHandler {
 
         let started = Timestamp::now();
         let conn = network_result_try!(Self::dial(registry.clone(), dial_info, timeout_ms).await?);
-        let _close_guard = CloseSessionOnDrop(conn.clone());
 
         let elapsed_ms =
             u32::try_from(Timestamp::now().as_u64().saturating_sub(started.as_u64()) / 1_000)
                 .unwrap_or(u32::MAX);
-        // Debug chaos sees the exchange on a clone, and the guard closes the shared session
+        // Debug chaos sees the exchange on a clone; dropping the last one closes the session
         let chaos_conn = registry.network_manager().chaos().wrap_connection(
             Box::new(WasmProtocolNetworkConnection::WebTransport(conn.clone())),
             None,
@@ -508,17 +537,5 @@ impl Drop for CloseHandleOnDrop {
         if let Some(handle) = self.0.take() {
             handle.close();
         }
-    }
-}
-
-/// Dropping the Rust future does not close the browser session, and an abandoned, unclosed
-/// session holds a WebTransport slot until the browser times it out; enough of them jam every
-/// later WebTransport dial on the page. [`Session::close`] is synchronous, so it completes
-/// inside `Drop`.
-struct CloseSessionOnDrop(WebTransportNetworkConnection);
-
-impl Drop for CloseSessionOnDrop {
-    fn drop(&mut self) {
-        self.0.inner.session.close(0, "request/response complete");
     }
 }

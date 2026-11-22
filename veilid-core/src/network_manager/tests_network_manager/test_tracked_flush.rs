@@ -1,5 +1,5 @@
 use super::*;
-use crate::network_manager::network::native::webtransport_state::spawn_tracked_flush;
+use crate::network_manager::network::spawn_tracked_flush;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub async fn test_tracked_flush_is_cancelled_and_joined_at_shutdown() {

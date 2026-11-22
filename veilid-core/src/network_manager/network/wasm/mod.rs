@@ -269,16 +269,28 @@ impl PlatformNetwork for WasmNetwork {
                     }
                     #[cfg(feature = "enable-protocol-webtransport")]
                     ProtocolType::WTS | ProtocolType::WTD => {
-                        let pnc = network_result_try!(
-                            webtransport::WebTransportProtocolHandler::connect(
+                        let conn =
+                            network_result_try!(webtransport::WebTransportProtocolHandler::dial(
                                 self.registry(),
                                 dial_info,
                                 timeout_ms
                             )
                             .await
-                            .wrap_err("connect failure")?
+                            .wrap_err("connect failure")?);
+                        // Debug chaos sees the send on a clone, and the original flushes the shared session
+                        let chaos_conn = self.network_manager().chaos().wrap_connection(
+                            Box::new(WasmProtocolNetworkConnection::WebTransport(conn.clone())),
+                            None,
                         );
-                        network_result_try!(pnc.send(data, mtu).await.wrap_err("send failure")?);
+                        network_result_try!(chaos_conn
+                            .send(data, mtu)
+                            .await
+                            .wrap_err("send failure")?);
+                        spawn_tracked_flush(
+                            &self.unlocked_inner.startup_lock,
+                            "WebTransport unbound flush",
+                            conn.flush_and_close(),
+                        );
                     }
                 };
                 Ok(NetworkResult::Value(()))

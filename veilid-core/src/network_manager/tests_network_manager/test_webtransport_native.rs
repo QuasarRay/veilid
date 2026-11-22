@@ -995,7 +995,7 @@ pub async fn test_flush_and_close_delivers_before_drop() {
             conn.send(msg.clone()).await.expect("send io"),
             NetworkResult::Value(())
         ));
-        let flush = conn.flush_and_close().await;
+        let flush = conn.flush_and_close();
         drop(conn);
         flush.await;
     }
@@ -1012,6 +1012,91 @@ pub async fn test_flush_and_close_delivers_before_drop() {
         got.as_deref(),
         Some(msg.as_ref()),
         "unbound WTS send must be flushed/delivered before the connection drops"
+    );
+
+    mock_registry::terminate(registry).await;
+}
+
+/// A session lives while any clone of its connection does, and ends once the last one drops
+pub async fn test_dropped_connection_closes_session() {
+    let registry = mock_registry::init("wt_drop_closes").await;
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+
+    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let endpoint = test_server_endpoint(
+        server_config,
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+    )
+    .unwrap();
+    let server_addr = endpoint.local_addr().unwrap();
+
+    let ended: std::sync::Arc<std::sync::Mutex<Option<bool>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let server_ended = ended.clone();
+    let server_registry = registry.clone();
+    spawn_detached("wt test drop server", async move {
+        let mut server = web_transport_quinn::Server::new(endpoint);
+        if let Some(request) = server.accept().await {
+            if let Ok(session) = request.ok().await {
+                if let Some(conn) =
+                    accept_session_connection(server_registry, server_addr, session).await
+                {
+                    let first = conn.recv().await;
+                    let second = conn.recv().await;
+                    *server_ended.lock().unwrap() = Some(
+                        matches!(first, Ok(NetworkResult::Value(_)))
+                            && !matches!(second, Ok(NetworkResult::Value(_))),
+                    );
+                }
+            }
+        }
+    });
+
+    let socket_address = SocketAddress::from_socket_addr(server_addr);
+    let url = format!("https://{}/", server_addr);
+    let di = DialInfo::try_webtransport_datagram(socket_address, url, vec![cert.hash], None)
+        .expect("wtd dialinfo");
+    {
+        let conn = match connect_connection(registry.clone(), None, di, 10_000, None)
+            .await
+            .expect("connect io")
+        {
+            NetworkResult::Value(c) => c,
+            other => panic!("WTD connect failed: {:?}", other),
+        };
+        // The server classifies the session on its first datagram
+        assert!(matches!(
+            conn.send(Bytes::from_static(b"classify the session"))
+                .await
+                .expect("send io"),
+            NetworkResult::Value(())
+        ));
+        let clone = conn.clone();
+        drop(conn);
+        sleep(200).await;
+        assert!(
+            ended.lock().unwrap().is_none(),
+            "a surviving clone keeps the session open"
+        );
+        drop(clone);
+    }
+
+    let mut got = None;
+    for _ in 0..100 {
+        if let Some(v) = *ended.lock().unwrap() {
+            got = Some(v);
+            break;
+        }
+        sleep(50).await;
+    }
+    assert_eq!(
+        got,
+        Some(true),
+        "the server must see the session end once the last handle drops"
     );
 
     mock_registry::terminate(registry).await;
@@ -2118,6 +2203,7 @@ pub async fn test_all() {
     Box::pin(test_connect_reuses_supplied_client_endpoint()).await;
     Box::pin(test_accept_wildcard_bind_resolves_local_ip()).await;
     Box::pin(test_flush_and_close_delivers_before_drop()).await;
+    Box::pin(test_dropped_connection_closes_session()).await;
     Box::pin(test_webtransport_ca_signed_roundtrip()).await;
     Box::pin(test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal()).await;
     Box::pin(test_webtransport_live_cert_swap()).await;

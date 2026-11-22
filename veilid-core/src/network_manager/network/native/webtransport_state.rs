@@ -142,7 +142,7 @@ impl NativeNetwork {
     /// connection.
     ///
     /// WebTransport `send()` only buffers into the quinn driver, so the buffered bytes have to
-    /// be flushed before the connection drops or quinn's implicit close abandons them (see
+    /// be flushed before the last connection handle drops and closes the session (see
     /// [`spawn_tracked_flush`]).
     pub(super) async fn send_webtransport_unbound(
         &self,
@@ -173,7 +173,7 @@ impl NativeNetwork {
         spawn_tracked_flush(
             &self.startup_lock,
             "WebTransport unbound flush",
-            conn.flush_and_close().await,
+            conn.flush_and_close(),
         );
         Ok(NetworkResult::value(()))
     }
@@ -360,24 +360,4 @@ impl NativeNetwork {
         )
         .await?)
     }
-}
-
-pub(in crate::network_manager) fn spawn_tracked_flush(
-    startup_lock: &StartupLock,
-    name: &str,
-    flush: impl std::future::Future<Output = ()> + Send + 'static,
-) {
-    let Ok(enter_guard) = startup_lock.enter_arc() else {
-        return;
-    };
-    let stop_token = startup_lock.stop_token();
-    spawn_detached(name, async move {
-        let _enter_guard = enter_guard;
-        match stop_token {
-            Some(st) => {
-                let _ = flush.timeout_at(st).await;
-            }
-            None => flush.await,
-        }
-    });
 }

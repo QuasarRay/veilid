@@ -38,7 +38,7 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
         Box::pin(async move {
             match self {
                 //            Self::Dummy(d) => d.close(),
-                Self::Ws(w) => w.close().await,
+                Self::Ws(w) => w.close(),
                 #[cfg(feature = "enable-protocol-webtransport")]
                 Self::WebTransport(w) => w.close().await,
             }

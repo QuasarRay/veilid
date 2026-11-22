@@ -50,6 +50,7 @@
   - Shutdown stops the storage manager's background work before the components it uses terminate, so a transaction's retried commit or rollback no longer keeps the RPC processor referenced.
   - A UDP receive loop stopped at shutdown exits at once, instead of counting its closed WebTransport demux as errors and asking for a network restart.
   - A call cancelled before it finishes logs its unfinished duration recording at debug, not error.
+  - A browser node closes a WebSocket without waiting for the server to answer the close.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
