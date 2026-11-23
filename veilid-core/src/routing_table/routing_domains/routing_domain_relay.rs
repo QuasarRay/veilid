@@ -25,11 +25,9 @@ impl RoutingDomainRelay {
             && self.dial_info_details == other.dial_info_details
     }
 
-    /// The relay addresses the keepalive pings reach
-    pub fn keepalive_addresses(&self) -> impl Iterator<Item = SocketAddress> + '_ {
-        self.pings
-            .iter()
-            .map(|ping| ping.dial_info.socket_address())
+    /// The relay addresses the keepalive pings reach, each with the protocol it is pinged over
+    pub fn keepalive_addresses(&self) -> impl Iterator<Item = PeerAddress> + '_ {
+        self.pings.iter().map(|ping| ping.dial_info.peer_address())
     }
 }
 

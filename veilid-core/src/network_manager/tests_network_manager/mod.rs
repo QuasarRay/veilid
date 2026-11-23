@@ -109,6 +109,11 @@ pub async fn test_all() {
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_address_detection::test_all().await;
     test_protected_reconnect::test_all();
+    #[cfg(all(
+        feature = "enable-protocol-webtransport",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    test_protected_reconnect::test_relay_protections_follow_the_keepalives().await;
     test_protocol_type::test_protocol_type_set_persisted_width();
     test_protocol_type::test_webtransport_and_udp_are_low_level_udp();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

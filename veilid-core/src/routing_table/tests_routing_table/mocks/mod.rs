@@ -303,6 +303,72 @@ pub fn fix_unsigned_peer_info(
     PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
 }
 
+/// A relay at this dial info, compiled for a node with none of its own that dials out over
+/// `outbound`; the caller drops it before the registry terminates
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub fn compile_test_relay(
+    routing_table: &RoutingTable,
+    outbound: ProtocolTypeSet,
+    dial_infos: Vec<DialInfo>,
+) -> RoutingDomainRelay {
+    let controller = routing_table
+        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
+    let mut editor = controller.edit();
+    editor.set_network_config(RoutingDomainNetworkConfig::new(
+        outbound,
+        outbound,
+        AddressTypeSet::all(),
+        PUBLIC_INTERNET_CAPABILITIES.iter().copied().collect(),
+    ));
+    editor.commit();
+
+    let dial_info_details = dial_infos
+        .into_iter()
+        .map(|dial_info| DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info,
+        })
+        .collect();
+    let (crypto_info_list, secret_keys) = fix_node_keys();
+    let node_info = NodeInfo::new(
+        Timestamp::new(0),
+        vec![ENVELOPE_VERSION_ENV0],
+        crypto_info_list,
+        PUBLIC_INTERNET_CAPABILITIES.to_vec(),
+        ProtocolTypeSet::new(),
+        AddressTypeSet::new(),
+        dial_info_details,
+        vec![],
+        TransportMtus::default(),
+        None,
+    );
+    let peer_info = PeerInfo::try_new_from_node_info(
+        routing_table,
+        RoutingDomain::PublicInternet,
+        &secret_keys,
+        node_info,
+    )
+    .expect("should build signed relay peer info");
+    let relay_node = routing_table
+        .register_node_with_peer_info(
+            Arc::new(UnverifiedPeerInfo::from_verified(&peer_info)),
+            false,
+        )
+        .expect("should register relay peer info")
+        .unfiltered();
+
+    let mut compiler = controller
+        .read_dyn()
+        .relay_requirements()
+        .make_relay_compiler();
+    assert!(compiler.apply_relay(RoutingDomainRelay::new(
+        RoutingDomain::PublicInternet,
+        relay_node,
+        RelayKind::Inbound,
+    )));
+    compiler.relays.remove(0)
+}
+
 /// Crypto info and secret keys of a node no other call returns
 pub fn fix_node_keys() -> (Vec<CryptoInfo>, SecretKeyGroup) {
     let mut crypto_info_list: Vec<CryptoInfo> = vec![];

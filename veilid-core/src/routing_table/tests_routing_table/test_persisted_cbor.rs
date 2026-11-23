@@ -43,6 +43,17 @@ fn dial_infos() -> Vec<DialInfo> {
             socket_address,
             request: "example.com/ws".to_owned(),
         }));
+        #[cfg(feature = "enable-protocol-webtransport")]
+        for expiration in [None, Some(Timestamp::new(1_796_246_776_351_169))] {
+            let wt = DialInfoWebTransport {
+                socket_address,
+                request: "example.com/wt".to_owned(),
+                cert_hashes: vec![[7u8; 32]],
+                expiration,
+            };
+            out.push(DialInfo::WebTransportStream(Box::new(wt.clone())));
+            out.push(DialInfo::WebTransportDatagram(Box::new(wt)));
+        }
     }
     out
 }

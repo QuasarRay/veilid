@@ -1208,8 +1208,7 @@ impl OnlineDetector {
             opt_new_state,
             opt_offline_evidence,
             opt_flap_penalty,
-            do_purge,
-            purge_reason,
+            opt_purge_reason,
             do_wipe,
             opt_eff_transition,
             opt_loss_log,
@@ -1282,30 +1281,7 @@ impl OnlineDetector {
                 }
             }
 
-            // Purge policy: a NAT rebind black-holes established flows, so a real outage
-            // must close everything and a blip must not. An interface change is a confirmed
-            // move (purge at once); ping-derived offline must persist first, rechecked
-            // on each event while offline.
-            let mut do_purge = false;
-            let mut purge_reason = "";
-            if pd.online_state == OnlineState::Offline && !matches!(event, OnlineEvent::Detached) {
-                // A move purges even mid-outage: recovery attempts may have opened
-                // fresh connections on the old interface since the last purge
-                let confirmed_move = matches!(event, OnlineEvent::NetworkChange);
-                let sustained = !pd.offline_purged
-                    && pd.offline_started_ts.is_some_and(|start| {
-                        now.duration_since(start) >= self.timings.offline_sustained
-                    });
-                if confirmed_move || sustained {
-                    pd.offline_purged = true;
-                    do_purge = true;
-                    purge_reason = if confirmed_move {
-                        "interface change"
-                    } else {
-                        "sustained offline"
-                    };
-                }
-            }
+            let opt_purge_reason = Self::purge_reason(&self.timings, pd, &event, now);
             // After the state step, so an answer that ends an outage is not counted in its window
             let opt_loss_log = match &event {
                 OnlineEvent::Success {
@@ -1329,8 +1305,7 @@ impl OnlineDetector {
                 opt_new_state,
                 opt_offline_evidence,
                 opt_flap_penalty,
-                do_purge,
-                purge_reason,
+                opt_purge_reason,
                 do_wipe,
                 opt_eff_transition,
                 opt_loss_log,
@@ -1350,7 +1325,7 @@ impl OnlineDetector {
             veilid_log!(self debug "{:?} offline evidence: {}", routing_domain, evidence);
         }
         self.log_effective_transition(routing_domain, opt_eff_transition, "broad failures");
-        if do_purge {
+        if let Some(purge_reason) = opt_purge_reason {
             // close_all_connections is silent on an empty table; log the decision
             veilid_log!(self debug "{:?} purging connections: {}", routing_domain, purge_reason);
             if let Some(connection_manager) = self.network_manager().opt_connection_manager() {
@@ -1365,6 +1340,41 @@ impl OnlineDetector {
         if let Some(penalty) = opt_flap_penalty {
             veilid_log!(self debugwarn "{:?} online state FLAPPING (penalty={:.1})", routing_domain, penalty);
         }
+    }
+
+    /// Purge policy: a NAT rebind black-holes established flows, so a real outage must close
+    /// everything and a blip must not. An interface change is a confirmed move (purge at once);
+    /// ping-derived offline must persist first, rechecked on each event while offline. A detach
+    /// closes every connection itself, so the outage it starts has nothing left to purge.
+    pub(crate) fn purge_reason(
+        timings: &OnlineDetectorTimings,
+        pd: &mut OnlineDetectionPerDomain,
+        event: &OnlineEvent,
+        now: Timestamp,
+    ) -> Option<&'static str> {
+        if matches!(event, OnlineEvent::Detached) {
+            pd.offline_purged = true;
+            return None;
+        }
+        if pd.online_state != OnlineState::Offline {
+            return None;
+        }
+        // A move purges even mid-outage: recovery attempts may have opened
+        // fresh connections on the old interface since the last purge
+        let confirmed_move = matches!(event, OnlineEvent::NetworkChange);
+        let sustained = !pd.offline_purged
+            && pd
+                .offline_started_ts
+                .is_some_and(|start| now.duration_since(start) >= timings.offline_sustained);
+        if !confirmed_move && !sustained {
+            return None;
+        }
+        pd.offline_purged = true;
+        Some(if confirmed_move {
+            "interface change"
+        } else {
+            "sustained offline"
+        })
     }
 
     /// Handle an event while offline.

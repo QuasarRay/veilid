@@ -268,10 +268,6 @@ impl NetworkConnection {
         self.flow
     }
 
-    pub fn dial_info(&self) -> Option<DialInfo> {
-        self.opt_dial_info.clone()
-    }
-
     #[expect(dead_code)]
     pub fn unique_flow(&self) -> UniqueFlow {
         UniqueFlow {

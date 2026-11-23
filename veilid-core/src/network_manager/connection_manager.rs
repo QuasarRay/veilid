@@ -54,10 +54,66 @@ impl Drop for ConnectionRefScope {
     }
 }
 
+/// The relay a protected connection is kept for, and the drops it has had
 #[derive(Debug)]
-struct ProtectedAddress {
+pub(super) struct ProtectedAddress {
     node_ref: NodeRef,
+    relay_id: NodeId,
     drops: ProtectedDropTracker,
+}
+
+/// The connection-table slots the relay keepalives ride, each protected for its relay
+#[derive(Debug, Default)]
+pub(super) struct RelayProtections {
+    by_remote: HashMap<ConnectionTableRemoteIndexKey, ProtectedAddress>,
+}
+
+impl RelayProtections {
+    /// Protects the slot each keepalive rides, whatever protocol holds it; a UDP keepalive holds
+    /// the firewall mapping open through no connection, so it protects none. A slot that stays
+    /// protected keeps its drop history
+    pub(super) fn update<'a>(
+        &mut self,
+        relays: impl IntoIterator<Item = &'a RoutingDomainRelay>,
+        fast_drop: TimestampDuration,
+    ) {
+        let mut by_remote = HashMap::new();
+        for relay in relays {
+            for remote in relay
+                .keepalive_addresses()
+                .filter(|peer_address| peer_address.protocol_type() != ProtocolType::UDP)
+                .map(connection_table_remote)
+            {
+                if by_remote.contains_key(&remote) {
+                    continue;
+                }
+                let drops = self
+                    .by_remote
+                    .remove(&remote)
+                    .map(|pa| pa.drops)
+                    .unwrap_or_else(|| ProtectedDropTracker::new(fast_drop));
+                by_remote.insert(
+                    remote,
+                    ProtectedAddress {
+                        node_ref: relay.relay_node.unfiltered(),
+                        relay_id: relay.relay_id.clone(),
+                        drops,
+                    },
+                );
+            }
+        }
+        self.by_remote = by_remote;
+    }
+
+    /// The protection of the slot this flow's connection fills
+    pub(super) fn for_flow(&self, flow: Flow) -> Option<&ProtectedAddress> {
+        self.by_remote.get(&connection_table_remote(flow.remote()))
+    }
+
+    fn for_flow_mut(&mut self, flow: Flow) -> Option<&mut ProtectedAddress> {
+        self.by_remote
+            .get_mut(&connection_table_remote(flow.remote()))
+    }
 }
 
 /// What to do about a protected connection that just dropped
@@ -126,7 +182,7 @@ struct ConnectionManagerInner {
     sender: flume::Sender<ConnectionManagerEvent>,
     async_processor_jh: Option<MustJoinHandle<()>>,
     stop_source: Option<StopSource>,
-    protected_addresses: HashMap<SocketAddress, ProtectedAddress>,
+    protections: RelayProtections,
 }
 
 struct ConnectionManagerArc {
@@ -180,7 +236,7 @@ impl ConnectionManager {
             stop_source: Some(stop_source),
             sender,
             async_processor_jh: Some(async_processor_jh),
-            protected_addresses: HashMap::new(),
+            protections: RelayProtections::default(),
         }
     }
     fn new_arc(registry: VeilidComponentRegistry) -> ConnectionManagerArc {
@@ -314,9 +370,9 @@ impl ConnectionManager {
         conn: &NetworkConnection,
     ) -> Option<NodeRef> {
         inner
-            .protected_addresses
-            .get(conn.flow().remote_address())
-            .map(|x| x.node_ref.clone())
+            .protections
+            .for_flow(conn.flow())
+            .map(|pa| pa.node_ref.clone())
     }
 
     // Update connection protections if things change, like a node becomes a relay
@@ -330,47 +386,20 @@ impl ConnectionManager {
             return;
         };
 
-        // Protect addresses for relays in all routing domains
-        let mut dead_addresses = inner
-            .protected_addresses
-            .keys()
-            .cloned()
-            .collect::<HashSet<_>>();
-        for routing_domain in RoutingDomainSet::all() {
-            for relay in self
-                .network_manager()
-                .routing_table()
-                .relays(routing_domain)
-            {
-                // Only what the keepalives ping: the relay closes an unpinged connection as idle
-                for protected_address in relay.keepalive_addresses() {
-                    // SocketAddress are distinct per routing domain, so they should not collide
-                    // and two nodes should never have the same SocketAddress
-
-                    // Update the protection, note the protected address is not dead
-                    dead_addresses.remove(&protected_address);
-                    inner
-                        .protected_addresses
-                        .entry(protected_address)
-                        .and_modify(|pa| pa.node_ref = relay.relay_node.unfiltered())
-                        .or_insert_with(|| ProtectedAddress {
-                            node_ref: relay.relay_node.unfiltered(),
-                            drops: ProtectedDropTracker::new(
-                                self.network_manager().timings().protected_fast_drop,
-                            ),
-                        });
-                }
-            }
-        }
+        // Protect the relay connections in all routing domains
+        let routing_table = self.network_manager().routing_table();
+        let relays = RoutingDomainSet::all()
+            .iter()
+            .flat_map(|routing_domain| routing_table.relays(routing_domain))
+            .collect::<Vec<_>>();
+        inner.protections.update(
+            &relays,
+            self.network_manager().timings().protected_fast_drop,
+        );
 
         // Safety-route first hops are intentionally NOT protected: with no far-side priority
         // flow they idle out, and reconnecting them only churns. The bidirectional route lets
         // the first hop reopen a connection to us for return-path answers when ours is down.
-
-        // Remove protected addresses that were not still associated with a protected noderef
-        for dead_address in dead_addresses {
-            inner.protected_addresses.remove(&dead_address);
-        }
 
         // For all connections, register the protection
         self.arc
@@ -538,11 +567,7 @@ impl ConnectionManager {
 
         let peer_address = dial_info.peer_address();
         let remote_addr = peer_address.socket_addr();
-        let remote = (
-            dial_info.protocol_type().low_level_protocol_type(),
-            dial_info.protocol_type().sequence_ordering(),
-            *peer_address.socket_address(),
-        );
+        let remote = connection_table_remote(peer_address);
         // Prefer a publicly-routable source (PublicInternet only); else use configured listener
         let net = self.network_manager().net();
         let preferred_local_address = net
@@ -869,45 +894,48 @@ impl ConnectionManager {
                     }
                 }
 
+                let mut expedite_relay = None;
                 if let Some(inner) = self.arc.inner.lock().as_mut() {
-                    for pa in inner.protected_addresses.values_mut() {
-                        if pa.node_ref.same_entry(&protect_nr) {
-                            // Our own close is not a drop the breaker should count
-                            let action = if closed_locally {
-                                ProtectedDropAction::Reconnect
-                            } else {
-                                pa.drops.record_drop(lifetime)
-                            };
-                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "== Protected connection dropped (fast_drops={}, lifetime={}, local={}): {} -> {} for node {}", pa.drops.fast_drops(), lifetime, closed_locally, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                    let pa = inner
+                        .protections
+                        .for_flow_mut(conn.flow())
+                        .filter(|pa| pa.node_ref.same_entry(&protect_nr));
+                    if let Some(pa) = pa {
+                        // Our own close is not a drop the breaker should count
+                        let action = if closed_locally {
+                            ProtectedDropAction::Reconnect
+                        } else {
+                            pa.drops.record_drop(lifetime)
+                        };
+                        veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "== Protected connection dropped (fast_drops={}, lifetime={}, local={}): {} -> {} for node {}", pa.drops.fast_drops(), lifetime, closed_locally, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
 
-                            let reconnect = match action {
-                                ProtectedDropAction::Reconnect => true,
-                                ProtectedDropAction::HoldOff { tripped_now } => {
-                                    // While degraded the drops are ours: back off, but blame nobody
-                                    if can_blame_peer {
-                                        protect_nr.record_protected_connection_dead(
-                                            conn.flow().transport_type(),
-                                        );
-                                    }
-                                    if tripped_now {
-                                        veilid_log!(self debug "== Protected connection died young {} times in a row, not re-opening until one lives: node {}", pa.drops.fast_drops(), protect_nr);
-                                    }
-                                    false
+                        let reconnect = match action {
+                            ProtectedDropAction::Reconnect => true,
+                            ProtectedDropAction::HoldOff { tripped_now } => {
+                                // While degraded the drops are ours: back off, but blame nobody
+                                if can_blame_peer {
+                                    protect_nr.record_protected_connection_dead(
+                                        conn.flow().transport_type(),
+                                    );
                                 }
-                            };
-
-                            // Re-open the protected connection by sending on it
-                            if reconnect {
-                                if let Some(dial_info) = conn.dial_info() {
-                                    self.keepalive_protected(dial_info, protect_nr.clone());
-                                } else {
-                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Can't re-open accepted protected connection: {} -> {} for node {}", conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                                if tripped_now {
+                                    veilid_log!(self debug "== Protected connection died young {} times in a row, not re-opening until one lives: node {}", pa.drops.fast_drops(), protect_nr);
                                 }
+                                false
                             }
+                        };
 
-                            break;
+                        if reconnect {
+                            expedite_relay = Some(pa.relay_id.clone());
                         }
                     }
+                }
+
+                // Re-opened by the relay's own keepalive; the commit takes our lock
+                if let Some(relay_id) = expedite_relay {
+                    self.routing_table()
+                        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>()
+                        .expedite_relay_keepalive(relay_id);
                 }
             }
             let _ = sender.send(ConnectionManagerEvent::Dead(Box::new(conn)));
@@ -932,18 +960,6 @@ impl ConnectionManager {
                 veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
             }
         }
-    }
-
-    /// Re-open a dropped protected connection with a keepalive: the send opens the connection,
-    /// and the envelope on it is what tells the far end whose connection it is. A bare connect
-    /// would be anonymous there and closed at its initial timeout
-    fn keepalive_protected(&self, dial_info: DialInfo, protect_nr: NodeRef) {
-        self.routing_table().enqueue_ping_validations(
-            "ProtectedKeepalive".to_owned(),
-            PingValidationGroup::Keepalive,
-            0,
-            vec![Destination::dial_info(dial_info, protect_nr)],
-        );
     }
 
     #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]

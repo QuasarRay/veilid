@@ -478,6 +478,11 @@ impl StorageManager {
         // theirs, and the reply pool completes the question either way
         if params.command == TransactCommand::Set && !unord.is_empty() {
             pending_lnxids.extend(in_flight.drain());
+            // Counted before the collector can settle one
+            self.inner
+                .lock()
+                .outbound_transaction_manager
+                .add_outstanding_sets(&pending_lnxids);
             let registry = self.registry();
             let subkey = params.opt_subkey.unwrap_or_log();
             let value = params.opt_value.clone().unwrap_or_log();

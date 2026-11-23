@@ -40,6 +40,16 @@ pub enum ConnectionRefKind {
 pub(super) type ConnectionTableRemoteIndexKey =
     (LowLevelProtocolType, SequenceOrdering, SocketAddress);
 
+/// The slot of the table a connection to this remote fills, and that a dial to it reuses
+pub(super) fn connection_table_remote(peer_address: PeerAddress) -> ConnectionTableRemoteIndexKey {
+    let protocol_type = peer_address.protocol_type();
+    (
+        protocol_type.low_level_protocol_type(),
+        protocol_type.sequence_ordering(),
+        *peer_address.socket_address(),
+    )
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -186,11 +196,7 @@ impl ConnectionTable {
         // Get indices for network connection table
         let id = network_connection.connection_id();
         let flow = network_connection.flow();
-        let remote = (
-            flow.protocol_type().low_level_protocol_type(),
-            flow.protocol_type().sequence_ordering(),
-            *flow.remote_address(),
-        );
+        let remote = connection_table_remote(flow.remote());
 
         let mut inner = self.inner.lock();
 
@@ -482,11 +488,7 @@ impl ConnectionTable {
             .remove(&flow)
             .expect_or_log("must have removed something here");
         // ids_by_remote
-        let remote = (
-            flow.protocol_type().low_level_protocol_type(),
-            flow.protocol_type().sequence_ordering(),
-            *flow.remote_address(),
-        );
+        let remote = connection_table_remote(flow.remote());
         let ids = inner.ids_by_remote.get_mut(&remote).unwrap_or_log();
         for (n, elem) in ids.iter().enumerate() {
             if *elem == id {

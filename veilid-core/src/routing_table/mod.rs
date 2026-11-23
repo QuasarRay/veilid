@@ -51,7 +51,6 @@ use bucket::*;
 use hashlink::LruCache;
 use network_estimator::*;
 use tasks::ping_validator::PingValidationBatch;
-pub(crate) use tasks::ping_validator::PingValidationGroup;
 
 impl_veilid_log_facility!("rtab");
 

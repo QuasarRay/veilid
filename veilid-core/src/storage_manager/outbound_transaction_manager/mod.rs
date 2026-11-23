@@ -1003,10 +1003,7 @@ impl OutboundTransactionManager {
                     continue;
                 }
                 TransactCommandDisposition::Pending => {
-                    // Answer still on its way; the node stays non-quiescent until it lands
-                    if result.params.command == TransactCommand::Set {
-                        node_transaction.add_outstanding_set();
-                    }
+                    // Answer still on its way; counted in flight when its collector started
                     continue;
                 }
                 TransactCommandDisposition::Valid => {
@@ -1326,6 +1323,25 @@ impl OutboundTransactionManager {
     ) {
         if let (Some(kp), Some(expiration)) = (opt_keepalive_processor, pnr.opt_expiration) {
             kp.refresh(pnr.lnxid, expiration, pnr.opt_rtt);
+        }
+    }
+
+    /// Set questions still in flight when their command returns. Each settles through
+    /// `record_late_transact_set_result`, which can run before the command's own results
+    /// are recorded, so the count goes in first.
+    pub fn add_outstanding_sets(&mut self, lnxids: &HashSet<LocalNodeTransactionId>) {
+        for &lnxid in lnxids {
+            let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid).cloned() else {
+                continue;
+            };
+            let Some(record_state) =
+                self.get_transaction_record_state_mut_by_lnxid(mapping.transaction_handle, lnxid)
+            else {
+                continue;
+            };
+            if let Some(nt) = record_state.get_node_transaction_mut(lnxid) {
+                nt.add_outstanding_set();
+            }
         }
     }
 

@@ -632,8 +632,40 @@ pub fn test_degraded_evidence_is_keyed_by_low_level_protocol() {
     assert_eq!(effective(&pd, now), OnlineState::Degraded);
 }
 
+/// A detach closes every connection itself, so the outage it starts purges nothing on reattach
+pub fn test_detach_leaves_nothing_to_purge() {
+    let t = timings();
+    // Past offline_sustained (5s)
+    let later = ts(20);
+    let failure = broad_failure(FramingType::Connection, 1, 1, later);
+    let offline_since = |start| {
+        let mut pd = OnlineDetectionPerDomain::default();
+        pd.online_state = OnlineState::Offline;
+        pd.offline_started_ts = Some(start);
+        pd
+    };
+
+    let mut pd = offline_since(ts(10));
+    assert_eq!(
+        OnlineDetector::purge_reason(&t, &mut pd, &OnlineEvent::Detached, ts(10)),
+        None
+    );
+    assert_eq!(
+        OnlineDetector::purge_reason(&t, &mut pd, &failure, later),
+        None
+    );
+
+    // Control: the same outage from pings
+    let mut pd = offline_since(ts(10));
+    assert_eq!(
+        OnlineDetector::purge_reason(&t, &mut pd, &failure, later),
+        Some("sustained offline")
+    );
+}
+
 pub fn test_all() {
     test_timings_at_default_rpc_timeout();
+    test_detach_leaves_nothing_to_purge();
     test_credit_is_kept_by_count();
     test_stall_is_credited_as_untestable();
     test_failures_across_a_stall_are_void();

@@ -30,6 +30,19 @@ impl PublicInternetRoutingDomainController {
         Ok(())
     }
 
+    /// Makes a relay's keepalive due, so the next validation reopens its connections on the dial
+    /// info it pings. The envelope tells the relay whose connection it is; a bare connect would
+    /// be anonymous there and closed at its initial timeout
+    pub fn expedite_relay_keepalive(&self, relay_id: NodeId) {
+        let Some(mut state) = self.read_dyn().relay_state(relay_id.clone()) else {
+            return;
+        };
+        state.last_keepalive = Timestamp::default();
+        let mut editor = self.edit();
+        editor.set_relay_state(relay_id, state);
+        editor.commit();
+    }
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Enqueue relay keepalive pings for all relays that need them and record the keepalive timestamp

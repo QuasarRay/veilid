@@ -179,10 +179,123 @@ pub fn serialize_json_bytes<T: Serialize + Debug>(val: T) -> Vec<u8> {
     }
 }
 
+/// Visitors for the `as_human_*` reads. serde replays an internally tagged or untagged enum from a
+/// buffer that claims every format is human-readable, so a binary format's native form arrives
+/// where the string form is expected; these take either.
+mod either_form {
+    use std::fmt;
+    use std::marker::PhantomData;
+    use std::str::FromStr;
+
+    use data_encoding::BASE64URL_NOPAD;
+    use serde::de::{self, Deserialize, IntoDeserializer};
+
+    /// `FromStr` text, or the value's native form
+    pub(super) struct TextOrNative<T>(pub PhantomData<T>);
+
+    impl<'de, T> de::Visitor<'de> for TextOrNative<T>
+    where
+        T: FromStr + Deserialize<'de>,
+        T::Err: fmt::Display,
+    {
+        type Value = T;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a string or the value's native form")
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<T, E> {
+            v.parse().map_err(E::custom)
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<T, E> {
+            T::deserialize(v.into_deserializer())
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<T, E> {
+            T::deserialize(v.into_deserializer())
+        }
+        fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<T, A::Error> {
+            T::deserialize(de::value::SeqAccessDeserializer::new(seq))
+        }
+        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+            T::deserialize(de::value::MapAccessDeserializer::new(map))
+        }
+    }
+
+    /// An optional `TextOrNative`
+    pub(super) struct OptTextOrNative<T>(pub PhantomData<T>);
+
+    impl<'de, T> de::Visitor<'de> for OptTextOrNative<T>
+    where
+        T: FromStr + Deserialize<'de>,
+        T::Err: fmt::Display,
+    {
+        type Value = Option<T>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("an optional string or the value's native form")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Option<T>, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<T>, E> {
+            Ok(None)
+        }
+        fn visit_some<D: de::Deserializer<'de>>(self, d: D) -> Result<Option<T>, D::Error> {
+            d.deserialize_any(TextOrNative(PhantomData)).map(Some)
+        }
+    }
+
+    /// Base64url-nopad text, or raw bytes
+    pub(super) struct Base64OrBytes;
+
+    impl<'de> de::Visitor<'de> for Base64OrBytes {
+        type Value = Vec<u8>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a base64url-nopad string or bytes")
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Vec<u8>, E> {
+            BASE64URL_NOPAD.decode(v.as_bytes()).map_err(E::custom)
+        }
+        fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Vec<u8>, E> {
+            Ok(v.to_vec())
+        }
+        fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Vec<u8>, E> {
+            Ok(v)
+        }
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<u8>, A::Error> {
+            let mut out = Vec::new();
+            while let Some(b) = seq.next_element()? {
+                out.push(b);
+            }
+            Ok(out)
+        }
+    }
+
+    /// An optional `Base64OrBytes`
+    pub(super) struct OptBase64OrBytes;
+
+    impl<'de> de::Visitor<'de> for OptBase64OrBytes {
+        type Value = Option<Vec<u8>>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("an optional base64url-nopad string or bytes")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Option<Vec<u8>>, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<Vec<u8>>, E> {
+            Ok(None)
+        }
+        fn visit_some<D: de::Deserializer<'de>>(self, d: D) -> Result<Option<Vec<u8>>, D::Error> {
+            d.deserialize_any(Base64OrBytes).map(Some)
+        }
+    }
+}
+
 /// serde `with`-module for byte buffers: base64url-nopad string for human-readable formats, raw bytes otherwise.
 pub mod as_human_base64 {
     use data_encoding::BASE64URL_NOPAD;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserializer, Serialize, Serializer};
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
@@ -204,15 +317,12 @@ pub mod as_human_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    /// Decodes a base64url-nopad string for human-readable formats, raw bytes otherwise.
+    /// Decodes a base64url-nopad string, or takes raw bytes, for human-readable formats; raw bytes otherwise.
     ///
     /// In human-readable formats, yields a serde decode error (`D::Error`) if the string is not valid base64url-nopad.
     pub fn deserialize<'de, D: Deserializer<'de>, B: From<Vec<u8>>>(d: D) -> Result<B, D::Error> {
         if d.is_human_readable() {
-            let base64 = String::deserialize(d)?;
-            BASE64URL_NOPAD
-                .decode(base64.as_bytes())
-                .map_err(serde::de::Error::custom)
+            d.deserialize_any(super::either_form::Base64OrBytes)
                 .map(B::from)
         } else {
             serde_bytes::deserialize(d).map(B::from)
@@ -245,19 +355,12 @@ pub mod as_human_opt_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    /// Decodes a base64url-nopad string for human-readable formats, raw bytes otherwise.
+    /// Decodes a base64url-nopad string, or takes raw bytes, for human-readable formats; raw bytes otherwise.
     ///
     /// In human-readable formats, yields a serde decode error (`D::Error`) if a present string is not valid base64url-nopad.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
         if d.is_human_readable() {
-            let base64 = Option::<String>::deserialize(d)?;
-            base64
-                .map(|x| {
-                    BASE64URL_NOPAD
-                        .decode(x.as_bytes())
-                        .map_err(serde::de::Error::custom)
-                })
-                .transpose()
+            d.deserialize_option(super::either_form::OptBase64OrBytes)
         } else {
             Option::<Vec<u8>>::deserialize(d)
         }
@@ -267,9 +370,10 @@ pub mod as_human_opt_base64 {
 /// serde `with`-module that uses a value's `Display`/`FromStr` for human-readable formats and its native serde impl otherwise.
 pub mod as_human_string {
     use std::fmt::Display;
+    use std::marker::PhantomData;
     use std::str::FromStr;
 
-    use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
@@ -294,7 +398,7 @@ pub mod as_human_string {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    /// Parses via `FromStr` for human-readable formats, native serde otherwise.
+    /// Parses via `FromStr`, or takes the native form, for human-readable formats; native serde otherwise.
     ///
     /// In human-readable formats, yields a serde decode error (`D::Error`) if `T::from_str` rejects the string.
     pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
@@ -304,7 +408,7 @@ pub mod as_human_string {
         D: Deserializer<'de>,
     {
         if d.is_human_readable() {
-            String::deserialize(d)?.parse().map_err(de::Error::custom)
+            d.deserialize_any(super::either_form::TextOrNative(PhantomData))
         } else {
             T::deserialize(d)
         }
@@ -314,9 +418,10 @@ pub mod as_human_string {
 /// serde `with`-module for `Option<T>` that uses `Display`/`FromStr` for human-readable formats and native serde otherwise.
 pub mod as_human_opt_string {
     use std::fmt::Display;
+    use std::marker::PhantomData;
     use std::str::FromStr;
 
-    use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
@@ -344,7 +449,7 @@ pub mod as_human_opt_string {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    /// Parses via `FromStr` for human-readable formats, native serde otherwise.
+    /// Parses via `FromStr`, or takes the native form, for human-readable formats; native serde otherwise.
     ///
     /// In human-readable formats, yields a serde decode error (`D::Error`) if `T::from_str` rejects a present string.
     pub fn deserialize<'de, T, D>(d: D) -> Result<Option<T>, D::Error>
@@ -354,10 +459,7 @@ pub mod as_human_opt_string {
         D: Deserializer<'de>,
     {
         if d.is_human_readable() {
-            match Option::<String>::deserialize(d)? {
-                None => Ok(None),
-                Some(v) => Ok(Some(v.parse::<T>().map_err(de::Error::custom)?)),
-            }
+            d.deserialize_option(super::either_form::OptTextOrNative(PhantomData))
         } else {
             Option::<T>::deserialize(d)
         }

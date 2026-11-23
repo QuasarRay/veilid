@@ -38,7 +38,7 @@
   - `network.detect_address_changes` left unset turns PublicInternet address detection off for a node with a configured public address for every inbound protocol, as it does for one with a global address on an interface.
   - A node that states its own PublicInternet dial info keeps it confirmed when its connection table empties, so the first nodes of a network come up without validators, and `detect_address_changes: false` rules detection out for good.
   - A browser node counts an answer over a named WSS or WebTransport url toward the address family the peer saw it from, so a name the browser resolved to IPv4 does not confirm IPv6.
-  - A node protects only the relay connections its keepalives ping, so a dual-stack node does not reopen the relay's other-family connection each time the relay closes it as idle.
+  - A node protects only the relay connections its keepalives ride, so it does not reopen the relay's other-family connection, or a WebTransport session beside a UDP keepalive, each time that connection goes idle.
   - The `storage` config section sets the stores' base directory and the remote record store's disk budget: `limit_percent` of its filesystem's free space and `limit_mb` in total, 25% and 256 MiB (128 MiB in a browser) by default.
   - A browser node in a secure context takes its storage budget from `navigator.storage.estimate()`; elsewhere only `limit_mb` applies.
   - A record store over its storage limit keeps its records and replaces the least recently used ones instead of deleting the excess when it loads.
@@ -51,6 +51,10 @@
   - A UDP receive loop stopped at shutdown exits at once, instead of counting its closed WebTransport demux as errors and asking for a network restart.
   - A call cancelled before it finishes logs its unfinished duration recording at debug, not error.
   - A browser node closes a WebSocket without waiting for the server to answer the close.
+  - A dropped relay connection is reopened by the relay's own keepalive, made due at once, so it comes back on the dial info that keepalive pings.
+  - A detach no longer counts toward PublicInternet readiness, relay or route flapping, and the reattach after it no longer purges connections as if the node had been offline.
+  - A transaction's End no longer waits out its timeout and retries forever when a Set's late answer lands before the Set's own result is recorded.
+  - Saved routing table entries and restore points that carry WebTransport dial info load after a restart instead of being skipped.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.

@@ -241,6 +241,11 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             self.no_responsive_since.lock().clear();
             *self.bootstrap_standoff.lock() = None;
 
+            // A detach is a clean break, not flapping
+            self.readiness_flap_detector.lock().reset();
+            self.relay_flap_detector.lock().reset();
+            self.route_flap_detector.lock().reset();
+
             // Serve the configured bootstrap records, whether or not we ever bootstrap
             let config_cache = self.network_manager().config_bootstrap_cache();
             self.read_dyn().set_config_bootstrap_cache(config_cache);

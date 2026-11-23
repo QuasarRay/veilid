@@ -138,11 +138,7 @@ pub async fn test_dead_connection_skip() {
     let local2 = SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 1, 0, 2)), 5002);
     let f1 = Flow::new(remote_pa, local1);
     let f2 = Flow::new(remote_pa, local2);
-    let remote = (
-        ProtocolType::TCP.low_level_protocol_type(),
-        ProtocolType::TCP.sequence_ordering(),
-        *remote_pa.socket_address(),
-    );
+    let remote = connection_table_remote(remote_pa);
 
     let c1 = NetworkConnection::dummy(registry.clone(), 1.into(), f1);
     let c1h = c1.get_handle();
