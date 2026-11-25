@@ -338,8 +338,7 @@ async fn test_webtransport_wrong_path_rejected_404() {
             _ => None,
         })
         .collect();
-    // The node dials itself, which an address on a tunnel interface may not loop back, so
-    // the routed interface's address comes first
+    // Prefer the routed interface's address: one on a tunnel interface may not loop back
     let routed_ip = discover_non_loopback_interface_ip();
     let wts_dial_info = wts_dial_infos
         .iter()

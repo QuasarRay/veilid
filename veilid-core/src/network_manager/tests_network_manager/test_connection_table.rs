@@ -299,16 +299,8 @@ pub async fn test_webtransport_stream_and_datagram_coexist() {
     table.add_connection(wtd).unwrap();
     assert_eq!(table.connection_count(), 2);
 
-    let wts_remote = (
-        ProtocolType::WTS.low_level_protocol_type(),
-        ProtocolType::WTS.sequence_ordering(),
-        remote,
-    );
-    let wtd_remote = (
-        ProtocolType::WTD.low_level_protocol_type(),
-        ProtocolType::WTD.sequence_ordering(),
-        remote,
-    );
+    let wts_remote = connection_table_remote(wts_flow.remote());
+    let wtd_remote = connection_table_remote(wtd_flow.remote());
     assert_ne!(wts_remote, wtd_remote);
 
     assert_eq!(

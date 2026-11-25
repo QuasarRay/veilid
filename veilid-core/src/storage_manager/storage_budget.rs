@@ -11,7 +11,7 @@
 
 use super::*;
 
-const MIB: u64 = 1_048_576;
+pub(super) const MIB: u64 = 1_048_576;
 
 /// Identifies a pool: a filesystem, or the browser origin
 pub(super) type StoragePoolId = u64;
@@ -123,6 +123,8 @@ pub(super) struct StoreLimitReport {
     pub limit: Option<u64>,
     /// Whether the limit is a share of the storage budget
     pub shared: bool,
+    /// Whether the budget measured its pool's free space
+    pub pool_measured: bool,
 }
 
 impl fmt::Display for StoreLimitReport {
@@ -177,11 +179,13 @@ impl StorageManager {
                 data: remote_record_store.total_storage_space(),
                 limit: Some(limit),
                 shared: false,
+                pool_measured: false,
             });
         }
 
         let (store, pool) = self.measure_record_store(&remote_record_store).await?;
-        let limits = StorageBudgetLimits::from_config(&config.storage, pool.is_some());
+        let pool_measured = pool.is_some();
+        let limits = StorageBudgetLimits::from_config(&config.storage, pool_measured);
         let pools: Vec<StoragePool> = pool.into_iter().collect();
         let cap = storage_budget_caps(
             &limits,
@@ -197,6 +201,7 @@ impl StorageManager {
             data: store.live,
             limit: cap,
             shared: true,
+            pool_measured,
         })
     }
 
@@ -301,7 +306,7 @@ impl StorageManager {
         }
 
         if remote.shared {
-            let measured = self.measure_pool().await.is_some();
+            let measured = remote.pool_measured;
             let limits = StorageBudgetLimits::from_config(&config.storage, measured);
             let percent = limits
                 .percent
@@ -328,6 +333,7 @@ impl StorageManager {
                 data,
                 limit: None,
                 shared: false,
+                pool_measured: false,
             };
             veilid_log!(self info "Local Record Store: {}", local);
         }

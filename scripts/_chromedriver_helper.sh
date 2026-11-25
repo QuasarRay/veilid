@@ -367,11 +367,10 @@ stop_chromedriver() {
 # otherwise leaves browser console output stranded inside Chrome. Uses
 # ChromeDriver's legacy POST /session/{id}/log endpoint (active when flutter
 # drive requests goog:loggingPrefs.browser: INFO during session creation).
-# Also drains the performance log every tenth poll. flutter drive turns it on
-# with tracing, and chromedriver moves Chrome's trace into it on each log read
-# made while it is unread or was last read empty: unread, that is 400 MB a
-# minute until chromedriver's allocator traps. Read without emptying it, the
-# trace piles up in Chrome and arrives at once.
+# Also drains the performance log to empty every tenth poll: flutter drive
+# enables it for tracing, and unread it grows 400 MB a minute until
+# chromedriver's allocator traps; a partial drain leaves the trace piling up
+# in Chrome.
 start_chromedriver_log_poller() {
     (
         local session_id=""

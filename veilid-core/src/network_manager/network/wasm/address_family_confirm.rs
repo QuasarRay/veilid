@@ -9,6 +9,7 @@ const ADDR_FAMILY_MAX_PROBES: usize = 8;
 
 /// A node to probe for an address family
 struct FamilyProbeCandidate {
+    /// The node to probe
     node_ref: NodeRef,
     /// The node's own addresses: an answer over a flow to any other address rode a relay
     addresses: Vec<SocketAddress>,

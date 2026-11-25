@@ -73,16 +73,6 @@ pub async fn test_all() {
     test_bootstrap::test_bootstrap_recheck_with_nothing_to_serve().await;
     test_bootstrap::test_record_lifetime_parse();
     test_bootstrap::test_bootstrap_entry_forms().await;
-    #[cfg(all(
-        feature = "enable-protocol-wss",
-        feature = "enable-protocol-webtransport",
-        not(target_arch = "wasm32")
-    ))]
-    {
-        test_tls_acceptors::test_serve_ip_certificate_by_family();
-        test_tls_acceptors::test_reload_after_renewal();
-        test_tls_acceptors::test_wss_server_name_for_ip_literal();
-    }
     test_bootstrap::test_config_bootstrap_payload().await;
     test_bootstrap::test_bootstrap_capability_needs_direct_dial_info().await;
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -94,6 +84,16 @@ pub async fn test_all() {
     test_bootstrap::test_legacy_record_lines().await;
     #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
     test_bootstrap::test_legacy_json_shape().await;
+    #[cfg(all(
+        feature = "enable-protocol-wss",
+        feature = "enable-protocol-webtransport",
+        not(target_arch = "wasm32")
+    ))]
+    {
+        test_tls_acceptors::test_serve_ip_certificate_by_family();
+        test_tls_acceptors::test_reload_after_renewal();
+        test_tls_acceptors::test_wss_server_name_for_ip_literal();
+    }
     #[cfg(feature = "debug-api")]
     test_chaos::test_all().await;
     test_connection_table::test_add_get_remove().await;

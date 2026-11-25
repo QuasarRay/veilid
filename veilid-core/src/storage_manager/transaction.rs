@@ -2169,7 +2169,7 @@ impl StorageManager {
     /// Roll back every open transaction while the network can still carry the rollbacks, sent but
     /// not awaited, then drop it. A transaction whose records an app call holds is left for
     /// terminate to drop.
-    pub(crate) async fn roll_back_transactions_for_shutdown(&self) {
+    pub(crate) async fn rollback_transactions_for_shutdown(&self) {
         let Ok(_guard) = self.startup_lock.enter() else {
             return;
         };
@@ -2204,14 +2204,10 @@ impl StorageManager {
                     veilid_log!(self debug "Shutdown rollback of {} not sent: {}", transaction_handle, e);
                 }
             }
-            let opt_state = self
-                .inner
+            self.inner
                 .lock()
                 .outbound_transaction_manager
-                .drop_transaction(transaction_handle);
-            if let Some(state) = opt_state {
-                drop(state.into_transaction_cleanup());
-            }
+                .drop_transaction_now(transaction_handle);
         }
     }
 }

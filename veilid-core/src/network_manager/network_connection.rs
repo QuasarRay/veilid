@@ -326,6 +326,13 @@ impl NetworkConnection {
         }
     }
 
+    /// Let the processor run out unjoined, when nothing is left to join it
+    pub fn detach_processor(&mut self) {
+        if let Some(processor) = self.processor.take() {
+            processor.detach();
+        }
+    }
+
     async fn send_internal(
         registry: VeilidComponentRegistry,
         protocol_connection: &ProtocolNetworkConnection,

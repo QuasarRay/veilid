@@ -50,21 +50,7 @@ impl NetworkManager {
         let json_bytes: Bytes = serialize_json(bootv1response).into();
         veilid_log!(self trace "B01T reponse: {}", String::from_utf8_lossy(&json_bytes));
 
-        // Reply with bootstrap records
-        let net = self.net();
-        match pin_future_closure!(net.send_data_to_existing_flow(
-            flow,
-            json_bytes,
-            SAFE_TRANSPORT_MTU
-        ))
-        .await?
-        {
-            NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
-            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
-            _ => Ok(NetworkResult::no_connection_other(
-                "bootstrap reply could not be sent",
-            )),
-        }
+        self.send_bootstrap_reply(flow, json_bytes).await
     }
 
     /// The peer info of the nodes the legacy lines name, from the table or our own publication

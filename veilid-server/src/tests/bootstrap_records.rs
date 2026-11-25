@@ -495,7 +495,7 @@ mod live {
 
     /// The node's own line, signed into a payload as the operator tooling does, is what the
     /// node holds to serve once its config carries the line. Serving it on the wire takes a node
-    /// reachable on every protocol and address family, which veilid-core's tests cover
+    /// reachable on every protocol it listens on, which veilid-core's tests cover
     async fn configured_payload_is_held(bootstrap: &str) {
         let dir = test_dir("payload");
         let port = free_port();

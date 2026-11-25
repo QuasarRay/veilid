@@ -4,7 +4,6 @@
 use super::*;
 use crate::storage_manager::storage_budget::*;
 
-const MIB: u64 = 1_048_576;
 const GIB: u64 = 1024 * MIB;
 
 fn limits(percent: Option<u32>, total: Option<u64>, minimum: u64) -> StorageBudgetLimits {

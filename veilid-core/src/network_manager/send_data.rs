@@ -424,7 +424,7 @@ impl NetworkManager {
                     relay_di.ip_addr(),
                 );
                 pin_future_closure!(self.send_data_cm_direct(
-                    target_node_ref,
+                    &destination_node_ref,
                     relay_di.clone(),
                     data,
                     mtu,
@@ -439,7 +439,7 @@ impl NetworkManager {
                     target_di.ip_addr(),
                 );
                 pin_future_closure!(self.send_data_cm_direct(
-                    target_node_ref,
+                    &destination_node_ref,
                     target_di.clone(),
                     data,
                     mtu,
@@ -720,8 +720,9 @@ impl NetworkManager {
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Only a flow to the punched address is the hole; a relayed one has the relay's remote
+        let hole_punch_remote = hole_punch_di.socket_address();
         let opt_last_flow = target_node_ref
-            .last_flow_to(hole_punch_di.socket_address())
+            .last_flow_where(|flow| flow.remote_address() == &hole_punch_remote)
             .filter(|flow| !self.transport_deprioritized(&target_node_ref, flow.transport_type()));
         let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
@@ -949,6 +950,31 @@ impl NetworkManager {
         }
     }
 
+    /// The newest live flow to the dial info's address on any port; a relayed envelope leaves our
+    /// relay's flow under its sender, so our relays' flows count only at their own dial info
+    fn last_direct_flow(
+        &self,
+        routing_domain: RoutingDomain,
+        node_ref: &FilteredNodeRef,
+        dial_info: &DialInfo,
+    ) -> Option<Flow> {
+        let remote = dial_info.socket_address();
+        let relay_socket_addresses = self
+            .relay_socket_addresses
+            .get(&routing_domain)
+            .map(|addresses| addresses.load_full())
+            .unwrap_or_default();
+        // Our relay is reached only at its dial info, where its connection is protected
+        let any_port = !relay_socket_addresses.contains(&remote);
+        node_ref.last_flow_where(|flow| {
+            let flow_remote = flow.remote_address();
+            *flow_remote == remote
+                || (any_port
+                    && flow_remote.address() == remote.address()
+                    && !relay_socket_addresses.contains(flow_remote))
+        })
+    }
+
     /// Send data using ContactMethod::Direct
     #[cfg_attr(
         feature = "instrument",
@@ -956,18 +982,21 @@ impl NetworkManager {
     )]
     async fn send_data_cm_direct(
         &self,
-        node_ref: NodeRef,
+        destination_node_ref: &FilteredNodeRef,
         dial_info: DialInfo,
         data: Bytes,
         mtu: u16,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
-        // Reuse only the existing flow whose remote is the target dial info; a flow that
-        // arrived through a relay has the relay's remote and must not carry a direct send
+        // The domain the contact method was resolved in
+        let Some(routing_domain) = destination_node_ref.best_routing_domain() else {
+            return Ok(NetworkResult::no_connection_other("no routing domain"));
+        };
+        let node_ref = destination_node_ref.unfiltered();
         let filtered_node_ref =
             node_ref.custom_filtered(NodeRefFilter::from(dial_info.make_filter()));
 
-        let opt_last_flow = filtered_node_ref
-            .last_flow_to(dial_info.socket_address())
+        let opt_last_flow = self
+            .last_direct_flow(routing_domain, &filtered_node_ref, &dial_info)
             .filter(|flow| {
                 !self.transport_deprioritized(&filtered_node_ref, flow.transport_type())
             });

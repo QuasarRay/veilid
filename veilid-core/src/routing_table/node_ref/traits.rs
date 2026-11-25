@@ -195,10 +195,8 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
 
-    /// The most recent live flow whose remote is exactly the given address. Veilid nodes bind
-    /// their outbound source port, so one connection exists between two nodes and its remote
-    /// is the dial info; a flow relayed in from elsewhere has a different remote and never matches.
-    fn last_flow_to(&self, remote: SocketAddress) -> Option<Flow> {
+    /// The most recent live flow matching the node ref filter that `accept` takes
+    fn last_flow_where(&self, accept: impl Fn(&Flow) -> bool) -> Option<Flow> {
         let routing_table = self.routing_table();
         self.operate(|e| {
             let sequencing = self.sequencing();
@@ -206,8 +204,8 @@ pub(crate) trait NodeRefCommonTrait:
             let (_ordering, filter) = filter.apply_sequencing(sequencing);
             e.last_flows(&routing_table, true, filter)
                 .into_iter()
-                .find(|(flow, _)| flow.remote_address() == &remote)
                 .map(|x| x.0)
+                .find(|flow| accept(flow))
         })
     }
 

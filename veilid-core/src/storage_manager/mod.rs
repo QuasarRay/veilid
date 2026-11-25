@@ -665,7 +665,7 @@ impl StorageManager {
             .await
             .expect_or_log("should be started up");
 
-        // Whatever the shutdown rollback left open goes through the normal drop
+        // Drop what the shutdown rollback left open
         self.inner
             .lock()
             .outbound_transaction_manager

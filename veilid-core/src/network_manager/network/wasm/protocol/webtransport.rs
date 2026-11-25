@@ -216,15 +216,20 @@ impl WebTransportNetworkConnection {
             match &inner.channel {
                 WebTransportChannel::Stream { recv, .. } => {
                     let mut stream = recv.lock().await;
-                    let len_buf = match read_exact(&mut stream, STREAM_LEN_PREFIX).await? {
-                        Some(b) => b,
-                        None => {
+                    let len_buf = match read_exact(&mut stream, STREAM_LEN_PREFIX).await {
+                        Ok(Some(b)) => b,
+                        Ok(None) => {
                             veilid_log!(registry debug
                                 "WebTransport(wasm): stream closed reading length {:?}", flow);
                             return Ok(NetworkResult::no_connection(io::Error::new(
                                 io::ErrorKind::ConnectionReset,
                                 "WebTransport stream closed",
                             )))
+                        }
+                        Err(e) => {
+                            veilid_log!(registry debug
+                                "WebTransport(wasm): stream length read failed {:?}: {}", flow, e);
+                            return Ok(NetworkResult::no_connection(e));
                         }
                     };
                     let len = u32::from_be_bytes(len_buf[..].try_into().unwrap()) as usize;
@@ -236,15 +241,20 @@ impl WebTransportNetworkConnection {
                             "too large WebTransport stream message",
                         ));
                     }
-                    match read_exact(&mut stream, len).await? {
-                        Some(payload) => Ok(NetworkResult::Value(Bytes::from(payload))),
-                        None => {
+                    match read_exact(&mut stream, len).await {
+                        Ok(Some(payload)) => Ok(NetworkResult::Value(Bytes::from(payload))),
+                        Ok(None) => {
                             veilid_log!(registry debug
                                 "WebTransport(wasm): stream closed mid-message {:?}", flow);
                             Ok(NetworkResult::no_connection(io::Error::new(
                                 io::ErrorKind::ConnectionReset,
                                 "WebTransport stream closed mid-message",
                             )))
+                        }
+                        Err(e) => {
+                            veilid_log!(registry debug
+                                "WebTransport(wasm): stream body read failed {:?}: {}", flow, e);
+                            Ok(NetworkResult::no_connection(e))
                         }
                     }
                 }

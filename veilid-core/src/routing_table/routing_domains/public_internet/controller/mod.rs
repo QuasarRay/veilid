@@ -87,6 +87,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     commit_subscription: Mutex<Option<EventBusSubscription>>,
     /// Subscription to PeerInfoChangeEvent for fast-path tick of downstream stages
     peer_info_subscription: Mutex<Option<EventBusSubscription>>,
+    /// Subscription to RelayPeerInfoChangeEvent to rebuild a changed relay at once
+    relay_peer_info_subscription: Mutex<Option<EventBusSubscription>>,
 
     /// Bootstrap wait detector (to prevent spamming logs)
     bootstrap_wait_detector: AtomicOptionTimestamp,
@@ -94,8 +96,6 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     bootstrap_announced_via: Mutex<Option<String>>,
     /// Set by a round that found only this node; holds off rounds and silence-driven rebootstrap
     bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
-    /// This node appeared among its own bootstraps in the last round that resolved any
-    own_bootstrap: AtomicBool,
     /// When the served payload gets re-checked, set once per cache period
     bootstrap_recheck_at: Mutex<Option<Timestamp>>,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
@@ -184,10 +184,10 @@ impl PublicInternetRoutingDomainController {
             ),
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
+            relay_peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
             bootstrap_announced_via: Mutex::new(None),
             bootstrap_standoff: Mutex::new(None),
-            own_bootstrap: AtomicBool::new(false),
             bootstrap_recheck_at: Mutex::new(None),
             no_responsive_since: Default::default(),
         };
@@ -237,6 +237,10 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
                 impl_subscribe_event_bus_async_clone!(self, peer_info_change_event_handler);
             *self.peer_info_subscription.lock() = Some(peer_info_sub);
 
+            let relay_peer_info_sub =
+                impl_subscribe_event_bus_async_clone!(self, relay_peer_info_change_event_handler);
+            *self.relay_peer_info_subscription.lock() = Some(relay_peer_info_sub);
+
             // Don't let detached time count toward the fallback-bootstrap delay
             self.no_responsive_since.lock().clear();
             *self.bootstrap_standoff.lock() = None;
@@ -263,6 +267,9 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = self.peer_info_subscription.lock().take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = self.relay_peer_info_subscription.lock().take() {
                 self.event_bus().unsubscribe(sub);
             }
 
@@ -313,9 +320,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         ))
     }
 
-    /// A served copy past its ttl is re-checked once, after a delay inside the ttl's first
-    /// half, so many nodes asked at once do not all ask the bootstraps at once. With nothing
-    /// to serve no copy covers a delay, and the re-check runs on the next tick
+    /// Delayed up to half the ttl so askers spread out, or to the next tick with nothing to serve
     fn request_bootstrap_recheck(&self) {
         let mut recheck_at = self.bootstrap_recheck_at.lock();
         if recheck_at.is_some() {

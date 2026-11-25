@@ -56,7 +56,7 @@ impl Drop for ConnectionRefScope {
 
 /// The relay a protected connection is kept for, and the drops it has had
 #[derive(Debug)]
-pub(super) struct ProtectedAddress {
+pub(super) struct RelayProtection {
     node_ref: NodeRef,
     relay_id: NodeId,
     drops: ProtectedDropTracker,
@@ -65,13 +65,11 @@ pub(super) struct ProtectedAddress {
 /// The connection-table slots the relay keepalives ride, each protected for its relay
 #[derive(Debug, Default)]
 pub(super) struct RelayProtections {
-    by_remote: HashMap<ConnectionTableRemoteIndexKey, ProtectedAddress>,
+    by_remote: HashMap<ConnectionTableRemoteIndexKey, RelayProtection>,
 }
 
 impl RelayProtections {
-    /// Protects the slot each keepalive rides, whatever protocol holds it; a UDP keepalive holds
-    /// the firewall mapping open through no connection, so it protects none. A slot that stays
-    /// protected keeps its drop history
+    /// Protects the slot each non-UDP keepalive rides, keeping the drop history of slots that stay
     pub(super) fn update<'a>(
         &mut self,
         relays: impl IntoIterator<Item = &'a RoutingDomainRelay>,
@@ -94,7 +92,7 @@ impl RelayProtections {
                     .unwrap_or_else(|| ProtectedDropTracker::new(fast_drop));
                 by_remote.insert(
                     remote,
-                    ProtectedAddress {
+                    RelayProtection {
                         node_ref: relay.relay_node.unfiltered(),
                         relay_id: relay.relay_id.clone(),
                         drops,
@@ -106,11 +104,11 @@ impl RelayProtections {
     }
 
     /// The protection of the slot this flow's connection fills
-    pub(super) fn for_flow(&self, flow: Flow) -> Option<&ProtectedAddress> {
+    pub(super) fn for_flow(&self, flow: Flow) -> Option<&RelayProtection> {
         self.by_remote.get(&connection_table_remote(flow.remote()))
     }
 
-    fn for_flow_mut(&mut self, flow: Flow) -> Option<&mut ProtectedAddress> {
+    fn for_flow_mut(&mut self, flow: Flow) -> Option<&mut RelayProtection> {
         self.by_remote
             .get_mut(&connection_table_remote(flow.remote()))
     }
@@ -938,7 +936,12 @@ impl ConnectionManager {
                         .expedite_relay_keepalive(relay_id);
                 }
             }
-            let _ = sender.send(ConnectionManagerEvent::Dead(Box::new(conn)));
+            if let Err(flume::SendError(ConnectionManagerEvent::Dead(mut conn))) =
+                sender.send(ConnectionManagerEvent::Dead(Box::new(conn)))
+            {
+                // Shutdown drained the processor already, and this runs in the connection's own task
+                conn.detach_processor();
+            }
         }
 
         // If there are no connections left in the table, we may have switched networks and

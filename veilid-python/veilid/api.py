@@ -1077,8 +1077,8 @@ class VeilidAPI(ABC):
         """Replace the configuration of a detached node; the new values apply at the next attach().
 
         The keys a running node cannot take a new value for must be unchanged: program_name,
-        namespace, the three stores, the routing table keys, the network key password, the DHT
-        storage sizing and the internal tuning.
+        namespace, storage.directory, the three stores, the routing table keys, the network key
+        password, the DHT storage sizing and the internal tuning.
 
         Raises VeilidAPIErrorGeneric unless the node is detached, VeilidAPIErrorInvalidArgument
         for a key that needs a restart, or VeilidAPIErrorNotInitialized if the node is shut down.

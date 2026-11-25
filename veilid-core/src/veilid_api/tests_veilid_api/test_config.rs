@@ -117,7 +117,7 @@ pub fn test_feature_sections_default_when_absent() {
     );
 }
 
-// A config saved before the storage settings existed still deserializes, with the defaults
+// A config without the storage settings deserializes with the defaults
 pub fn test_storage_defaults_when_absent() {
     let mut json = serde_json::to_value(fake_veilid_config()).expect("serialize");
     assert!(

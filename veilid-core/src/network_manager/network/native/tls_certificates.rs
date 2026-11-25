@@ -11,11 +11,8 @@ use futures_rustls::rustls::{
 };
 use std::time::SystemTime;
 
-/// Serves the hostname certificate to a handshake that names a server and the listener
-/// family's IP-SAN certificate to one that does not. A dial by address sends no SNI (RFC 6066),
-/// so the family of the listener is the only signal for which certificate to present. Without
-/// an IP certificate the hostname one is served: dials by name work, dials by address fail to
-/// validate
+/// Serves the hostname certificate when the client sends SNI, else the listener family's IP-SAN
+/// certificate (a dial by address sends none, RFC 6066), else the hostname one
 #[derive(Debug)]
 pub(in crate::network_manager) struct TlsServerCertResolver {
     hostname: Arc<CertifiedKey>,

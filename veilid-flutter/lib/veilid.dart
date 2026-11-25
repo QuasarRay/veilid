@@ -129,9 +129,9 @@ abstract class Veilid {
 
   /// Replace the configuration of a detached node; the new values apply at
   /// the next [attach]. The keys a running node cannot take a new value for
-  /// must be unchanged: the program name and namespace, the three stores, the
-  /// node keys, the network key password, the DHT storage sizing and the
-  /// internal tuning.
+  /// must be unchanged: the program name and namespace, `storage.directory`
+  /// and the three stores, the node keys, the network key password, the DHT
+  /// storage sizing and the internal tuning.
   ///
   /// Throws [VeilidAPIExceptionGeneric] unless the node is detached,
   /// [VeilidAPIExceptionInvalidArgument] for a key that needs a restart, and

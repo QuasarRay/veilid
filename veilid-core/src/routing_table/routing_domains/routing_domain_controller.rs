@@ -56,7 +56,7 @@ pub trait RoutingDomainController:
     }
     /// Note that the served bootstrap payload has come due, for the bootstrap task to re-check
     fn request_bootstrap_recheck(&self) {}
-
+    /// True when this domain's persisted state means the saved routing table must not be trusted
     fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {
         Box::pin(async move { false })
     }

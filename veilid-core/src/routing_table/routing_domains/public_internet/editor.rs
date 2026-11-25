@@ -194,8 +194,8 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
         }
         if changed.relays_changed {
             veilid_log!(self info "[PublicInternet] relays changed: [{}] -> [{}]",
-            old_snapshot.relays.iter().map(|x| format!("{:#}",x.relay_node)).collect::<Vec<_>>().join(","),
-            new_snapshot.relays.iter().map(|x| format!("{:#}",x.relay_node)).collect::<Vec<_>>().join(","));
+            old_snapshot.relays_summary(),
+            new_snapshot.relays_summary());
         }
         if changed.outbound_protocols_changed {
             veilid_log!(self info

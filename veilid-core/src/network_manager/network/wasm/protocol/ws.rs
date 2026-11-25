@@ -107,12 +107,6 @@ impl WebsocketNetworkConnection {
 
 ///////////////////////////////////////////////////////////
 
-/// Whether the browser blocks a plain ws:// dial as mixed content, which an https page does.
-/// Other secure contexts, such as http://localhost, open ws:// to any host
-pub(in crate::network_manager) fn ws_blocked_as_mixed_content() -> bool {
-    is_browser_https()
-}
-
 pub(in crate::network_manager) struct WebsocketProtocolHandler {}
 
 impl WebsocketProtocolHandler {
@@ -140,7 +134,7 @@ impl WebsocketProtocolHandler {
 
         let socket_address = dial_info.socket_address();
 
-        if !tls && ws_blocked_as_mixed_content() {
+        if !tls && is_browser_https() {
             veilid_log!(registry debug
                 "WS: refusing ws:// to {} from an https page (mixed content)", socket_address);
             return Ok(NetworkResult::no_connection_other(

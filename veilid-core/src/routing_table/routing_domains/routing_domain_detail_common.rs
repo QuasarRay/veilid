@@ -32,7 +32,7 @@ pub struct RoutingDomainDetailCommon {
     current_peer_info_cache: Mutex<Option<Arc<PeerInfo>>>,
     /// The last known bootstrap peers that seeded our routing table
     bootstrap_peers: Mutex<Vec<NodeRef>>,
-    /// What the last bootstrap recorded, served to B01T requests.
+    /// What the last bootstrap recorded, served to bootstrap requests.
     /// None until a bootstrap has recorded something, which is what says a persisted
     /// routing table predates this and must not be trusted.
     bootstrap_cache: Mutex<Option<BootstrapCache>>,
@@ -169,13 +169,13 @@ impl RoutingDomainDetailCommon {
         capabilities
     }
 
-    pub fn set_own_bootstrap(&self, own_bootstrap: bool) {
-        self.own_bootstrap.store(own_bootstrap, Ordering::Release);
+    /// Record whether this node found itself among its own bootstraps, returning the last verdict
+    pub fn swap_own_bootstrap(&self, own_bootstrap: bool) -> bool {
+        self.own_bootstrap.swap(own_bootstrap, Ordering::AcqRel)
     }
 
-    /// A node answers bootstrap requests when it is told to or finds itself among its own
-    /// bootstraps, and only while every protocol it listens on has confirmed direct dial info
-    /// and it needs no relay: a request is answered with what the node can vouch for
+    /// Serves when configured to or among its own bootstraps, and only while direct on every
+    /// inbound protocol with no relay
     fn serves_bootstrap(&self) -> bool {
         if self.routing_domain != RoutingDomain::PublicInternet {
             return false;
@@ -230,7 +230,7 @@ impl RoutingDomainDetailCommon {
 
     /// Record what a bootstrap produced. An empty result still marks that a bootstrap ran,
     /// but keeps the last good set so this node goes on serving through a re-bootstrap. A
-    /// re-check round that learned nothing newer starts a new cache period on what is held
+    /// re-check round starts a new cache period on what is held
     pub fn record_bootstrap_cache(
         &self,
         bootstrap_cache: BootstrapCache,
@@ -238,15 +238,9 @@ impl RoutingDomainDetailCommon {
     ) {
         let mut cache = self.bootstrap_cache.lock();
         let held = cache.get_or_insert_default();
-        if bootstrap_cache.is_empty() {
-            if let Some(now) = rechecked_at {
-                held.mark_rechecked(now);
-            }
-        } else {
-            held.union(bootstrap_cache);
-            if let Some(now) = rechecked_at {
-                held.mark_rechecked(now);
-            }
+        held.union(bootstrap_cache);
+        if let Some(now) = rechecked_at {
+            held.mark_rechecked(now);
         }
     }
 
@@ -256,7 +250,7 @@ impl RoutingDomainDetailCommon {
         *self.config_bootstrap_cache.lock() = bootstrap_cache;
     }
 
-    /// Everything this node can serve over B01T: what a bootstrap recorded, plus config
+    /// What this node can serve to a bootstrap request: what a bootstrap recorded, plus config
     pub fn get_served_bootstrap_cache(&self) -> BootstrapCache {
         let mut served = self.bootstrap_cache.lock().clone().unwrap_or_default();
         served.union(self.config_bootstrap_cache.lock().clone());
@@ -518,20 +512,10 @@ impl RoutingDomainDetailCommon {
         ));
         let mut relay_info_list = vec![];
         for relay in self.relays() {
-            let relay_node_ids = relay.relay_node.node_ids();
-            let Some(relay_node_info) = relay.relay_node.node_info(self.routing_domain) else {
-                veilid_log!(self debug "not including relay node {} in peer info for routing domain {:?}", relay_node_ids, self.routing_domain);
+            let Some(relay_info) = relay.relay_info() else {
+                veilid_log!(self debug "not including relay node {} in peer info for routing domain {:?}", relay.relay_node.node_ids(), self.routing_domain);
                 continue;
             };
-            let relay_info = RelayInfo::new(
-                relay_node_info.timestamp(),
-                relay_node_ids,
-                relay_node_info.outbound_protocols(),
-                relay_node_info.address_types(),
-                relay.dial_info_details,
-                relay.relay_kind,
-                *relay_node_info.receive_mtus(),
-            );
             relay_info_list.push(relay_info);
         }
 

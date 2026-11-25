@@ -164,6 +164,7 @@ struct NetworkManagerInner {
     tick_subscription: Option<EventBusSubscription>,
     peer_info_change_subscription: Option<EventBusSubscription>,
     socket_address_change_subscription: Option<EventBusSubscription>,
+    routing_domain_commit_subscription: Option<EventBusSubscription>,
 
     // Relay workers
     relay_stop_source: Option<StopSource>,
@@ -189,6 +190,9 @@ pub(crate) struct NetworkManager {
 
     // Our largest packets per low-level transport, read on every send
     own_mtus: OwnMtus,
+
+    // Our relays' dial info socket addresses per routing domain, read on every direct send
+    relay_socket_addresses: BTreeMap<RoutingDomain, ArcSwap<HashSet<SocketAddress>>>,
 
     // Debug packet loss injection
     chaos: Chaos,
@@ -241,6 +245,7 @@ impl NetworkManager {
             tick_subscription: None,
             peer_info_change_subscription: None,
             socket_address_change_subscription: None,
+            routing_domain_commit_subscription: None,
             //
             relay_send_channel: None,
             relay_stop_source: None,
@@ -320,6 +325,10 @@ impl NetworkManager {
             online_detector,
             transport_stats,
             own_mtus: OwnMtus::new(),
+            relay_socket_addresses: RoutingDomain::all()
+                .into_iter()
+                .map(|routing_domain| (routing_domain, ArcSwap::default()))
+                .collect(),
             chaos: Chaos::new(),
             timings,
             components: RwLock::new(None),
@@ -535,11 +544,20 @@ impl NetworkManager {
         let socket_address_change_subscription =
             impl_subscribe_event_bus!(self, Self, socket_address_change_event_handler);
 
+        let routing_domain_commit_subscription =
+            impl_subscribe_event_bus!(self, Self, routing_domain_commit_event_handler);
+
         {
             let mut inner = self.inner.lock();
             inner.tick_subscription = Some(tick_subscription);
             inner.peer_info_change_subscription = Some(peer_info_change_subscription);
             inner.socket_address_change_subscription = Some(socket_address_change_subscription);
+            inner.routing_domain_commit_subscription = Some(routing_domain_commit_subscription);
+        }
+
+        // After subscribing, so no relay change is missed
+        for routing_domain in RoutingDomain::all() {
+            self.update_relay_socket_addresses(routing_domain);
         }
 
         veilid_log!(self trace "NetworkManager::internal_startup end");
@@ -579,6 +597,9 @@ impl NetworkManager {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.peer_info_change_subscription.take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = inner.routing_domain_commit_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
         }
@@ -1368,12 +1389,12 @@ impl NetworkManager {
                 #[cfg(feature = "enable-bootstrap-v0")]
                 network_result_value_or_log!(self pin_future!(self.handle_boot_v0_request(flow)).await? => [ format!(": v0 flow={:?}", flow) ] {});
                 #[cfg(not(feature = "enable-bootstrap-v0"))]
-                veilid_log!(self debug "dropping BOOT request this build no longer answers from {:?}", flow);
+                veilid_log!(self debug "dropping BOOT request this build does not answer from {:?}", flow);
             } else {
                 #[cfg(feature = "enable-bootstrap-v1")]
                 network_result_value_or_log!(self pin_future!(self.handle_boot_v1_request(flow)).await? => [ format!(": v1 flow={:?}", flow) ] {});
                 #[cfg(not(feature = "enable-bootstrap-v1"))]
-                veilid_log!(self debug "dropping B01T request this build no longer answers from {:?}", flow);
+                veilid_log!(self debug "dropping B01T request this build does not answer from {:?}", flow);
             }
             return Ok(true);
         }
@@ -1716,6 +1737,36 @@ impl NetworkManager {
                 evt.flow,
                 evt.reporting_peer.clone(),
             );
+        }
+    }
+
+    fn routing_domain_commit_event_handler(&self, evt: Arc<RoutingDomainCommitEvent>) {
+        if evt.relays_changed {
+            self.update_relay_socket_addresses(evt.routing_domain);
+        }
+    }
+
+    /// Store the socket addresses we relay through and ping our relays at in this domain
+    fn update_relay_socket_addresses(&self, routing_domain: RoutingDomain) {
+        let relay_socket_addresses = self
+            .routing_table()
+            .relays(routing_domain)
+            .iter()
+            .flat_map(|relay| {
+                relay
+                    .dial_info_details
+                    .iter()
+                    .map(|did| did.dial_info.socket_address())
+                    .chain(
+                        relay
+                            .pings
+                            .iter()
+                            .map(|ping| ping.dial_info.socket_address()),
+                    )
+            })
+            .collect::<HashSet<_>>();
+        if let Some(addresses) = self.relay_socket_addresses.get(&routing_domain) {
+            addresses.store(Arc::new(relay_socket_addresses));
         }
     }
 }

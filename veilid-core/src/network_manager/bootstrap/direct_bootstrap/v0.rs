@@ -11,7 +11,7 @@ impl NetworkManager {
     )]
     pub async fn handle_boot_v0_request(&self, flow: Flow) -> EyreResult<NetworkResult<()>> {
         // Get a bunch of nodes with a range of crypto kinds, protocols and capabilities
-        let bootstrap_nodes = self.find_bootstrap_nodes_filtered(2);
+        let bootstrap_nodes = self.find_bootstrap_nodes_filtered(BOOTSTRAP_PEERS_PER_TYPE);
 
         // Serialize out peer info
         let bootstrap_peerinfo: Vec<legacy_json::LegacyPeerInfo> = bootstrap_nodes
@@ -23,20 +23,6 @@ impl NetworkManager {
 
         veilid_log!(self trace "BOOT reponse: {}", String::from_utf8_lossy(&json_bytes));
 
-        // Reply with a chunk of signed routing table
-        let net = self.net();
-        match pin_future_closure!(net.send_data_to_existing_flow(
-            flow,
-            json_bytes,
-            SAFE_TRANSPORT_MTU
-        ))
-        .await?
-        {
-            NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
-            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
-            _ => Ok(NetworkResult::no_connection_other(
-                "bootstrap reply could not be sent",
-            )),
-        }
+        self.send_bootstrap_reply(flow, json_bytes).await
     }
 }

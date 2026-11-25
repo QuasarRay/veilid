@@ -3898,18 +3898,18 @@ dependencies = [
 
 [[package]]
 name = "web-transport-trait"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60221f03172c9e8e8d19d1c038c87ef2804d05f8a71264817f60a28bbd03edab"
+checksum = "15c5e4e5cf5c7fafc1825899678cfa893ed009ef70f7a367cf44c837dd3b96ce"
 dependencies = [
  "bytes",
 ]
 
 [[package]]
 name = "web-transport-wasm"
-version = "0.8.8"
+version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "115a271830e2473e3bd8a2b3619dcdb0b95c41683261cc31703d64046c8fe1e9"
+checksum = "ad8037a8914527619051580fa27e30efa00b3f4896f009d3828c03e263ea0ef1"
 dependencies = [
  "bytes",
  "js-sys",

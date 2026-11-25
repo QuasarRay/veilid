@@ -1,7 +1,6 @@
 **UNRELEASED**
 
 - veilid-core:
-  - WebTransport (HTTP/3 over QUIC) is a transport, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching.
   - **Breaking** The `default`, `default-async-std` and `default-wasm` feature sets include `enable-protocol-wss` and `enable-protocol-webtransport`, so a node connects out over WSS and listens and connects over WebTransport. A `wasm32` build needs `--cfg=web_sys_unstable_apis` in its rustflags, which the veilid workspace's `.cargo/config.toml` sets.
   - **Breaking** TXT-record bootstrap is removed; a bare bootstrap name resolves by A/AAAA and expands over `network.routing_table.bootstrap_protocols`, which defaults to WSS and WebTransport.
   - **Breaking** Nodes bootstrap only over B02T; bootstrap servers must run 0.6.0 before their clients.
@@ -11,11 +10,12 @@
   - **Breaking** A browser node fails to start on a page that gives it no protocol reaching peers: WS unless the page is https, WebTransport where the browser offers it.
   - **Breaking** `network.dht.remote_max_storage_space_mb` defaults to 0, a share of the storage budget, instead of 256 MiB (128 MiB in a browser).
   - **Breaking** `VeilidConfig::new` sets `storage.directory` and leaves the store directories empty, which puts the stores where they were.
+  - WebTransport (HTTP/3 over QUIC) is a transport, with the `WTS` stream and `WTD` datagram protocol types, rolling self-signed certificates browsers accept by hash, CA-signed mode when a URL is configured, and QUIC hole punching.
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
   - WebTransport sessions start at QUIC's 1200-byte minimum, which every path carries, and discover their path up to the UDP interface limit.
   - WebTransport listens and hole-punches without RawUDP: a WebTransport-only node punches from its own socket and returns the hole-punch receipt over the QUIC session it opens through the hole.
-  - WebTransport datagram messages are sized like RawUDP ones, up to the maximum message size, instead of an 8-fragment cap.
+  - WebTransport datagram messages are sized like RawUDP ones, up to the maximum message size.
   - WebTransport session logs and the `nodeinfo` connection table show each QUIC session's path MTU.
   - The chaos `max_size` cap judges WebTransport frames by the session's QUIC packet size, not the whole message.
   - Published node info carries an expiration, the earliest of its dial infos', and peer info past its expiration is treated as dead.
@@ -23,7 +23,7 @@
   - TLS dependency updates: rustls 0.23.46 (RUSTSEC-2026-0346 through 0349), rustls-webpki 0.103.16 (RUSTSEC-2026-0382) and webpki-roots 1.0.11 (RUSTSEC-2026-0381).
   - `network.privacy.country_code_denylist` and `network.virtual_network` take their defaults when a config leaves them out, like every other section a cargo feature adds.
   - Bootstrap v2 (`B02T`): one operator-signed payload per network with an expiration and an advisory cache ttl, served as received by nodes that advertise the `BOOT` capability, working with and without bootstrap keys.
-  - Answering `BOOT` and `B01T` requests is behind `enable-bootstrap-v0` and `enable-bootstrap-v1`, default on.
+  - Answering v0 (`BOOT`) and v1 (`B01T`) bootstrap requests is behind `enable-bootstrap-v0` and `enable-bootstrap-v1`, default on.
   - Legacy JSON bootstrap replies carry only UDP, TCP and WS dial infos, the kinds every 0.5.x build parses.
   - `bootstrap_records` accepts the `2|` payload line.
   - A packet with an unknown four-byte tag is dropped instead of punishing its sender.
@@ -38,23 +38,22 @@
   - `network.detect_address_changes` left unset turns PublicInternet address detection off for a node with a configured public address for every inbound protocol, as it does for one with a global address on an interface.
   - A node that states its own PublicInternet dial info keeps it confirmed when its connection table empties, so the first nodes of a network come up without validators, and `detect_address_changes: false` rules detection out for good.
   - A browser node counts an answer over a named WSS or WebTransport url toward the address family the peer saw it from, so a name the browser resolved to IPv4 does not confirm IPv6.
-  - A node protects only the relay connections its keepalives ride, so it does not reopen the relay's other-family connection, or a WebTransport session beside a UDP keepalive, each time that connection goes idle.
+  - A node keeps open only the relay connections its keepalives use, so it stops reopening the relay's other connections each time they go idle.
   - The `storage` config section sets the stores' base directory and the remote record store's disk budget: `limit_percent` of its filesystem's free space and `limit_mb` in total, 25% and 256 MiB (128 MiB in a browser) by default.
-  - A browser node in a secure context takes its storage budget from `navigator.storage.estimate()`; elsewhere only `limit_mb` applies.
+  - A browser node in a secure context takes its storage budget from `navigator.storage.estimate()`; on any other page only `limit_mb` applies.
   - A record store over its storage limit keeps its records and replaces the least recently used ones instead of deleting the excess when it loads.
   - `block_store.remote_max_storage_space_mb` is reserved for the block store's remote cache.
   - Startup logs where the stores live and each record store's size and limit.
   - `VeilidLayerFilter::add_facilities` takes a name ending in `*` for every target with that prefix.
   - At shutdown a node sends a rollback for each DHT transaction still open while it can reach the network, and does not wait for the answers.
   - Detach and shutdown release the RPC calls waiting for answers at once instead of waiting out their timeouts.
-  - Shutdown stops the storage manager's background work before the components it uses terminate, so a transaction's retried commit or rollback no longer keeps the RPC processor referenced.
-  - A UDP receive loop stopped at shutdown exits at once, instead of counting its closed WebTransport demux as errors and asking for a network restart.
+  - Shutdown no longer warns that the RPC processor or storage manager is still referenced.
   - A call cancelled before it finishes logs its unfinished duration recording at debug, not error.
   - A browser node closes a WebSocket without waiting for the server to answer the close.
-  - A dropped relay connection is reopened by the relay's own keepalive, made due at once, so it comes back on the dial info that keepalive pings.
+  - A node reopens a dropped relay connection at once, on the dial info its relay keepalive pings.
   - A detach no longer counts toward PublicInternet readiness, relay or route flapping, and the reattach after it no longer purges connections as if the node had been offline.
   - A transaction's End no longer waits out its timeout and retries forever when a Set's late answer lands before the Set's own result is recorded.
-  - Saved routing table entries and restore points that carry WebTransport dial info load after a restart instead of being skipped.
+  - A direct send reuses a peer's live connection or UDP flow from the peer's address on any port, so a node behind a port forward is not dialed a second time on its published port.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.
@@ -62,7 +61,7 @@
   - **Breaking** `getDefaultVeilidConfig` sets `storage.directory` and leaves the three store directories empty, so a path built from a store's directory must start from `storage.directory` instead.
   - `VeilidConfigWebTransport` under the protocol config.
   - `VeilidConfigAppLifecycle.autoDetectState`, so a Dart app can turn off the platform's own lifecycle reports and drive the node with `reportAppLifecycleState`.
-  - `VeilidConfigRoutingTable.bootstrapProtocols`, the protocols a bootstrap request goes out on, in order.
+  - `VeilidConfigRoutingTable.bootstrapProtocols` and `getDefaultVeilidConfig(bootstrapProtocols:)`, the protocols a bootstrap request goes out on, in order.
   - `VeilidConfigStorage` and `VeilidConfigBlockStore.remoteMaxStorageSpaceMb`.
   - The integration test fixture keeps its stores in a fresh temp directory and deletes it at teardown.
   - `run_integration_tests.sh` passes on the `flutter test` arguments given after `--`.
@@ -84,10 +83,10 @@
   - veilid-server checks the core config before it starts, so an invalid config fails before the daemon forks.
   - veilid-server's own log lines, such as unknown config key warnings, are in the `#common` group and show at the configured log level.
 - veilid-tools:
-  - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
-  - `UdpDfSender`: a don't-fragment sending socket beside a shared UDP socket, the way `UdpTtlSender` sends hole punches; on Linux and Android it is connected to a documentation address so it never receives.
   - **Breaking** `VeilidRng` implements the `rand` 0.10 traits `TryRng` and `TryCryptoRng`; the `rand` 0.8 `RngCore` and `CryptoRng` impls are gone.
   - **Breaking** The `Resolver` (`txt_lookup`, `ptr_lookup`, `supports_txt`) is removed.
+  - `UdpSocketIo` with `bind_udp_socket_io()`, `bind_udp_socket_io_probed()` and `routed_local_ip()`, `sleep_until()`, and `AssemblyBuffer::is_frame()`.
+  - `UdpDfSender`: a don't-fragment sending socket beside a shared UDP socket, the way `UdpTtlSender` sends hole punches; on Linux and Android it is connected to a documentation address so it never receives.
   - The virtual network's `StableRng` draws from `rand` 0.10, so a seed produces a different scenario than it did in 0.5.8.
   - `has_webtransport()` reports whether the JS environment offers WebTransport.
   - `filesystem_space()` reports which filesystem holds a path and its free space.
@@ -96,10 +95,7 @@
   - The TypeScript `VeilidConfigProtocol` carries the optional `wss` and `webtransport` sections.
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
   - In a minified app bundle, a thrown error's `name` and `constructor.name` are its class name, such as `VeilidAPIErrorTryAgain`, instead of the short name the minifier gave the class.
-  - Bootstraps over B02T, WSS first and WebTransport second by default.
-  - **Breaking** Startup fails on a page where the node could reach no peer: an https page without WebTransport, or a page that is not a secure context with `ws.connect` off.
-  - A `ws://` bootstrap url on an https page, or a `wts://` one on a page without WebTransport, is skipped.
-  - The TypeScript `VeilidConfig` carries the optional `storage` section.
+  - The TypeScript `VeilidConfig` carries the optional `storage` section, `VeilidConfigRoutingTable.bootstrapProtocols` and `VeilidConfigBlockStore.remoteMaxStorageSpaceMb`.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 

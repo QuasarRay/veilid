@@ -14,6 +14,9 @@ impl_veilid_log_facility!("net");
 /// Port a bootstrap host answers on when a bare name names it
 pub const BOOTSTRAP_DIRECT_PORT: u16 = 5150;
 
+/// Directly reachable nodes a bootstrap reply offers per protocol and address family
+pub const BOOTSTRAP_PEERS_PER_TYPE: usize = 2;
+
 /// Ceiling on served legacy record lines, far above any real bootstrap's output
 #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 pub const MAX_BOOTSTRAP_RECORD_STRINGS: usize = 64;
@@ -33,8 +36,7 @@ pub use direct_bootstrap::{BootV2Response, B02T_MAGIC};
 pub use payload::*;
 
 impl NetworkManager {
-    /// The payload in the config's `bootstrap_records`, if any line holds one this node trusts.
-    /// A line that fails its signature check is a configuration mistake and is said so
+    /// The newest trusted payload in the config's `bootstrap_records`; bad lines are warned about
     pub fn config_bootstrap_payload(&self) -> Option<SignedBootstrapPayload> {
         let (record_strings, bootstrap_keys) = {
             let cfg = self.config();
@@ -70,8 +72,7 @@ impl NetworkManager {
         newest
     }
 
-    /// Everything the config says this node serves, whether or not it ever bootstraps: the
-    /// payload, and the legacy lines for nodes that still ask the old way. No lookup of any kind
+    /// What the config says this node serves, payload and legacy lines, with no lookup
     pub fn config_bootstrap_cache(&self) -> BootstrapCache {
         let cache = self
             .config_bootstrap_payload()
@@ -87,20 +88,15 @@ impl NetworkManager {
         cache
     }
 
-    /// The configured payload as a bootstrap source: its nodes are asked directly
-    pub fn config_bootstrap(&self) -> BootstrapPeers {
+    /// The configured payload's nodes, asked directly as a bootstrap source
+    pub fn config_bootstrap(&self) -> Vec<BootstrapNode> {
         let Some(payload) = self.config_bootstrap_payload() else {
-            return BootstrapPeers::default();
+            return vec![];
         };
         if payload.payload().is_expired(Timestamp::now()) {
             veilid_log!(self warn "The configured bootstrap payload has expired");
-            return BootstrapPeers::default();
+            return vec![];
         }
-        let unanswered = payload.payload().bootstrap_nodes().to_vec();
-        BootstrapPeers {
-            peers: vec![],
-            payload: Some(payload),
-            unanswered,
-        }
+        payload.payload().bootstrap_nodes().to_vec()
     }
 }

@@ -25,9 +25,7 @@ function publishTestEnvironment() {
 
 publishTestEnvironment();
 
-// WDIO_PAGE_HOST serves the test page from another address of this machine, WDIO_PAGE_CERT with
-// WDIO_PAGE_KEY serve it over https. A plain http page from an address other than localhost is
-// not a secure context; an https page is one where a clear websocket is mixed content
+// Serve the page off localhost or over https, to test non-secure and mixed-content pages
 const pageTls = Boolean(process.env.WDIO_PAGE_CERT && process.env.WDIO_PAGE_KEY);
 const pageOrigin =
   pageTls || process.env.WDIO_PAGE_HOST

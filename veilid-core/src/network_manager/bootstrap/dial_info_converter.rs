@@ -1,12 +1,5 @@
 use super::*;
 
-/// The short form of one dial info inside a legacy record line, relative to the line's hostname
-#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
-pub struct ShortDialInfo {
-    /// Protocol letter, port and path, like `W5150/ws`
-    pub short_url: String,
-}
-
 /// A bare bootstrap entry as a url host and port: `host`, `host:port`, an IP literal, or
 /// `[ipv6]:port`. An IPv6 host comes back bracketed and a missing port is the bootstrap port
 pub fn split_bootstrap_entry(entry: &str) -> Option<(String, u16)> {
@@ -25,26 +18,11 @@ pub fn split_bootstrap_entry(entry: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port.parse().ok()?))
 }
 
-pub trait DialInfoConverterResolver: Send + Sync {
-    fn to_socket_addrs(
-        &self,
-        host: &str,
-        default: SocketAddr,
-    ) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>>;
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BootstrapDialInfoConverter {}
 
-pub trait DialInfoConverter: Send + Sync {
-    fn try_vec_from_url<'a>(
-        &'a self,
-        url: &'a str,
-    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>>;
-}
-
-impl<C> DialInfoConverter for C
-where
-    C: DialInfoConverterResolver,
-{
-    fn try_vec_from_url<'a>(
+impl BootstrapDialInfoConverter {
+    pub fn try_vec_from_url<'a>(
         &'a self,
         url: &'a str,
     ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>> {
@@ -68,15 +46,14 @@ where
             };
 
             let socket_addrs = match split_url.host {
-                SplitUrlHost::Hostname(_) => self
-                    .to_socket_addrs(
-                        &split_url.host_port(port),
-                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
-                    )
-                    .await
-                    .map_err(|_| {
-                        VeilidAPIError::parse_error("couldn't resolve hostname in url", url)
-                    })?,
+                SplitUrlHost::Hostname(_) => resolve_socket_addrs(
+                    &split_url.host_port(port),
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
+                )
+                .await
+                .map_err(|_| {
+                    VeilidAPIError::parse_error("couldn't resolve hostname in url", url)
+                })?,
                 SplitUrlHost::IpAddr(a) => vec![SocketAddr::new(a, port)],
             };
 
@@ -114,10 +91,9 @@ where
 /// The short form a legacy record line carries for a dial info: the hostname is the line's,
 /// so only the protocol letter, port and path remain
 #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
-pub fn to_short_dial_info(dial_info: &DialInfo) -> ShortDialInfo {
-    fn path_suffix(request: &str, scheme: &str) -> (u16, String) {
-        let split_url = SplitUrl::from_str(&format!("{}://{}", scheme, request)).unwrap_or_log();
-        let default_port = if scheme == "ws" { 80 } else { 443 };
+pub fn to_short_dial_info(dial_info: &DialInfo) -> String {
+    fn port_and_path(url: &str, default_port: u16) -> (u16, String) {
+        let split_url = SplitUrl::from_str(url).unwrap_or_log();
         let path = split_url
             .path
             .map(|p| p.to_string())
@@ -126,58 +102,44 @@ pub fn to_short_dial_info(dial_info: &DialInfo) -> ShortDialInfo {
             .unwrap_or_default();
         (split_url.port.unwrap_or(default_port), path)
     }
-    let short_url = match dial_info {
+    match dial_info {
         DialInfo::UDP(di) => format!("U{}", di.socket_address.port()),
         DialInfo::TCP(di) => format!("T{}", di.socket_address.port()),
         DialInfo::WS(di) => {
-            let (port, path) = path_suffix(&di.request, "ws");
+            let (port, path) = port_and_path(&format!("ws://{}", di.request), 80);
             format!("W{}{}", port, path)
         }
         #[cfg(feature = "enable-protocol-wss")]
         DialInfo::WSS(di) => {
-            let (port, path) = path_suffix(&di.request, "wss");
+            let (port, path) = port_and_path(&format!("wss://{}", di.request), 443);
             format!("S{}{}", port, path)
         }
-        // The datagram half shares the stream's `B` short form, which the generator then
-        // dedupes into a single entry; a short form of its own would not parse back
+        // The datagram half shares the stream's `B` form; a form of its own would not parse
         #[cfg(feature = "enable-protocol-webtransport")]
         DialInfo::WebTransportStream(di) | DialInfo::WebTransportDatagram(di) => {
-            let split_url = SplitUrl::from_str(&di.request).unwrap_or_log();
-            let path = split_url
-                .path
-                .map(|p| p.to_string())
-                .filter(|p| !p.is_empty())
-                .map(|p| format!("/{}", p))
-                .unwrap_or_default();
-            format!("B{}{}", split_url.port.unwrap_or(443), path)
+            let (port, path) = port_and_path(&di.request, 443);
+            format!("B{}{}", port, path)
         }
-    };
-    ShortDialInfo { short_url }
+    }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BootstrapDialInfoConverter {}
-
-impl DialInfoConverterResolver for BootstrapDialInfoConverter {
-    #[allow(unused_variables)]
-    fn to_socket_addrs(
-        &self,
-        host: &str,
-        default: SocketAddr,
-    ) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>> {
-        // Resolve if possible, WASM doesn't support resolution and doesn't need it to connect to the dialinfo
-        // This will not be used on signed dialinfo, only for bootstrapping, so we don't need to worry about
-        // the '0.0.0.0' address being propagated across the routing table
-        let host = host.to_owned();
-        pin_dyn_future!(async move {
-            cfg_if::cfg_if! {
-                if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-                    Ok(vec![default])
-                } else {
-                    // getaddrinfo blocks for the system resolver's whole retry ladder
-                    blocking_wrapper(move || host.to_socket_addrs().map(|i| i.collect())).await
-                }
+#[allow(unused_variables)]
+fn resolve_socket_addrs(
+    host: &str,
+    default: SocketAddr,
+) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>> {
+    // Resolve if possible, WASM doesn't support resolution and doesn't need it to connect to the dialinfo
+    // This will not be used on signed dialinfo, only for bootstrapping, so we don't need to worry about
+    // the '0.0.0.0' address being propagated across the routing table
+    let host = host.to_owned();
+    pin_dyn_future!(async move {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+                Ok(vec![default])
+            } else {
+                // getaddrinfo blocks for the system resolver's whole retry ladder
+                blocking_wrapper(move || host.to_socket_addrs().map(|i| i.collect())).await
             }
-        })
-    }
+        }
+    })
 }

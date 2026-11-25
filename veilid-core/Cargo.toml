@@ -96,11 +96,11 @@ enable-protocol-webtransport = [
     "webpki-roots",
 ]
 
-# JSON format to use for serializing
-# Answer BOOT (v0) and B01T (v1) bootstrap requests from nodes of the previous version
+# Answer BOOT (v0) and B01T (v1) bootstrap requests from 0.5.x nodes
 enable-bootstrap-v0 = []
 enable-bootstrap-v1 = []
 
+# JSON format to use for serializing
 json-camel-case = []
 
 # GeoIP

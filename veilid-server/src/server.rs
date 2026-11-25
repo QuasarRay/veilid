@@ -189,7 +189,7 @@ pub async fn run_veilid_server_subnode(
         None
     };
 
-    // Signing needs only the API; every other one-shot mode needs the network
+    // Signing needs no network
     let auto_attach = match server_mode {
         ServerMode::Normal => settings_auto_attach,
         ServerMode::SignBootstrapPayload { .. } => false,

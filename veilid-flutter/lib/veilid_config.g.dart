@@ -468,9 +468,14 @@ _VeilidConfigRoutingTable _$VeilidConfigRoutingTableFromJson(
   bootstrap: (json['bootstrap'] as List<dynamic>)
       .map((e) => e as String)
       .toList(),
-  bootstrapProtocols: (json['bootstrapProtocols'] as List<dynamic>)
-      .map(VeilidConfigBootstrapProtocol.fromJson)
-      .toList(),
+  bootstrapProtocols:
+      (json['bootstrapProtocols'] as List<dynamic>?)
+          ?.map(VeilidConfigBootstrapProtocol.fromJson)
+          .toList() ??
+      const [
+        VeilidConfigBootstrapProtocol.wss,
+        VeilidConfigBootstrapProtocol.wts,
+      ],
   bootstrapKeys: (json['bootstrapKeys'] as List<dynamic>)
       .map(Typed<BarePublicKey>.fromJson)
       .toList(),

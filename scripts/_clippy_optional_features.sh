@@ -43,7 +43,7 @@ cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-core --no-default-features \
     --features=enable-crypto-vld0,rt-tokio,debug-api,backtrace $@
 
-# The legacy bootstrap servers are on by default, so this one keeps the build without them clean
+# The pass above turns the bootstrap features off with the protocols; this one turns them off alone
 echo "Running clippy for x86_64-unknown-linux-gnu without the legacy bootstrap features (enable-bootstrap-v0, enable-bootstrap-v1)..."
 cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-core --no-default-features \

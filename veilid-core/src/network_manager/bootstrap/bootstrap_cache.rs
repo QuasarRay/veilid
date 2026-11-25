@@ -60,14 +60,6 @@ impl BootstrapCache {
         this
     }
 
-    pub fn is_empty(&self) -> bool {
-        #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
-        if !self.record_strings.is_empty() {
-            return false;
-        }
-        self.payload_line.is_none()
-    }
-
     pub fn payload_timestamp(&self) -> Option<Timestamp> {
         self.payload_timestamp
     }

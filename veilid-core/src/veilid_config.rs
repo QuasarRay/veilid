@@ -60,14 +60,13 @@ pub(crate) struct OutboundProtocols {
 }
 
 impl OutboundProtocols {
-    /// Whether any of these reaches a peer. WSS does not count: a peer listens on it only
-    /// with a CA certificate
-    fn reaches_peers(&self) -> bool {
+    /// Whether this protocol can reach arbitrary peers; WSS cannot, peers listen on it only with a CA certificate
+    fn dials_any_peer(&self) -> bool {
         self.udp || self.tcp || self.ws || self.webtransport
     }
 
     /// Whether a bootstrap can be dialed over this protocol
-    fn dials(&self, bootstrap_protocol: VeilidConfigBootstrapProtocol) -> bool {
+    fn dials_bootstraps(&self, bootstrap_protocol: VeilidConfigBootstrapProtocol) -> bool {
         match bootstrap_protocol {
             VeilidConfigBootstrapProtocol::Udp => self.udp,
             VeilidConfigBootstrapProtocol::Tcp => self.tcp,
@@ -574,11 +573,11 @@ pub struct VeilidConfigRoutingTable {
         tsify(type = "string[]")
     )]
     pub bootstrap_keys: Vec<PublicKey>,
-    /// Bootstrap record lines, verbatim: the network's signed payload line (`2|...`) as
-    /// `veilid-server --sign-bootstrap-payload` prints it, and the legacy TXT lines as
-    /// `--dump-bootstrap-records` prints them. The payload is served to bootstrap requests and
-    /// names the nodes this node joins from; the legacy lines are served to nodes of the
-    /// previous version. Empty by default, in which case the payload comes from the bootstraps.
+    /// Bootstrap record lines, verbatim: the signed payload line (`2|...`) that
+    /// `veilid-server --sign-bootstrap-payload` prints, and the 0.5.x TXT lines that
+    /// `--dump-bootstrap-records` prints (served only with `enable-bootstrap-v0`/`-v1`). The
+    /// payload is served to bootstrap requests and names the nodes this node joins from. Empty
+    /// by default, in which case the payload comes from the bootstraps.
     pub bootstrap_records: Vec<String>,
     /// Answer bootstrap requests with the payload this node holds and its peers. Off by
     /// default: a bootstrap server turns it on, and an app has no reason to serve. A node that
@@ -1701,8 +1700,7 @@ impl VeilidConfig {
         }
     }
 
-    /// The protocols this node dials: the ones enabled for outbound connections, which in a
-    /// browser leaves the websockets and, where the browser offers it, WebTransport
+    /// The enabled outbound protocols this node can dial; in a browser, those its page allows
     pub(crate) fn outbound_protocols(&self) -> OutboundProtocols {
         cfg_if::cfg_if! {
             if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
@@ -1729,7 +1727,7 @@ impl VeilidConfig {
     /// Why a node on this page would reach no peer, if it would not
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     pub(crate) fn peer_reach_error_on(&self, page: &PageContext) -> Option<&'static str> {
-        if self.outbound_protocols_on(page).reaches_peers() {
+        if self.outbound_protocols_on(page).dials_any_peer() {
             return None;
         }
         Some(if page.https {
@@ -1746,19 +1744,17 @@ impl VeilidConfig {
         let dialable = self.outbound_protocols();
         let mut out = Vec::new();
         for bootstrap_protocol in &self.network.routing_table.bootstrap_protocols {
-            if dialable.dials(*bootstrap_protocol) && !out.contains(bootstrap_protocol) {
+            if dialable.dials_bootstraps(*bootstrap_protocol) && !out.contains(bootstrap_protocol) {
                 out.push(*bootstrap_protocol);
             }
         }
         out
     }
 
-    /// A node needs a protocol that reaches its peers, and WSS is not one: a peer listens on
-    /// it only with a CA certificate, so a node left with WSS alone would bootstrap and then
-    /// wait for peers that never come. A browser page narrows the choice further
+    /// A node must dial a protocol that reaches peers; a browser page narrows the choice
     fn validate_outbound_protocols(&self) -> VeilidAPIResult<()> {
         let enabled = self.enabled_outbound_protocols();
-        if !enabled.reaches_peers() {
+        if !enabled.dials_any_peer() {
             if enabled.wss {
                 apibail_generic!(
                     "WSS is the only protocol enabled for outbound connections under 'network.protocol', and it reaches bootstraps but no other peer"
@@ -1775,8 +1771,7 @@ impl VeilidConfig {
         Ok(())
     }
 
-    /// A node with bootstraps to reach must be able to dial at least one of the protocols it
-    /// would reach them over, or it would start and never bootstrap
+    /// A node with bootstraps must be able to dial one of its `bootstrap_protocols`
     fn validate_bootstrap_protocols(&self) -> VeilidAPIResult<()> {
         let rt = &self.network.routing_table;
         let has_bootstraps = !rt.bootstrap.is_empty()

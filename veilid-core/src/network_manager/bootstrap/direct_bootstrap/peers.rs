@@ -26,7 +26,7 @@ impl NetworkManager {
 
         let filter = Box::new(
             move |opt_snap: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
-                // Our own node is never a bootstrap peer for someone else
+                // None is this node, which the B02T reply adds on its own
                 let Some(snap) = opt_snap.as_ref() else {
                     return false;
                 };

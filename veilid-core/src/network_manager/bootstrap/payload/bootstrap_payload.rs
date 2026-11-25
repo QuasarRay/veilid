@@ -128,7 +128,7 @@ impl BootstrapPayload {
 }
 
 /// Parse an operator-facing lifetime: `<N>y`, `<N>mo`, `<N>d`, combinable, or `none`/`0` for no
-/// expiration. Years are 365 days and months 30, which the help text says
+/// expiration. A year is 365 days and a month 30
 #[cfg_attr(
     not(any(feature = "debug-api", test, feature = "test-util")),
     expect(dead_code)

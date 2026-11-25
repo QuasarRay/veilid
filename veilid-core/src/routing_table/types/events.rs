@@ -17,6 +17,12 @@ pub struct RoutingDomainCommitEvent {
     pub relays_changed: bool,
 }
 
+/// Posted when one of our relays has new peer info, for relay management to rebuild it
+#[derive(Clone, Copy, Debug)]
+pub struct RelayPeerInfoChangeEvent {
+    pub routing_domain: RoutingDomain,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RoutingDomainReadyEvent {
     pub routing_domain: RoutingDomain,

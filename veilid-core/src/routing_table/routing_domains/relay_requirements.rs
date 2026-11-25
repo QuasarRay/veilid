@@ -128,11 +128,13 @@ impl RelayRequirements {
 /// The protocols a relay is wanted for. WSS is not one: a peer listens on it only with a CA
 /// certificate, so none depends on it to reach this node
 fn relayed_protocol_types() -> ProtocolTypeSet {
-    #[allow(unused_mut)]
-    let mut out = ProtocolTypeSet::all();
-    #[cfg(feature = "enable-protocol-wss")]
-    out.remove(ProtocolType::WSS);
-    out
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "enable-protocol-wss")] {
+            ProtocolTypeSet::all() - ProtocolType::WSS
+        } else {
+            ProtocolTypeSet::all()
+        }
+    }
 }
 
 /// Builder for a list of relays that satisfy the requirements
@@ -179,6 +181,7 @@ impl RelayCompiler {
         // Clear out the dial info details and the pings because we'll add new ones
         relay.dial_info_details.clear();
         relay.pings.clear();
+        relay.relay_peer_info = Some(relay_peer_info.clone());
 
         // For all for the relay's dial info, see if it matches a protocol+address type we need covered
         let mut dial_info_list = relay_peer_info.node_info().dial_info_detail_list().to_vec();

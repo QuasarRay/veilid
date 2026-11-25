@@ -145,7 +145,7 @@ impl BootstrapRecord {
         let mut short_urls: Vec<String> = self
             .dial_info_details()
             .iter()
-            .map(|did| to_short_dial_info(&did.dial_info).short_url)
+            .map(|did| to_short_dial_info(&did.dial_info))
             .collect();
         if short_urls.is_empty() {
             bail!("No dial info for bootstrap host");

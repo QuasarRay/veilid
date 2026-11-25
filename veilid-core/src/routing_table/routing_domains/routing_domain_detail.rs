@@ -79,7 +79,7 @@ pub trait RoutingDomainDetail:
     );
     /// Set the bootstrap records supplied by config for this domain
     fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache);
-    /// Everything this domain can serve to a B01T request
+    /// Everything this domain can serve to a bootstrap request
     fn get_served_bootstrap_cache(&self) -> BootstrapCache;
 
     /// Update the low water mark of nodes since the last peer minimum refresh

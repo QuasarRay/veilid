@@ -335,8 +335,7 @@ impl RPCProcessor {
     pub async fn shutdown(&self) {
         veilid_log!(self debug "starting rpc processor shutdown");
 
-        // Shutdown never waits out an answer: release the callers waiting on one, then wait for
-        // them to leave
+        // Release callers waiting on an answer so the shutdown below need not wait them out
         let mut cancelled = self.cancel_all_op_waiters();
         let guard = self
             .startup_context
@@ -345,7 +344,7 @@ impl RPCProcessor {
             .await
             .expect_or_log("should be started up");
 
-        // And any question asked while they left, which the drain below would wait out
+        // Cancel questions asked meanwhile; the drain below would wait them out
         cancelled += self.cancel_all_op_waiters();
         if cancelled > 0 {
             veilid_log!(self debug "cancelled {} rpc operations waiting for a reply", cancelled);

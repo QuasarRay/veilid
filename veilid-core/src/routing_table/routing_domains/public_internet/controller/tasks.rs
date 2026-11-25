@@ -216,6 +216,18 @@ impl PublicInternetRoutingDomainController {
         }
     }
 
+    pub async fn relay_peer_info_change_event_handler(&self, evt: Arc<RelayPeerInfoChangeEvent>) {
+        if evt.routing_domain != RoutingDomain::PublicInternet {
+            return;
+        }
+        let state = self.state();
+        if Self::check_relay_management(&state) {
+            if let Err(e) = self.relay_management_task.try_tick_now().await {
+                veilid_log!(self warn "[PublicInternet] relay_management tick failed: {}", e);
+            }
+        }
+    }
+
     pub async fn peer_info_change_event_handler(&self, evt: Arc<PeerInfoChangeEvent>) {
         if evt.routing_domain != RoutingDomain::PublicInternet || evt.opt_new_peer_info.is_none() {
             return;

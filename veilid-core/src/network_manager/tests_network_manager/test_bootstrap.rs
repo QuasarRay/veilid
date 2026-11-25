@@ -414,7 +414,6 @@ pub async fn test_bootstrap_cache() {
 
         // Nothing held comes due at once, then once per default cache period
         let mut empty = BootstrapCache::default();
-        assert!(empty.is_empty());
         assert!(empty.served_payload(now).is_none());
         assert!(empty.recheck_due(now));
         empty.mark_rechecked(now);
@@ -422,7 +421,6 @@ pub async fn test_bootstrap_cache() {
         assert!(empty.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
 
         let mut learned = BootstrapCache::from_payload(&older, Some(now));
-        assert!(!learned.is_empty());
         assert_eq!(learned.served_payload(now), Some(older.clone()));
         assert!(!learned.recheck_due(now));
         assert!(learned.recheck_due(now.later(DEFAULT_BOOTSTRAP_CACHE_TTL)));
@@ -569,9 +567,7 @@ pub async fn test_config_bootstrap_payload() {
         assert_eq!(payload.to_line(), newer_line);
 
         // The configured payload's nodes are what this node asks directly
-        let peers = network_manager.config_bootstrap();
-        assert!(peers.peers.is_empty());
-        assert_eq!(peers.unanswered.len(), 1);
+        assert_eq!(network_manager.config_bootstrap().len(), 1);
 
         // And it is what this node serves before it ever bootstraps
         let cache = network_manager.config_bootstrap_cache();
@@ -653,7 +649,7 @@ pub async fn test_bootstrap_peers_omit_expired_peer_info() {
         register(&routing_table, &current);
         register(&routing_table, &expired);
 
-        let answers = network_manager.find_bootstrap_nodes_filtered(2);
+        let answers = network_manager.find_bootstrap_nodes_filtered(BOOTSTRAP_PEERS_PER_TYPE);
         let answered_node_ids: Vec<NodeIdGroup> = answers.iter().map(|nr| nr.node_ids()).collect();
         assert!(
             answered_node_ids.contains(current.node_ids()),
@@ -728,7 +724,7 @@ fn legacy_dial_info_details() -> Vec<DialInfoDetail> {
 pub fn test_legacy_short_dial_info() {
     let shorts: Vec<String> = legacy_dial_info_details()
         .iter()
-        .map(|did| to_short_dial_info(&did.dial_info).short_url)
+        .map(|did| to_short_dial_info(&did.dial_info))
         .collect();
     assert!(shorts.contains(&"U5150".to_owned()), "{shorts:?}");
     assert!(shorts.contains(&"W5150/ws".to_owned()), "{shorts:?}");

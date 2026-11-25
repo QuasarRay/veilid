@@ -124,6 +124,22 @@ pub(super) struct CommitChanged {
 }
 
 impl CommitSnapshot {
+    /// Each relay with the dial infos we use it on, for logging
+    pub(super) fn relays_summary(&self) -> String {
+        self.relays
+            .iter()
+            .map(|relay| {
+                let dial_infos = relay
+                    .dial_info_details
+                    .iter()
+                    .map(|did| did.dial_info.to_string())
+                    .collect::<Vec<_>>();
+                format!("{:#}@[{}]", relay.relay_node, dial_infos.join(","))
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     pub(super) fn diff(&self, new: &CommitSnapshot) -> CommitChanged {
         let dial_info_changed = self.dial_info_details != new.dial_info_details;
         let relays_changed = self.relays.len() != new.relays.len()
@@ -131,7 +147,7 @@ impl CommitSnapshot {
                 .relays
                 .iter()
                 .zip(new.relays.iter())
-                .any(|x| !x.0.relay_node.same_entry(&x.1.relay_node));
+                .any(|x| !x.0.equivalent(x.1));
         let outbound_protocols_changed = self.outbound_protocols != new.outbound_protocols;
         let inbound_protocols_changed = self.inbound_protocols != new.inbound_protocols;
         let address_types_changed = self.address_types != new.address_types;

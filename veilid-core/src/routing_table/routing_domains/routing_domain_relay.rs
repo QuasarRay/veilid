@@ -7,6 +7,8 @@ pub struct RoutingDomainRelay {
     pub relay_id: NodeId,
     pub relay_node: FilteredNodeRef,
     pub relay_kind: RelayKind,
+    /// The relay's peer info as last applied; our peer info describes the relay from this alone
+    pub relay_peer_info: Option<Arc<PeerInfo>>,
     pub pings: Vec<RelayPing>,
     pub dial_info_details: Vec<DialInfoDetail>,
 }
@@ -23,6 +25,26 @@ impl RoutingDomainRelay {
                 .zip(other.pings.iter())
                 .all(|(a, b)| a.equivalent(b))
             && self.dial_info_details == other.dial_info_details
+            && match (self.relay_info(), other.relay_info()) {
+                (Some(a), Some(b)) => a.equivalent(&b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+
+    /// The relay info our peer info carries for this relay
+    pub fn relay_info(&self) -> Option<RelayInfo> {
+        let relay_peer_info = self.relay_peer_info.as_ref()?;
+        let node_info = relay_peer_info.node_info();
+        Some(RelayInfo::new(
+            node_info.timestamp(),
+            relay_peer_info.node_ids().clone(),
+            node_info.outbound_protocols(),
+            node_info.address_types(),
+            self.dial_info_details.clone(),
+            self.relay_kind,
+            *node_info.receive_mtus(),
+        ))
     }
 
     /// The relay addresses the keepalive pings reach, each with the protocol it is pinged over
@@ -36,10 +58,12 @@ impl RoutingDomainRelay {
         let relay_node =
             relay_node.custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain));
         let relay_id = relay_node.best_node_id();
+        let relay_peer_info = relay_node.get_peer_info(routing_domain);
         RoutingDomainRelay {
             relay_id,
             relay_node,
             relay_kind,
+            relay_peer_info,
             dial_info_details: vec![],
             pings: vec![],
         }

@@ -7,15 +7,14 @@ import 'veilid.dart';
 /// Build a [VeilidConfig] from veilid-core's defaults, overriding the
 /// program/storage/network fields most callers need to set.
 ///
-/// On non-web platforms the stores are placed under [storageDirectory], or
-/// under the application support directory when that is not given. Pass it
-/// from an embedder that starts a node off the main isolate: path_provider is
-/// a platform-channel call, and such an isolate has no messenger bound to make
-/// one. [bootstrap] and [bootstrapKeys] are
-/// comma-separated; empty strings leave the built-in defaults in place.
-/// [bootstrapRecords] (the network's `2|` payload line and any legacy TXT
-/// lines, which contain commas of their own) and [bootstrapProtocols] are
-/// lists; null leaves the built-in defaults in place.
+/// Off the web the stores go under [storageDirectory], or under the
+/// application support directory when it is null. An embedder that starts a
+/// node off the main isolate passes it: path_provider is a platform-channel
+/// call, and such an isolate has no messenger bound to make one.
+/// [bootstrap] is comma-separated, and empty keeps the default.
+/// [bootstrapKeys] is comma-separated, empty for none, and null keeps the
+/// default. [bootstrapRecords] (whose lines hold commas of their own) and
+/// [bootstrapProtocols] are lists, and null keeps the default.
 Future<VeilidConfig> getDefaultVeilidConfig({
   required bool isWeb,
   required String programName,

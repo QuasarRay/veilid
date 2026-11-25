@@ -46,10 +46,8 @@ impl NetworkManager {
         legacy && data.len() >= 8 && &data[4..8] == B02T_MAGIC
     }
 
-    /// Build the B02T reply: the held payload as its bytes, then peers within the message cap.
-    /// Answers an unauthenticated packet, so this touches no resolver, does no I/O and signs
-    /// nothing; what is held is served as is, and a re-check that has come due, for a stale
-    /// learned copy or for having nothing to serve, is left to the bootstrap task
+    /// Build the B02T reply: the held payload bytes, then peers within the message cap.
+    /// Does no I/O; a due re-check is left to the bootstrap task
     pub fn boot_v2_response(&self) -> Result<Bytes, RPCError> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;
@@ -87,7 +85,7 @@ impl NetworkManager {
                 }
             }
         }
-        for nr in self.find_bootstrap_nodes_filtered(2) {
+        for nr in self.find_bootstrap_nodes_filtered(BOOTSTRAP_PEERS_PER_TYPE) {
             if let Some(pi) = nr.get_peer_info(routing_domain) {
                 push(pi);
             }
@@ -128,20 +126,7 @@ impl NetworkManager {
             .map_err(|e| eyre!("B02T response could not be built: {}", e))?;
         veilid_log!(self trace "B02T response: {} bytes", response.len());
 
-        let net = self.net();
-        match pin_future_closure!(net.send_data_to_existing_flow(
-            flow,
-            response,
-            SAFE_TRANSPORT_MTU
-        ))
-        .await?
-        {
-            NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
-            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
-            _ => Ok(NetworkResult::no_connection_other(
-                "bootstrap reply could not be sent",
-            )),
-        }
+        self.send_bootstrap_reply(flow, response).await
     }
 
     /// Decode a reply's body, the bytes after the magic. Peers that fail to decode are dropped

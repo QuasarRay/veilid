@@ -413,7 +413,7 @@ impl AttachmentManager {
     pub async fn pre_terminate_async(&self) {
         // Roll back open transactions while the network can still carry the rollbacks
         self.storage_manager()
-            .roll_back_transactions_for_shutdown()
+            .rollback_transactions_for_shutdown()
             .await;
 
         // Start attachment shutdown

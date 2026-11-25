@@ -238,6 +238,11 @@ class DefaultVeilidFixture implements VeilidFixture {
 
     config = _selectProtocols(config);
 
+    // UPNP=0 runs the node without a port mapping
+    if (const String.fromEnvironment('UPNP') == '0') {
+      config = config.copyWith(network: config.network.copyWith(upnp: false));
+    }
+
     final us = _veilidUpdateStream = await Veilid.instance.startupVeilidCore(
       config,
     );

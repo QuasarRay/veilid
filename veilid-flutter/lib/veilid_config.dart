@@ -488,7 +488,11 @@ sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
     required List<PublicKey> publicKeys,
     required List<SecretKey> secretKeys,
     required List<String> bootstrap,
-    required List<VeilidConfigBootstrapProtocol> bootstrapProtocols,
+    @Default([
+      VeilidConfigBootstrapProtocol.wss,
+      VeilidConfigBootstrapProtocol.wts,
+    ])
+    List<VeilidConfigBootstrapProtocol> bootstrapProtocols,
     required List<PublicKey> bootstrapKeys,
     required List<String> bootstrapRecords,
     @Default(false) bool serveDirectBootstrap,

@@ -58,9 +58,9 @@ impl fmt::Display for PublicInternetRoutingDomainDetail {
 impl_veilid_component_accessors!(PublicInternetRoutingDomainDetail);
 
 impl PublicInternetRoutingDomainDetail {
-    /// Whether this node found itself among its own bootstraps, part of its capabilities
-    pub fn set_own_bootstrap(&self, own_bootstrap: bool) {
-        self.common.set_own_bootstrap(own_bootstrap);
+    /// Record whether this node is among its own bootstraps, returning the last verdict
+    pub fn swap_own_bootstrap(&self, own_bootstrap: bool) -> bool {
+        self.common.swap_own_bootstrap(own_bootstrap)
     }
 }
 

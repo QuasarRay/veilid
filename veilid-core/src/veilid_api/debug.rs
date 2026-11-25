@@ -96,7 +96,7 @@ enum DebugCommand {
     },
     /// print this node's public addresses, one per line
     Bootstrapaddresses,
-    /// print this node's bootstrap node line, for an operator to sign into a payload
+    /// print this node's bootstrap node line, for the bootstrap operator to sign into a payload
     Bootstrapnode,
     /// sign bootstrap node lines into a payload line
     Bootstrappayload {

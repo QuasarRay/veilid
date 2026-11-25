@@ -206,18 +206,11 @@ impl NativeNetwork {
             webtransport::QuicMtuLimit::for_address_type(&self.registry(), AddressType::IPV6);
         if let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() {
             let cfg = self.config();
-            let certs = Self::load_certs(std::path::Path::new(&cfg.network.tls.certificate_path))
-                .wrap_err("failed to load webtransport TLS certificate")?;
-            if certs.is_empty() {
-                bail!("webtransport TLS certificate is empty");
-            }
-            let mut keys = Self::load_keys(std::path::Path::new(&cfg.network.tls.private_key_path))
-                .wrap_err("failed to load webtransport TLS private key")?;
-            if keys.is_empty() {
-                bail!("webtransport TLS private key is empty");
-            }
-            let hostname_ck = certified_key_from_chain(certs, keys.remove(0))
-                .wrap_err("failed to build CA-signed webtransport hostname certificate")?;
+            let hostname_ck = load_certified_key(
+                &cfg.network.tls.certificate_path,
+                &cfg.network.tls.private_key_path,
+            )
+            .wrap_err("failed to build CA-signed webtransport hostname certificate")?;
 
             let v4_ip = self.load_webtransport_ip_certified_key("ipv4");
             let v6_ip = self.load_webtransport_ip_certified_key("ipv6");
@@ -294,15 +287,7 @@ impl NativeNetwork {
     fn load_webtransport_ip_certified_key(&self, family_stem: &str) -> Option<Arc<CertifiedKey>> {
         let (cert_path, key_path) =
             sibling_ip_cert_key_paths(&self.config().network.tls, family_stem)?;
-        let certs = Self::load_certs(std::path::Path::new(&cert_path)).ok()?;
-        if certs.is_empty() {
-            return None;
-        }
-        let mut keys = Self::load_keys(std::path::Path::new(&key_path)).ok()?;
-        if keys.is_empty() {
-            return None;
-        }
-        match certified_key_from_chain(certs, keys.remove(0)) {
+        match load_certified_key(&cert_path, &key_path) {
             Ok(ck) => {
                 veilid_log!(self debug "serving WebTransport {} IP-SAN certificate for SNI-less (IP-literal) dials from {}", family_stem, cert_path);
                 Some(ck)
@@ -549,9 +534,7 @@ impl NativeNetwork {
     ///
     /// Interface addresses rather than the resolved hostname: the configured URL may be a
     /// round-robin name fronting several hosts, so each backend must advertise only its own
-    /// IPs, which are the ones its IP-SAN cert covers. The TXT bootstrap record stays
-    /// single-hostname regardless, because `to_short` derives the WTS hostname by PTR of the
-    /// socket address (matching udp/tcp).
+    /// IPs, which are the ones its IP-SAN cert covers.
     ///
     /// Falls back to the hostname URL ([`add_wt_url_dial_info`]) when no per-family IP-SAN
     /// cert is present.

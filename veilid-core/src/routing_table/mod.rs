@@ -1987,21 +1987,22 @@ impl RoutingTable {
         };
         self.mark_save_dirty();
 
-        // If this is our relay, then redo our own peerinfo because
-        // if we have relayed peerinfo, then changing the relay's peerinfo
-        // changes our own peer info
-        let rdc = self.get_routing_domain_controller(routing_domain);
-        let rdd = rdc.read_dyn();
-        let our_relay_node_ids = rdd
+        // Our peer info describes our relays, so relay management rebuilds a changed one and
+        // republishes ours once
+        let our_relay_node_ids = self
+            .get_routing_domain_controller(routing_domain)
+            .read_dyn()
             .relays()
             .iter()
             .flat_map(|rdr| rdr.relay_node.node_ids().to_vec())
             .collect::<Vec<_>>();
         if node_ids.contains_any_from_iter(our_relay_node_ids.iter()) {
-            rdd.invalidate();
-            // Publishing reads the detail again; a held read lock can deadlock a waiting writer
-            drop(rdd);
-            rdc.publish_peer_info();
+            if let Err(e) = self
+                .event_bus()
+                .post(RelayPeerInfoChangeEvent { routing_domain })
+            {
+                veilid_log!(self debug "Failed to post RelayPeerInfoChangeEvent: {}", e);
+            }
         }
 
         // Update tables that use peer info

@@ -22,7 +22,7 @@ Firewall: 5150/TCP/UDP inbound allow all<br>
 TLS: a certificate from a CA browsers trust<br>
 
 A bootstrap answers bootstrap requests once it has published its own node info with a direct
-address for every protocol it listens on, in both address families, and no relay. With its
+address for every protocol it listens on and no relay. With its
 public IPv4 and IPv6 addresses on its own interfaces it confirms them at startup and publishes
 by itself, as the first bootstrap of a new network must. A host whose public addresses are
 translated elsewhere waits for other nodes to validate them, so give it static addresses
@@ -179,11 +179,11 @@ with `bootstrap_keys: []` accepts. The command prints the payload line:
   or `1y`, `6mo`, `30d` (combinable; a year is 365 days and a month 30). Nodes stop serving
   a payload at its expiration, so a lifetime makes the network depend on someone re-signing
   in time; with `none` the payload is re-signed only when the bootstrap set changes.
-- `--bootstrap-cache-ttl-hours` (default 24) is advisory: a node that learned the payload
-  over the network re-checks its source after that long, so a newer payload reaches the
-  network within about a day of being pasted into the bootstraps. A node that answers
-  bootstrap requests while holding no payload, or an expired one, asks its bootstraps for
-  one when a request arrives, at most once in that time.
+- `--bootstrap-cache-ttl-hours` (default 24) is advisory: a serving node that learned the
+  payload re-checks its source on the first bootstrap request after that long, after a random
+  delay of up to half of it. A node that answers bootstrap requests while holding no payload,
+  or an expired one, asks its bootstraps for one when a request arrives, at most once in that
+  time.
 
 ### Paste the payload line into every bootstrap
 
@@ -237,8 +237,8 @@ Create the following DNS records for your domain:
 
 The round-robin name is what clients put in `bootstrap`; the per-host names are what each
 certificate and `wss.url` and `webtransport.url` carry. Give each bootstrap address a PTR
-record pointing at its per-host name: the legacy records below need it, and a WebTransport
-client checks the certificate against the name it dialed.
+record pointing at its per-host name; `--dump-bootstrap-records` names the legacy lines by it
+when `--bootstrap-hostname` is not given.
 
 ## For nodes running 0.5.x (TXT records)
 

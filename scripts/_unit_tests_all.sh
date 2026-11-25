@@ -28,9 +28,8 @@ else
     # SELECTED packages, so the mock-api pass shares no dependency artifacts with the default one.
     # They are functions purely so the argument lists are not duplicated by the timing below.
     #
-    # run_test_attachment_manager and run_test_bootstrap are the native tests that reach the
-    # network. The mock pass covers the attachment lifecycle, so both are excluded to keep this
-    # script offline.
+    # run_test_attachment_manager and run_test_bootstrap reach the network, so they are excluded to
+    # keep this script offline; the mock pass covers the attachment lifecycle.
     #
     # app-lifecycle is on here, as the app bindings ship it, so its tests run; clippy's
     # `-p veilid-core` pass compiles it off, as veilid-server ships it.

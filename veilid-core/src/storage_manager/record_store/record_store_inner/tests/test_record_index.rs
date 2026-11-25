@@ -927,7 +927,7 @@ pub async fn test_storage_limit_freezes(
     unlocked_inner: RecordStoreUnlockedInner,
     vcrypto: &CryptoSystemGuard<'_>,
 ) {
-    const MIB: u64 = 1_048_576;
+    use crate::storage_manager::storage_budget::MIB;
     let desc = random_signed_value_descriptor(vcrypto, Some(MAX_SUBKEY));
     let new_record = || {
         Record::<LocalRecordDetail>::try_new(

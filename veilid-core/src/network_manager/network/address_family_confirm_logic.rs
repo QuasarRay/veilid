@@ -36,8 +36,7 @@ pub(crate) enum FamilyProbeDisposition {
 pub(crate) enum FamilyProbeAnswer {
     /// No answer came
     Unanswered,
-    /// The peer answered. Holds the family of the address it saw us from, when the answer
-    /// came over a flow to the peer itself
+    /// The peer answered, with the family it saw us from when the answer came over a flow to it
     Answered(Option<AddressType>),
 }
 
@@ -56,9 +55,7 @@ impl FamilyProbeRound {
         }
     }
 
-    /// Fold one probe in, returning the disposition once it is settled. An answer the peer
-    /// saw from another family settles nothing: the dial went to a named url, which a
-    /// browser reaches over whichever family it resolves
+    /// Fold one probe in; an answer seen from another family settles nothing
     pub(crate) fn record(&mut self, answer: FamilyProbeAnswer) -> Option<FamilyProbeDisposition> {
         match answer {
             FamilyProbeAnswer::Answered(Some(seen_from)) if seen_from == self.address_type => {

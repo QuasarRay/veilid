@@ -757,14 +757,18 @@ impl OutboundTransactionManager {
         self.transactions.keys().copied().collect()
     }
 
-    /// Drop every open transaction, releasing its routes and keepalives without awaiting its
-    /// background work
+    /// Drop a transaction, releasing its routes and keepalives without awaiting its background work
+    pub fn drop_transaction_now(&mut self, transaction_handle: OutboundTransactionHandle) {
+        if let Some(state) = self.drop_transaction(transaction_handle) {
+            drop(state.into_transaction_cleanup());
+        }
+    }
+
+    /// Drop every open transaction now, with no terminal delivery retries
     pub fn drop_all_transactions(&mut self) {
         self.clear_terminal_delivery_spawner();
         for transaction_handle in self.transaction_handles() {
-            if let Some(state) = self.drop_transaction(transaction_handle) {
-                drop(state.into_transaction_cleanup());
-            }
+            self.drop_transaction_now(transaction_handle);
         }
     }
 
@@ -1326,9 +1330,7 @@ impl OutboundTransactionManager {
         }
     }
 
-    /// Set questions still in flight when their command returns. Each settles through
-    /// `record_late_transact_set_result`, which can run before the command's own results
-    /// are recorded, so the count goes in first.
+    /// Count Set questions still in flight when their command returns
     pub fn add_outstanding_sets(&mut self, lnxids: &HashSet<LocalNodeTransactionId>) {
         for &lnxid in lnxids {
             let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid).cloned() else {

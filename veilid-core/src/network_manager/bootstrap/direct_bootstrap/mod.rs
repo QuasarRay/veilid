@@ -16,9 +16,7 @@ pub use v2::*;
 impl_veilid_log_facility!("net");
 
 impl NetworkManager {
-    /// Direct bootstrap request: ask one dial info for the network's payload and its peers.
-    /// A server that answers with anything but a B02T reply has not been upgraded; its answer is
-    /// dropped, and the round goes on with the other bootstraps
+    /// Ask one dial info for the payload and its peers; a reply without the B02T magic is dropped
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
@@ -57,6 +55,24 @@ impl NetworkManager {
 
         let response = self.decode_boot_v2_response(&out_data[B02T_MAGIC.len()..])?;
         Ok(self.accept_boot_v2_response(response))
+    }
+
+    /// Send a bootstrap reply down the flow its request came in on
+    async fn send_bootstrap_reply(
+        &self,
+        flow: Flow,
+        reply: Bytes,
+    ) -> EyreResult<NetworkResult<()>> {
+        let net = self.net();
+        match pin_future_closure!(net.send_data_to_existing_flow(flow, reply, SAFE_TRANSPORT_MTU))
+            .await?
+        {
+            NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
+            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+            _ => Ok(NetworkResult::no_connection_other(
+                "bootstrap reply could not be sent",
+            )),
+        }
     }
 
     /// Apply the trust rules to a reply. With bootstrap keys the payload must carry a trusted

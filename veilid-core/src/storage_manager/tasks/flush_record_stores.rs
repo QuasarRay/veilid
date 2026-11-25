@@ -1,7 +1,7 @@
 use super::*;
 
 impl StorageManager {
-    // Flush records stores to disk, remove dead records and follow the storage budget
+    // Flush record stores to disk, remove dead records and apply the storage budget
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err)

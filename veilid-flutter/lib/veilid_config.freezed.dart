@@ -6959,7 +6959,7 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 @JsonSerializable()
 
 class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidConfigRoutingTable {
-  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, required final  List<VeilidConfigBootstrapProtocol> bootstrapProtocols, required final  List<PublicKey> bootstrapKeys, required final  List<String> bootstrapRecords, this.serveDirectBootstrap = false}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapProtocols = bootstrapProtocols,_bootstrapKeys = bootstrapKeys,_bootstrapRecords = bootstrapRecords;
+  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, final  List<VeilidConfigBootstrapProtocol> bootstrapProtocols = const [VeilidConfigBootstrapProtocol.wss, VeilidConfigBootstrapProtocol.wts], required final  List<PublicKey> bootstrapKeys, required final  List<String> bootstrapRecords, this.serveDirectBootstrap = false}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapProtocols = bootstrapProtocols,_bootstrapKeys = bootstrapKeys,_bootstrapRecords = bootstrapRecords;
   factory _VeilidConfigRoutingTable.fromJson(Map<String, dynamic> json) => _$VeilidConfigRoutingTableFromJson(json);
 
  final  List<PublicKey> _publicKeys;
@@ -6984,7 +6984,7 @@ class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidCo
 }
 
  final  List<VeilidConfigBootstrapProtocol> _bootstrapProtocols;
-@override List<VeilidConfigBootstrapProtocol> get bootstrapProtocols {
+@override@JsonKey() List<VeilidConfigBootstrapProtocol> get bootstrapProtocols {
   if (_bootstrapProtocols is EqualUnmodifiableListView) return _bootstrapProtocols;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_bootstrapProtocols);

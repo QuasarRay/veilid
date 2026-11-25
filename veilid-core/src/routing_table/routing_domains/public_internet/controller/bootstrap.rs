@@ -2,8 +2,7 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-/// What a round that found this node to be its only bootstrap was judged on. Config does not
-/// change on its own, so only a change in our network can give another verdict
+/// The network state under which this node judged itself its only bootstrap
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BootstrapStandoff {
     /// Our published peer info and online state when the round started
@@ -54,18 +53,17 @@ impl PublicInternetRoutingDomainController {
         let refresh_only = nodes_needed.needs_bootstrap.is_empty();
         let crypto_kinds = nodes_needed.needs_bootstrap;
 
-        // Don't bother if nothing to bootstrap from is configured, and stand off while this
-        // node is the only bootstrap it knows of
+        // Nothing to ask, or standing off as this node's only bootstrap
         let routing_table = self.routing_table();
         let network_manager = self.network_manager();
         let bootstraps = self.config().network.routing_table.bootstrap.clone();
-        let config_peers = network_manager.config_bootstrap();
+        let config_nodes = network_manager.config_bootstrap();
         let epoch = routing_table.loss_epoch(None);
         let standing_off = self
             .bootstrap_standoff
             .lock()
             .is_some_and(|standoff| standoff.holds(&epoch));
-        if standing_off || (bootstraps.is_empty() && config_peers.unanswered.is_empty()) {
+        if standing_off || (bootstraps.is_empty() && config_nodes.is_empty()) {
             // A re-check with no one to ask still uses up its cache period
             if recheck {
                 self.record_bootstrap_cache(BootstrapCache::default(), true);
@@ -78,8 +76,6 @@ impl PublicInternetRoutingDomainController {
             routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
         }
 
-        // Expand every entry: a url is dialed as given, a bare name on every address it
-        // resolves to over the configured protocols, in order
         let mut targets = Vec::<BootstrapTarget>::new();
         for entry in bootstraps {
             // A hostname resolves on the blocking pool, which a stop cannot interrupt
@@ -95,7 +91,7 @@ impl PublicInternetRoutingDomainController {
             }
         }
         // The configured payload's nodes are asked directly, on their own dial infos
-        for bsn in &config_peers.unanswered {
+        for bsn in &config_nodes {
             targets.push(BootstrapTarget {
                 entry: format!("payload node {}", bsn.node_ids()),
                 groups: self.protocol_groups(bsn.dial_infos()),
@@ -183,8 +179,7 @@ impl PublicInternetRoutingDomainController {
             }
         }
 
-        // A payload learned over the network is what this node serves from now on; a round
-        // that learned none still marks that a bootstrap ran, and starts a new cache period
+        // A learned payload replaces what is served; an empty round still starts a cache period
         let now = Timestamp::now();
         let bootstrap_cache = found
             .payload
@@ -195,13 +190,12 @@ impl PublicInternetRoutingDomainController {
 
         // A round that resolved anything decides whether this node is one of its own bootstraps
         if resolved_anything || !bootstrapped_peers.is_empty() {
-            let was_own_bootstrap = self.own_bootstrap.swap(own_node_seen, Ordering::AcqRel);
+            let was_own_bootstrap = self.read().swap_own_bootstrap(own_node_seen);
             if own_node_seen != was_own_bootstrap {
                 if own_node_seen {
                     veilid_log!(self info "This node is one of its own bootstraps and answers direct bootstrap requests");
                 }
                 // The verdict is part of the advertised capabilities
-                self.read().set_own_bootstrap(own_node_seen);
                 self.publish_peer_info();
             }
         }

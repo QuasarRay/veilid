@@ -1164,8 +1164,6 @@ impl NativeNetwork {
             }
             detect_address_changes
         } else {
-            // Detect only what this host cannot state itself: a family with no global address
-            // on an interface and no configured public address for every inbound protocol
             let address_config = &network_state.address_config;
             let mut in_use = AddressTypeSet::new();
             if address_config.ipv4_global {
