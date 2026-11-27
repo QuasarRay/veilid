@@ -2,7 +2,7 @@ mod igd_manager;
 mod low_level_protocol_tcp;
 mod low_level_protocol_udp;
 mod mtu_detection;
-mod network_state;
+pub(in crate::network_manager) mod network_state;
 mod restore;
 mod tasks;
 
@@ -1162,7 +1162,7 @@ impl NativeNetwork {
         let require_inbound_relay = config.network.privacy.require_inbound_relay;
 
         let enable_public_internet_detect_address_changes = if require_inbound_relay {
-            veilid_log!(self info "Manually-disabled detection of PublicInternet address changes because 'network.private.require_inbound_relay' is 'true'");
+            veilid_log!(self info "Manually-disabled detection of PublicInternet address changes because 'network.privacy.require_inbound_relay' is 'true'");
             false
         } else if let Some(detect_address_changes) = detect_address_changes {
             if detect_address_changes {

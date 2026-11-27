@@ -7,6 +7,12 @@ pub mod test_attachment_manager;
 pub mod test_bootstrap;
 pub mod test_dht;
 pub mod test_dht_transactions;
+// One native node with static public addresses and no peers
+#[cfg(all(
+    not(feature = "mock-api"),
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+pub mod test_require_inbound_relay;
 #[cfg(feature = "enable-protocol-webtransport")]
 pub mod test_veilid_config;
 #[cfg(all(

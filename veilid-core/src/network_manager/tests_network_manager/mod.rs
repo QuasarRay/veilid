@@ -19,6 +19,8 @@ mod test_family_mtu;
 mod test_hole_punch_ttl;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod test_hop_mtu;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_inbound_relay_dial_info;
 mod test_loss_estimator;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod test_mtu_probe_processor;
@@ -93,6 +95,8 @@ pub async fn test_all() {
     test_family_mtu::test_all();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_hop_mtu::test_hop_mtu_sizes_by_the_next_hop().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    Box::pin(test_inbound_relay_dial_info::test_all()).await;
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_mtu_probe_processor::test_all().await;
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

@@ -305,7 +305,7 @@ impl NativeNetwork {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) fn add_udp_interface_dial_info(
+    pub(in crate::network_manager) fn add_udp_interface_dial_info(
         &self,
         config: Arc<VeilidConfig>,
         bound_addresses: &[SocketAddr],
@@ -387,7 +387,7 @@ impl NativeNetwork {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) fn add_ws_interface_dial_info(
+    pub(in crate::network_manager) fn add_ws_interface_dial_info(
         &self,
         config: Arc<VeilidConfig>,
         bound_addresses: &[SocketAddr],
@@ -491,7 +491,7 @@ impl NativeNetwork {
 
     #[cfg(feature = "enable-protocol-wss")]
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) fn add_wss_interface_dial_info(
+    pub(in crate::network_manager) fn add_wss_interface_dial_info(
         &self,
         config: Arc<VeilidConfig>,
         bound_addresses: &[SocketAddr],
@@ -580,7 +580,7 @@ impl NativeNetwork {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) fn add_tcp_interface_dial_info(
+    pub(in crate::network_manager) fn add_tcp_interface_dial_info(
         &self,
         config: Arc<VeilidConfig>,
         bound_addresses: &[SocketAddr],

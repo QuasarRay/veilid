@@ -500,7 +500,7 @@ impl NativeNetwork {
         }
     }
 
-    pub(super) fn add_wt_interface_dial_info(
+    pub(in crate::network_manager) fn add_wt_interface_dial_info(
         &self,
         bound_addresses: &[SocketAddr],
         network_state: &mut NetworkState,
@@ -537,7 +537,7 @@ impl NativeNetwork {
         Ok(())
     }
 
-    pub(super) fn add_wt_url_dial_info(
+    pub(in crate::network_manager) fn add_wt_url_dial_info(
         &self,
         bound_addresses: &[SocketAddr],
         network_state: &mut NetworkState,

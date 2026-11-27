@@ -32,7 +32,7 @@ pub struct AddressConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct RoutingDomainNetworkState {
+pub(in crate::network_manager) struct RoutingDomainNetworkState {
     /// If we are detecting address changes for this routing domain
     pub detect_address_changes: bool,
     /// The calculated routing domain network config
@@ -44,7 +44,7 @@ pub(super) struct RoutingDomainNetworkState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct NetworkState {
+pub(in crate::network_manager) struct NetworkState {
     /// The calculated protocol configuration for inbound/outbound protocols
     pub protocol_config: ProtocolConfig,
     /// The calculated address configuration for IPV4/IPV6 on local interfaces
@@ -153,6 +153,11 @@ impl NetworkState {
             );
         };
 
+        // A node that requires an inbound relay publishes none of its own PublicInternet addresses
+        if self.require_inbound_relay && routing_domain == RoutingDomain::PublicInternet {
+            return Ok(());
+        }
+
         // It this is a static public address and we are not detecting address changes
         // then we can add this directly to the public internet routing domain
         // (otherwise we will add this during the 'confirm dial info' process)
@@ -183,6 +188,11 @@ impl NetworkState {
                 dial_info_detail
             );
         };
+
+        // A node that requires an inbound relay publishes none of its own PublicInternet addresses
+        if self.require_inbound_relay && routing_domain == RoutingDomain::PublicInternet {
+            return Ok(());
+        }
 
         if let Some(routing_domain_network_state) =
             self.routing_domain_network_states.get_mut(&routing_domain)

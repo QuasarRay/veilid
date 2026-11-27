@@ -132,6 +132,10 @@ cfg_if! {
         #[cfg(not(feature = "mock-api"))]
         run_test!(common test_bootstrap);
 
+        // One node that requires an inbound relay must not publish its own addresses
+        #[cfg(not(feature = "mock-api"))]
+        run_test!(common test_require_inbound_relay);
+
         #[cfg(all(feature = "enable-protocol-webtransport", not(feature = "mock-api")))]
         run_test!(common test_webtransport_e2e);
         #[cfg(feature = "enable-protocol-webtransport")]
