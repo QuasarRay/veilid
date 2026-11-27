@@ -50,6 +50,17 @@ pub(super) fn connection_table_remote(peer_address: PeerAddress) -> ConnectionTa
     )
 }
 
+/// The protocols whose connections fill the slots a connection of `protocol_type` fills
+pub(super) fn connection_table_slot_protocols(protocol_type: ProtocolType) -> ProtocolTypeSet {
+    ProtocolTypeSet::all()
+        .iter()
+        .filter(|pt| {
+            pt.low_level_protocol_type() == protocol_type.low_level_protocol_type()
+                && pt.sequence_ordering() == protocol_type.sequence_ordering()
+        })
+        .collect()
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]

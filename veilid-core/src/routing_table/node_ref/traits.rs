@@ -213,9 +213,12 @@ pub(crate) trait NodeRefCommonTrait:
         self.operate_mut(|e| e.clear_last_flows(self.dial_info_filter()))
     }
 
-    fn set_last_flow(&self, flow: Flow, ts: Timestamp) {
+    /// Records a flow the node was heard on or reached over, which clears the failure of every
+    /// Direct method whose dial info `reaches` says the flow reaches
+    fn set_last_flow(&self, flow: Flow, ts: Timestamp, reaches: impl Fn(&DialInfo) -> bool) {
         let (best_node_id, flow) = self.operate_mut(|e| {
             e.set_last_flow(flow, ts);
+            e.clear_direct_failures_where(reaches);
             let best_node_id = e.best_node_id();
             (best_node_id, flow)
         });

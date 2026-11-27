@@ -1,5 +1,5 @@
 mod igd_manager;
-mod low_level_protocol_tcp;
+pub(in crate::network_manager) mod low_level_protocol_tcp;
 mod low_level_protocol_udp;
 mod mtu_detection;
 pub(in crate::network_manager) mod network_state;
@@ -378,13 +378,15 @@ impl PlatformNetwork for NativeNetwork {
                             .await
                             .wrap_err("send message failure")?);
                     }
+                    // Dropped right after the send, and a reset can reach the peer before it reads
                     ProtocolType::TCP => {
                         let peer_socket_addr = dial_info.to_socket_addr();
                         let pnc = network_result_try!(RawTcpProtocolHandler::connect(
                             self.registry(),
                             None,
                             peer_socket_addr,
-                            connect_timeout_ms
+                            connect_timeout_ms,
+                            TcpClose::Graceful
                         )
                         .await
                         .wrap_err("connect failure")?);
@@ -395,7 +397,8 @@ impl PlatformNetwork for NativeNetwork {
                             self.registry(),
                             None,
                             dial_info,
-                            connect_timeout_ms
+                            connect_timeout_ms,
+                            TcpClose::Graceful
                         )
                         .await
                         .wrap_err("connect failure")?);
@@ -407,7 +410,8 @@ impl PlatformNetwork for NativeNetwork {
                             self.registry(),
                             None,
                             dial_info,
-                            connect_timeout_ms
+                            connect_timeout_ms,
+                            TcpClose::Graceful
                         )
                         .await
                         .wrap_err("connect failure")?);
@@ -551,6 +555,7 @@ impl PlatformNetwork for NativeNetwork {
                                     None,
                                     peer_socket_addr,
                                     connect_timeout_ms,
+                                    TcpClose::Reset,
                                 )
                                 .await
                                 .wrap_err("connect failure")?
@@ -560,6 +565,7 @@ impl PlatformNetwork for NativeNetwork {
                                 None,
                                 dial_info,
                                 connect_timeout_ms,
+                                TcpClose::Reset,
                             )
                             .await
                             .wrap_err("connect failure")?,
@@ -569,6 +575,7 @@ impl PlatformNetwork for NativeNetwork {
                                 None,
                                 dial_info,
                                 connect_timeout_ms,
+                                TcpClose::Reset,
                             )
                             .await
                             .wrap_err("connect failure")?,

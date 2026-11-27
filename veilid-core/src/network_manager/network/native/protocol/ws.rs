@@ -356,6 +356,7 @@ impl WebsocketProtocolHandler {
         local_address: Option<SocketAddr>,
         dial_info: DialInfo,
         timeout_ms: u32,
+        close: TcpClose,
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         // Split dial info up
         let (tls, scheme) = match dial_info {
@@ -396,6 +397,7 @@ impl WebsocketProtocolHandler {
         )
         .await
         .folded()?);
+        close.apply(&tcp_stream)?;
         let segment_size = tcp_stream_mss(&tcp_stream).ok();
 
         // See what local address we ended up with

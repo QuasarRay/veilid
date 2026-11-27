@@ -1661,11 +1661,21 @@ impl NetworkManager {
 
     /// Record the last flow for a peer in the routing table and the connection table appropriately
     pub(super) fn set_last_flow(&self, node_ref: NodeRef, flow: Flow, timestamp: Timestamp) {
-        // Set the last flow on the routing table entry
-        node_ref.set_last_flow(flow, timestamp);
-
         // Get the routing domain for the flow
-        let Some(routing_domain) = self.routing_table().routing_domain_for_flow(flow) else {
+        let opt_routing_domain = self.routing_table().routing_domain_for_flow(flow);
+
+        // Set the last flow on the routing table entry
+        node_ref.set_last_flow(flow, timestamp, |dial_info| {
+            opt_routing_domain.is_some_and(|routing_domain| {
+                Self::flow_reaches_dial_info(
+                    &self.relay_socket_addresses(routing_domain),
+                    &flow,
+                    dial_info,
+                )
+            })
+        });
+
+        let Some(routing_domain) = opt_routing_domain else {
             // Flow may be dead because of a network change
             veilid_log!(self debug
                 "flow found with no routing domain: {} for {}",
@@ -1744,6 +1754,14 @@ impl NetworkManager {
         if evt.relays_changed {
             self.update_relay_socket_addresses(evt.routing_domain);
         }
+    }
+
+    /// The socket addresses we relay through and ping our relays at in a routing domain
+    fn relay_socket_addresses(&self, routing_domain: RoutingDomain) -> Arc<HashSet<SocketAddress>> {
+        self.relay_socket_addresses
+            .get(&routing_domain)
+            .map(|addresses| addresses.load_full())
+            .unwrap_or_default()
     }
 
     /// Store the socket addresses we relay through and ping our relays at in this domain

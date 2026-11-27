@@ -1311,6 +1311,12 @@ impl BucketEntryInner {
         self.contact_method_failures.get(cm).copied()
     }
 
+    /// Removes the failure of every Direct method whose dial info `works` vouches for
+    pub fn clear_direct_failures_where(&mut self, works: impl Fn(&DialInfo) -> bool) {
+        self.contact_method_failures
+            .retain(|cm, _| !matches!(cm, ContactMethod::Direct { target_di } if works(target_di)));
+    }
+
     ////////////////////////////////////////////////////////////////////////
     // Geolocation
     ////////////////////////////////////////////////////////////////////////

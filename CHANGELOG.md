@@ -56,6 +56,10 @@
   - A detach no longer counts toward PublicInternet readiness, relay or route flapping, and the reattach after it no longer purges connections as if the node had been offline.
   - A transaction's End no longer waits out its timeout and retries forever when a Set's late answer lands before the Set's own result is recorded.
   - A direct send reuses a peer's live connection or UDP flow from the peer's address on any port, so a node behind a port forward is not dialed a second time on its published port.
+  - A dial info validator closes the TCP, WS or WSS connection that carried its receipt with a FIN instead of a reset, so the node being validated reads the receipt.
+  - The TCP listener reads a connection its peer wrote to and reset before the accept, so a receipt from an older validator is not dropped unread.
+  - A direct send reuses a peer's live connection on any protocol that shares the picked dial info's low-level protocol and ordering, so a fallback to WS does not open a second connection beside a TCP one.
+  - A flow recorded from a peer's address clears the failures of its direct dial info on that listener, so sends return to the preferred protocol there when the peer comes back.
 - veilid-core-optimized:
   - Cryptography dependency updates: chacha20 0.10.2 (0.10.1 was yanked), ctutils 0.4.8 (RUSTSEC-2026-0385), argon2 0.6.0, blake2 0.11.0, zeroize 1.9.1, sha2 0.11.1 and hpke 0.15.1.
   - hpke 0.15 writes DHKEM(X25519) secret keys in clamped form, so KEM keypairs generated from this release differ in form from earlier ones; both forms open the same sealed data.

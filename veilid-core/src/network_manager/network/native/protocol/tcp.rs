@@ -209,6 +209,7 @@ impl RawTcpProtocolHandler {
         local_address: Option<SocketAddr>,
         remote_address: SocketAddr,
         timeout_ms: u32,
+        close: TcpClose,
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         // Non-blocking connect to remote address
         let tcp_stream = network_result_try!(connect_async_tcp_stream(
@@ -219,6 +220,7 @@ impl RawTcpProtocolHandler {
         )
         .await
         .folded()?);
+        close.apply(&tcp_stream)?;
         let segment_size = tcp_stream_mss(&tcp_stream).ok();
 
         // See what local address we ended up with and turn this into a stream

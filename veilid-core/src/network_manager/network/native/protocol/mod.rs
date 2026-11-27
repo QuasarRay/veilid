@@ -8,6 +8,25 @@ pub mod ws;
 use super::*;
 use std::io;
 
+/// How an outbound TCP stream ends when it is dropped
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TcpClose {
+    /// A reset at once, which keeps the shared listen port out of TIME_WAIT
+    Reset,
+    /// A FIN after the kernel delivers everything written, for a send whose reply nobody reads
+    Graceful,
+}
+
+impl TcpClose {
+    /// Sockets are created to reset, so only `Graceful` changes one
+    pub fn apply(self, tcp_stream: &TcpStream) -> io::Result<()> {
+        match self {
+            Self::Reset => Ok(()),
+            Self::Graceful => set_tcp_stream_linger(tcp_stream, None),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) enum NativeProtocolNetworkConnection {
     //    Dummy(DummyNetworkConnection),
@@ -125,6 +144,7 @@ impl NativeProtocolNetworkConnection {
                     local_address,
                     dial_info.to_socket_addr(),
                     timeout_ms,
+                    TcpClose::Reset,
                 )
                 .await
             }
@@ -134,6 +154,7 @@ impl NativeProtocolNetworkConnection {
                     local_address,
                     dial_info,
                     timeout_ms,
+                    TcpClose::Reset,
                 )
                 .await
             }
@@ -144,6 +165,7 @@ impl NativeProtocolNetworkConnection {
                     local_address,
                     dial_info,
                     timeout_ms,
+                    TcpClose::Reset,
                 )
                 .await
             }

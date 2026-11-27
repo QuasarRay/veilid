@@ -82,16 +82,16 @@ impl NativeNetwork {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    async fn tcp_acceptor(
+    pub(in crate::network_manager) async fn tcp_acceptor(
         self,
-        tcp_stream: io::Result<TcpStream>,
+        accepted: io::Result<(TcpStream, SocketAddr)>,
         consecutive_accept_errors: Arc<AtomicUsize>,
         listener_state: Arc<RwLock<ListenerState>>,
         connection_manager: ConnectionManager,
         connection_initial_timeout_ms: u32,
         tls_connection_initial_timeout_ms: u32,
     ) {
-        let tcp_stream = match tcp_stream {
+        let (tcp_stream, peer_addr) = match accepted {
             Ok(v) => {
                 consecutive_accept_errors.store(0, Ordering::Relaxed);
                 v
@@ -121,13 +121,6 @@ impl NativeNetwork {
         // Limit the number of connections from the same IP address
         // and the number of total connections
         // XXX limiting here instead for connection table? may be faster and avoids tls negotiation
-        let peer_addr = match tcp_stream.peer_addr() {
-            Ok(addr) => addr,
-            Err(e) => {
-                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to get peer address: {}", e);
-                return;
-            }
-        };
         // Check to see if it is punished
         if self
             .network_manager()
@@ -154,15 +147,14 @@ impl NativeNetwork {
             }
         };
 
+        // A socket its peer wrote to and reset takes no options, and still holds what was written
         if let Err(e) = set_tcp_stream_linger(&tcp_stream, Some(core::time::Duration::from_secs(0)))
         {
             veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Couldn't set TCP linger: {} on {:?} -> {:?}", e, peer_addr, local_addr);
-            return;
         }
 
         if let Err(e) = tcp_stream.set_nodelay(true) {
             veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Couldn't set TCP nodelay: {} on {:?} -> {:?}", e, peer_addr, local_addr);
-            return;
         }
 
         let segment_size = tcp_stream_mss(&tcp_stream).ok();
@@ -291,17 +283,20 @@ impl NativeNetwork {
             // moves listener object in and get incoming iterator
             // when this task exists, the listener will close the socket
 
-            let incoming_stream = async_tcp_listener_incoming(listener);
+            // accept() gives the peer address, which a socket the peer already reset cannot
+            let incoming_stream = futures_util::stream::unfold(listener, |listener| async move {
+                Some((listener.accept().await, listener))
+            });
 
             let _ = incoming_stream
-                .for_each_concurrent(None, |tcp_stream| {
+                .for_each_concurrent(None, |accepted| {
                     let this = this.clone();
                     let listener_state = listener_state.clone();
                     let connection_manager = connection_manager.clone();
                     let consecutive_accept_errors = consecutive_accept_errors.clone();
                     Self::tcp_acceptor(
                         this,
-                        tcp_stream,
+                        accepted,
                         consecutive_accept_errors,
                         listener_state,
                         connection_manager,

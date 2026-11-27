@@ -1,4 +1,5 @@
 use super::*;
+use connection_table::{connection_table_remote, connection_table_slot_protocols};
 use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("net");
@@ -950,28 +951,34 @@ impl NetworkManager {
         }
     }
 
-    /// The newest live flow to the dial info's address on any port; a relayed envelope leaves our
+    /// Whether `flow` reaches the listener `dial_info` names: it fills the dial info's connection
+    /// table slot, or would at the same address on another port. A relayed envelope leaves our
     /// relay's flow under its sender, so our relays' flows count only at their own dial info
+    pub(super) fn flow_reaches_dial_info(
+        relay_socket_addresses: &HashSet<SocketAddress>,
+        flow: &Flow,
+        dial_info: &DialInfo,
+    ) -> bool {
+        let (low_level, ordering, remote) = connection_table_remote(dial_info.peer_address());
+        let (flow_low_level, flow_ordering, flow_remote) = connection_table_remote(flow.remote());
+        (flow_low_level, flow_ordering) == (low_level, ordering)
+            && (flow_remote == remote
+                // Our relay is reached only at its dial info, where its connection is protected
+                || (flow_remote.address() == remote.address()
+                    && !relay_socket_addresses.contains(&remote)
+                    && !relay_socket_addresses.contains(&flow_remote)))
+    }
+
+    /// The newest live flow that reaches the dial info's listener
     fn last_direct_flow(
         &self,
         routing_domain: RoutingDomain,
         node_ref: &FilteredNodeRef,
         dial_info: &DialInfo,
     ) -> Option<Flow> {
-        let remote = dial_info.socket_address();
-        let relay_socket_addresses = self
-            .relay_socket_addresses
-            .get(&routing_domain)
-            .map(|addresses| addresses.load_full())
-            .unwrap_or_default();
-        // Our relay is reached only at its dial info, where its connection is protected
-        let any_port = !relay_socket_addresses.contains(&remote);
+        let relay_socket_addresses = self.relay_socket_addresses(routing_domain);
         node_ref.last_flow_where(|flow| {
-            let flow_remote = flow.remote_address();
-            *flow_remote == remote
-                || (any_port
-                    && flow_remote.address() == remote.address()
-                    && !relay_socket_addresses.contains(flow_remote))
+            Self::flow_reaches_dial_info(&relay_socket_addresses, flow, dial_info)
         })
     }
 
@@ -992,8 +999,12 @@ impl NetworkManager {
             return Ok(NetworkResult::no_connection_other("no routing domain"));
         };
         let node_ref = destination_node_ref.unfiltered();
-        let filtered_node_ref =
-            node_ref.custom_filtered(NodeRefFilter::from(dial_info.make_filter()));
+        // A connection on any protocol of the dial info's connection table slot carries the send
+        let filtered_node_ref = node_ref.custom_filtered(NodeRefFilter::from(
+            DialInfoFilter::all()
+                .with_protocol_type_set(connection_table_slot_protocols(dial_info.protocol_type()))
+                .with_address_type(dial_info.address_type()),
+        ));
 
         let opt_last_flow = self
             .last_direct_flow(routing_domain, &filtered_node_ref, &dial_info)
@@ -1153,7 +1164,7 @@ impl NetworkManager {
     ///   2. this peer's transport failing (per-edge evidence)
     ///   3. address type, IPv4 first
     ///   4. last failure time, stalest first
-    fn pick_contact_method(
+    pub(super) fn pick_contact_method(
         &self,
         target_node_ref: FilteredNodeRef,
         contact_methods: Vec<ContactMethod>,

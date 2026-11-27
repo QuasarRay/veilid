@@ -12,6 +12,8 @@ mod test_connection_table;
 #[cfg(not(target_arch = "wasm32"))]
 mod test_dial_info_validators;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_direct_flow_reuse;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod test_egress_change;
 mod test_envelope_timestamps;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -39,6 +41,8 @@ mod test_protocol_type;
     )
 ))]
 mod test_shared_socket_fragmentation;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_tcp_one_shot_send;
 // rcgen, which makes the test certificates, comes with WebTransport
 #[cfg(all(
     feature = "enable-protocol-wss",
@@ -122,6 +126,8 @@ pub async fn test_all() {
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_family_mtu::test_all();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_direct_flow_reuse::test_all().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_hop_mtu::test_hop_mtu_sizes_by_the_next_hop().await;
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     Box::pin(test_inbound_relay_dial_info::test_all()).await;
@@ -134,6 +140,8 @@ pub async fn test_all() {
     test_address_family_confirm::test_all();
     #[cfg(not(target_arch = "wasm32"))]
     test_udp_protocol::test_demuxed_recv_reassembles_from_channel().await;
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_tcp_one_shot_send::test_all().await;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     test_ws_mixed_content::test_ws_allowed_from_a_secure_http_page();
     #[cfg(all(feature = "enable-protocol-webtransport", not(target_arch = "wasm32")))]
