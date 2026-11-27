@@ -20,6 +20,18 @@ const RELAY_DEGRADATION_MARGIN: u64 = 2;
 /// Also the anti-herding knob: selection picks at random from this tier, so a wider tier
 /// spreads load across more nodes.
 const RELAY_SELECTION_PERCENTILE: f32 = 75.0;
+/// XXX: relay management runs per logged timing sample, kept until the lazy snapshot is ruled on
+const RELAY_MANAGEMENT_TIMING_RUNS: u64 = 60;
+
+/// XXX: what relay management runs that snapshot the routing table cost, logged at debug
+#[derive(Debug, Default)]
+pub(super) struct RelayManagementTiming {
+    runs: u64,
+    total_us: u64,
+    max_us: u64,
+    snapshot_total_us: u64,
+    max_entries: usize,
+}
 
 impl PublicInternetRoutingDomainController {
     /// Our egress moved, so every incumbent's latency so far was measured from somewhere else:
@@ -245,6 +257,51 @@ impl PublicInternetRoutingDomainController {
         _last_ts: Timestamp,
         cur_ts: Timestamp,
     ) -> EyreResult<()> {
+        let run_start = Timestamp::now();
+        let mut snapshot_sample = None;
+        let res = self.relay_management_run(cur_ts, &mut snapshot_sample);
+        if let Some((snapshot_time, entries)) = snapshot_sample {
+            self.record_relay_management_timing(
+                Timestamp::now().duration_since(run_start),
+                snapshot_time,
+                entries,
+            );
+        }
+        res
+    }
+
+    /// XXX: sample one run, logging a summary every RELAY_MANAGEMENT_TIMING_RUNS runs
+    fn record_relay_management_timing(
+        &self,
+        run_time: TimestampDuration,
+        snapshot_time: TimestampDuration,
+        entries: usize,
+    ) {
+        let summary = {
+            let mut timing = self.relay_management_timing.lock();
+            timing.runs += 1;
+            timing.total_us += run_time.as_u64();
+            timing.max_us = timing.max_us.max(run_time.as_u64());
+            timing.snapshot_total_us += snapshot_time.as_u64();
+            timing.max_entries = timing.max_entries.max(entries);
+            if timing.runs < RELAY_MANAGEMENT_TIMING_RUNS {
+                return;
+            }
+            core::mem::take(&mut *timing)
+        };
+        veilid_log!(self debug "[PublicInternet] relay management timing: {} runs, mean {:#}, max {:#}, snapshot mean {:#}, up to {} entries",
+            summary.runs,
+            TimestampDuration::new(summary.total_us / summary.runs),
+            TimestampDuration::new(summary.max_us),
+            TimestampDuration::new(summary.snapshot_total_us / summary.runs),
+            summary.max_entries);
+    }
+
+    fn relay_management_run(
+        &self,
+        cur_ts: Timestamp,
+        snapshot_sample: &mut Option<(TimestampDuration, usize)>,
+    ) -> EyreResult<()> {
         let routing_table = self.routing_table();
 
         // Get relay requirements if we've reached the state where we can allocate relays meaningfully
@@ -300,8 +357,13 @@ impl PublicInternetRoutingDomainController {
                 )
             };
 
+            let snapshot_start = Timestamp::now();
             let relay_snapshot =
                 routing_table.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
+            *snapshot_sample = Some((
+                Timestamp::now().duration_since(snapshot_start),
+                relay_snapshot.entries().len(),
+            ));
 
             let mut valid_relays = vec![];
             let mut state_updates = vec![];

@@ -152,7 +152,7 @@ impl WebTransportNetworkConnection {
                     let mut stream = send.lock().await;
                     let len = (message.len() as u32).to_be_bytes();
                     if let Err(err) = chunked_write(&inner.session, &mut stream, &len).await {
-                        veilid_log!(registry debug
+                        veilid_log!(registry debug target: "protocol",
                             "WebTransport(wasm): stream length write failed {:?}: {}", flow, err);
                         return Ok(NetworkResult::no_connection(err));
                     }
@@ -219,7 +219,7 @@ impl WebTransportNetworkConnection {
                     let len_buf = match read_exact(&mut stream, STREAM_LEN_PREFIX).await {
                         Ok(Some(b)) => b,
                         Ok(None) => {
-                            veilid_log!(registry debug
+                            veilid_log!(registry debug target: "protocol",
                                 "WebTransport(wasm): stream closed reading length {:?}", flow);
                             return Ok(NetworkResult::no_connection(io::Error::new(
                                 io::ErrorKind::ConnectionReset,
@@ -227,7 +227,7 @@ impl WebTransportNetworkConnection {
                             )))
                         }
                         Err(e) => {
-                            veilid_log!(registry debug
+                            veilid_log!(registry debug target: "protocol",
                                 "WebTransport(wasm): stream length read failed {:?}: {}", flow, e);
                             return Ok(NetworkResult::no_connection(e));
                         }
@@ -265,7 +265,7 @@ impl WebTransportNetworkConnection {
                             Ok(data) => data,
                             Err(e) => {
                                 let err = to_io_error_other(e);
-                                veilid_log!(registry debug
+                                veilid_log!(registry debug target: "protocol",
                                     "WebTransport(wasm): datagram read failed {:?}: {}", flow, err);
                                 return Ok(NetworkResult::no_connection(err));
                             }

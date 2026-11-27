@@ -14,9 +14,11 @@
   - The `network.protocol.webtransport` config section sets `connect`, `listen`, `listen_address`, `path` and `url`.
   - QUIC packets on the shared UDP port leave through a don't-fragment socket of their own, so WebTransport path MTU discovery runs there as on a dedicated port, while RawUDP keeps fragmenting at the interface MTU.
   - WebTransport sessions start at QUIC's 1200-byte minimum, which every path carries, and discover their path up to the UDP interface limit.
+  - A WebTransport session idles out at twice `internal.network.connection_inactivity_timeout_ms`, so veilid's own inactivity close ends it first, and a listener closes an inbound handshake that has not sent its CONNECT within `internal.network.connection_initial_timeout_ms`.
   - WebTransport listens and hole-punches without RawUDP: a WebTransport-only node punches from its own socket and returns the hole-punch receipt over the QUIC session it opens through the hole.
   - WebTransport datagram messages are sized like RawUDP ones, up to the maximum message size.
-  - WebTransport session logs and the `nodeinfo` connection table show each QUIC session's path MTU.
+  - The `nodeinfo` connection table shows each QUIC session's path MTU. WebTransport session opens, ends and path MTU rises log under the `protocol` facility, and a path MTU drop under `net`.
+  - The periodic routing table save logs under `rtab::stats`.
   - The chaos `max_size` cap judges WebTransport frames by the session's QUIC packet size, not the whole message.
   - Published node info carries an expiration, the earliest of its dial infos', and peer info past its expiration is treated as dead.
   - `TimestampDuration::new_hours()` and `new_days()`.
@@ -96,6 +98,7 @@
   - The TypeScript `Target` type is a plain union of its node id and route id forms, and `VALUE_SEQ_NUM_MAX` is a `number`.
   - In a minified app bundle, a thrown error's `name` and `constructor.name` are its class name, such as `VeilidAPIErrorTryAgain`, instead of the short name the minifier gave the class.
   - The TypeScript `VeilidConfig` carries the optional `storage` section, `VeilidConfigRoutingTable.bootstrapProtocols` and `VeilidConfigBlockStore.remoteMaxStorageSpaceMb`.
+  - Always built with WSS, so the `enable-protocol-wss` feature is gone.
 - `check_all.sh` and CI fail when a `Cargo.lock` in the tree pins a yanked crate.
 - Minimum Supported Rust Version (MSRV) is now 1.91.0, which WebTransport's dependencies need.
 

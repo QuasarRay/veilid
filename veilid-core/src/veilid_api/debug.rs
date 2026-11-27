@@ -1357,7 +1357,7 @@ impl VeilidAPI {
         keypairs: Option<String>,
         nodes: Vec<String>,
     ) -> VeilidAPIResult<String> {
-        let Some(lifetime) = parse_record_lifetime(&lifetime) else {
+        let Some(lifetime) = parse_payload_lifetime(&lifetime) else {
             apibail_invalid_argument!("debug_bootstrappayload", "lifetime", lifetime);
         };
         let cache_ttl = ttl.map(|hours| TimestampDuration::new_secs(hours.saturating_mul(3600)));

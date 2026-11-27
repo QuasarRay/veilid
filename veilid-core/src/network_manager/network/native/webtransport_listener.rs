@@ -8,14 +8,7 @@ use super::webtransport_quinn_runtime::{veilid_quinn_runtime, VeilidQuinnUdpSock
 use super::webtransport_state::DedicatedPunchSocket;
 use super::*;
 use futures_rustls::rustls::sign::CertifiedKey;
-use web_transport_quinn::{quinn, Server};
-
-/// Grace period after rejecting a CONNECT with a 404, during which the QUIC connection is
-/// held open so the quinn driver can transmit the response. `Request::reject`
-/// (`web_transport_quinn`) finishes the response stream without waiting for delivery, then
-/// drops its own `Connection` handle; if that is the last live handle, quinn's `Drop` turns
-/// it into an immediate implicit close that can abandon the still-buffered 404.
-const WT_REJECT_FLUSH_GRACE_MS: u32 = 1000;
+use web_transport_quinn::{quinn, Request};
 
 /// Assemble an advertised WebTransport URL from `base`, injecting `inject_port` and
 /// `configured_path` only where `base` leaves them out.
@@ -204,6 +197,7 @@ impl NativeNetwork {
             webtransport::QuicMtuLimit::for_address_type(&self.registry(), AddressType::IPV4);
         let limit_v6 =
             webtransport::QuicMtuLimit::for_address_type(&self.registry(), AddressType::IPV6);
+        let idle_timeout = webtransport::QuicIdleTimeout::for_registry(&self.registry());
         if let WebTransportCertMode::CaSigned(_) = self.webtransport_cert_mode() {
             let cfg = self.config();
             let hostname_ck = load_certified_key(
@@ -214,10 +208,16 @@ impl NativeNetwork {
 
             let v4_ip = self.load_webtransport_ip_certified_key("ipv4");
             let v6_ip = self.load_webtransport_ip_certified_key("ipv6");
-            let v4 = webtransport::build_ca_server_config(hostname_ck.clone(), v4_ip, limit_v4)
-                .wrap_err("failed to build CA-signed webtransport server config (ipv4)")?;
-            let v6 = webtransport::build_ca_server_config(hostname_ck, v6_ip, limit_v6)
-                .wrap_err("failed to build CA-signed webtransport server config (ipv6)")?;
+            let v4 = webtransport::build_ca_server_config(
+                hostname_ck.clone(),
+                v4_ip,
+                limit_v4,
+                idle_timeout,
+            )
+            .wrap_err("failed to build CA-signed webtransport server config (ipv4)")?;
+            let v6 =
+                webtransport::build_ca_server_config(hostname_ck, v6_ip, limit_v6, idle_timeout)
+                    .wrap_err("failed to build CA-signed webtransport server config (ipv6)")?;
             return Ok(Some(WebTransportServerConfigs { v4, v6 }));
         }
         let cert = {
@@ -228,9 +228,9 @@ impl NativeNetwork {
             return Ok(None);
         };
         // One certificate, but each family discovers up to its own limit
-        let v4 = webtransport::build_server_config(&cert, limit_v4)
+        let v4 = webtransport::build_server_config(&cert, limit_v4, idle_timeout)
             .wrap_err("failed to build self-signed webtransport server config (ipv4)")?;
-        let v6 = webtransport::build_server_config(&cert, limit_v6)
+        let v6 = webtransport::build_server_config(&cert, limit_v6, idle_timeout)
             .wrap_err("failed to build self-signed webtransport server config (ipv6)")?;
         Ok(Some(WebTransportServerConfigs { v4, v6 }))
     }
@@ -313,7 +313,9 @@ impl NativeNetwork {
                 .unwrap_or(false)
     }
 
-    pub(super) fn webtransport_current_advertisement(&self) -> CertificateAdvertisement {
+    pub(in crate::network_manager) fn webtransport_current_advertisement(
+        &self,
+    ) -> CertificateAdvertisement {
         self.inner
             .lock()
             .webtransport
@@ -810,24 +812,42 @@ impl NativeNetwork {
             &format!("WebTransport listener {}", local_addr),
             async move {
                 veilid_log!(this trace "WebTransport listener task spawned on {}", local_addr);
-                let mut server = Server::new(endpoint);
                 loop {
-                    let request = match &stop_token {
-                        Some(st) => match server.accept().timeout_at(st.clone()).await {
+                    let incoming = match &stop_token {
+                        Some(st) => match endpoint.accept().timeout_at(st.clone()).await {
                             Ok(r) => r,
                             Err(_) => break,
                         },
-                        None => server.accept().await,
+                        None => endpoint.accept().await,
                     };
-                    let Some(request) = request else {
+                    let Some(incoming) = incoming else {
                         break;
                     };
 
                     let registry = this.registry();
                     let log = this.clone();
-                    let connection_manager = this.network_manager().connection_manager();
                     let expected_path = expected_path.clone();
                     spawn_detached("WebTransport session", async move {
+                        // quinn's idle timeout is too long to bound a stalled handshake
+                        let remote_addr = incoming.remote_address();
+                        let request = match timeout(connection_initial_timeout_ms, async {
+                            let conn = incoming.await?;
+                            Request::accept(conn).await
+                        })
+                        .await
+                        {
+                            Ok(Ok(request)) => request,
+                            Ok(Err(e)) => {
+                                veilid_log!(log debug target: "protocol",
+                                    "WebTransport: handshake from {} failed: {}", remote_addr, e);
+                                return;
+                            }
+                            Err(_) => {
+                                veilid_log!(log debug target: "protocol",
+                                    "WebTransport: handshake from {} not done within {}ms", remote_addr, connection_initial_timeout_ms);
+                                return;
+                            }
+                        };
                         let request_path: String = request
                             .url
                             .path()
@@ -839,11 +859,13 @@ impl NativeNetwork {
                             veilid_log!(log debug
                             "WebTransport: rejecting CONNECT with path {:?} from {} (expected {:?})",
                             request_path, peer_addr, expected_path);
+                            // `reject` drops its own Connection, and a last dropped handle
+                            // closes at once, abandoning the buffered 404
                             let conn = request.conn().clone();
                             let _ = request
                                 .reject(web_transport_quinn::http::StatusCode::NOT_FOUND)
                                 .await;
-                            let _ = timeout(WT_REJECT_FLUSH_GRACE_MS, conn.closed()).await;
+                            let _ = timeout(connection_initial_timeout_ms, conn.closed()).await;
                             return;
                         }
                         let session = match request.ok().await {
@@ -864,6 +886,7 @@ impl NativeNetwork {
                             session.close(0u32, b"close");
                             return;
                         }
+                        let connection_manager = log.network_manager().connection_manager();
                         let Some(address_lock_guard) = connection_manager
                             .acquire_inbound_address_lock(peer_addr)
                             .await
@@ -883,23 +906,17 @@ impl NativeNetwork {
                             Ok(None) => {
                                 veilid_log!(log debug "WebTransport: inbound session from {} could not be classified as a stream or datagram session; closing", peer_addr);
                                 session_close.close(0u32, b"session not classified");
-                                let _ =
-                                    timeout(WT_REJECT_FLUSH_GRACE_MS, session_close.closed()).await;
                                 return;
                             }
                             Err(_) => {
                                 veilid_log!(log debug "WebTransport: inbound session from {} sent no stream or datagram within {}ms; closing", peer_addr, connection_initial_timeout_ms);
-                                // Closing with a capsule resolves a browser peer's `session.closed()`
-                                // promptly, rather than leaving it open until it idles out.
-                                // `Session::close` delivers the capsule from a spawned task, so the
-                                // session is held until `closed()` confirms it went out.
+                                // The close capsule resolves a browser peer's `session.closed()`
+                                // at once; `Session::close` sends it from a task of its own
                                 session_close.close(0u32, b"no stream or datagram");
-                                let _ =
-                                    timeout(WT_REJECT_FLUSH_GRACE_MS, session_close.closed()).await;
                                 return;
                             }
                         };
-                        veilid_log!(log debug
+                        veilid_log!(log debug target: "protocol",
                             "WebTransport: {} session from {} path mtu {} datagram budget {}",
                             conn.flow().protocol_type(), peer_addr, conn.path_mtu(), conn.datagram_budget());
                         // QUIC sizes its own packets; chaos reads the session's path MTU

@@ -640,8 +640,13 @@ impl RoutingTable {
         }
 
         if let Some(saved) = saved {
-            veilid_log!(self debug "saved routing table ({:?}): {} entries, {} written, {} deleted, {} routing domain states written in {:#}",
+            let line = format!("saved routing table ({:?}): {} entries, {} written, {} deleted, {} routing domain states written in {:#}",
                 reason, saved.entries, saved.written, saved.deleted, saved.routing_domain_states, TimestampDuration::since(start_ts));
+            if reason == SaveReason::Periodic {
+                veilid_log!(self debug target: "rtab::stats", "{}", line);
+            } else {
+                veilid_log!(self debug "{}", line);
+            }
         }
     }
 

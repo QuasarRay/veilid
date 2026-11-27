@@ -89,7 +89,8 @@ pub struct NetworkConnectionStats {
 }
 
 impl NetworkConnectionStats {
-    /// Records a QUIC session's path MTU, logging each move after the first
+    /// Records a QUIC session's path MTU, logging each move after the first: a drop under `net`,
+    /// a rise, which is discovery climbing on every new session, under `protocol`
     fn note_path_mtu(
         &mut self,
         registry: &VeilidComponentRegistry,
@@ -99,7 +100,11 @@ impl NetworkConnectionStats {
             return;
         };
         if let Some(prev) = self.path_mtu.filter(|prev| *prev != path_mtu) {
-            veilid_log!(registry debug "path mtu {} -> {} on {:?}", prev, path_mtu, protocol_connection.flow());
+            if path_mtu < prev {
+                veilid_log!(registry debug "path mtu {} -> {} on {:?}", prev, path_mtu, protocol_connection.flow());
+            } else {
+                veilid_log!(registry debug target: "protocol", "path mtu {} -> {} on {:?}", prev, path_mtu, protocol_connection.flow());
+            }
         }
         self.path_mtu = Some(path_mtu);
     }

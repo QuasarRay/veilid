@@ -2,10 +2,12 @@
 //! mapping, so the configured payload is tested here and not only in veilid-core, beside the
 //! config round trips and the operator flags that feed it.
 
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 use crate::server::choose_legacy_hostname;
 use crate::settings::*;
 use clap::Parser as _;
 use std::ffi::OsString;
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -244,7 +246,7 @@ pub fn test_sign_bootstrap_payload_flags() {
     let args = crate::CmdlineArgs::try_parse_from([
         "veilid-server",
         "--sign-bootstrap-payload",
-        "--bootstrap-record-lifetime",
+        "--bootstrap-payload-lifetime",
         "1y6mo",
         "--bootstrap-cache-ttl-hours",
         "12",
@@ -253,7 +255,7 @@ pub fn test_sign_bootstrap_payload_flags() {
     ])
     .expect("should parse");
     assert!(args.sign_bootstrap_payload);
-    assert_eq!(args.bootstrap_record_lifetime.as_deref(), Some("1y6mo"));
+    assert_eq!(args.bootstrap_payload_lifetime.as_deref(), Some("1y6mo"));
     assert_eq!(args.bootstrap_cache_ttl_hours, Some(12));
     assert_eq!(args.node_lines, ["node|AAAA", "@nodes.txt"]);
 
@@ -278,6 +280,7 @@ pub fn test_read_node_lines_expands_files() {
 }
 
 /// Which name the legacy record lines carry, from the operator or from reverse DNS
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 pub fn test_legacy_hostname_choice() {
     let v4: IpAddr = "203.0.113.5".parse().expect("should parse");
     let v6: IpAddr = "2001:db8::5".parse().expect("should parse");
@@ -666,6 +669,7 @@ mod tests {
         test_read_node_lines_expands_files();
     }
 
+    #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
     #[test]
     fn legacy_hostname_choice() {
         test_legacy_hostname_choice();

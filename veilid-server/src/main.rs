@@ -11,6 +11,7 @@ compile_error!("async-std compilation for windows is currently unsupported");
 
 mod client_api;
 mod logs;
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 mod ptr_lookup;
 mod server;
 mod settings;
@@ -155,12 +156,12 @@ pub struct CmdlineArgs {
     /// Signs bootstrap node lines into one payload line and then quits
     ///
     /// The node lines are the positional arguments, or '@FILE' for a file holding one per line. Signing keypairs are read from stdin, one per line, ended by an empty line; without any the payload is unsigned.
-    #[arg(long, requires = "bootstrap_record_lifetime")]
+    #[arg(long, requires = "bootstrap_payload_lifetime")]
     sign_bootstrap_payload: bool,
 
     /// How long the signed payload stays valid: <N>y, <N>mo, <N>d, combinable like 1y6mo (a year is 365 days, a month 30), or 'none'
     #[arg(long, value_name = "LIFETIME", requires = "sign_bootstrap_payload")]
-    bootstrap_record_lifetime: Option<String>,
+    bootstrap_payload_lifetime: Option<String>,
 
     /// Hours a node serves the payload it learned from the network before re-checking its source (default 24)
     #[arg(long, value_name = "HOURS", requires = "sign_bootstrap_payload")]
@@ -561,8 +562,8 @@ fn main() -> EyreResult<()> {
         )
     } else if args.sign_bootstrap_payload {
         let node_lines = read_node_lines(&args.node_lines)?;
-        let Some(lifetime) = args.bootstrap_record_lifetime else {
-            bail!("--bootstrap-record-lifetime is required");
+        let Some(lifetime) = args.bootstrap_payload_lifetime else {
+            bail!("--bootstrap-payload-lifetime is required");
         };
         let keypairs =
             prompt_signing_keypairs("No keypairs specified, the payload will be unsigned.")?;

@@ -115,8 +115,8 @@ fn public_internet_confirmed(registry: &VeilidComponentRegistry) -> bool {
 }
 
 /// A node with a configured public address for every inbound protocol states its dial info
-/// itself: `auto` detects nothing, and an emptied connection table asks for no confirmation,
-/// which a network with no validators yet could not give
+/// itself: `auto` detects nothing, and neither an emptied connection table nor an egress change
+/// asks for a confirmation, which a network with no validators yet could not give
 async fn test_static_public_addresses_need_no_validators() {
     let (update_callback, mut config) = fixture_veilid_core();
     config.network.detect_address_changes = None;
@@ -142,6 +142,8 @@ async fn test_static_public_addresses_need_no_validators() {
         .contains(&RoutingDomain::PublicInternet));
     assert!(public_internet_confirmed(&registry));
     assert!(!net.request_confirm_after_empty_table());
+    assert!(public_internet_confirmed(&registry));
+    assert!(!net.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet));
     assert!(public_internet_confirmed(&registry));
 
     api.shutdown().await;

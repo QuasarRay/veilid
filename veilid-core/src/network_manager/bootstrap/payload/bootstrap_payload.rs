@@ -133,7 +133,7 @@ impl BootstrapPayload {
     not(any(feature = "debug-api", test, feature = "test-util")),
     expect(dead_code)
 )]
-pub fn parse_record_lifetime(s: &str) -> Option<Option<TimestampDuration>> {
+pub fn parse_payload_lifetime(s: &str) -> Option<Option<TimestampDuration>> {
     let s = s.trim().to_ascii_lowercase();
     if s == "none" || s == "0" {
         return Some(None);

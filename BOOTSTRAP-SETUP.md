@@ -164,7 +164,7 @@ Keep the `node|...` line. Collect one from every bootstrap server, then sign the
 Once per network, on a machine holding the signing key:
 
 ```shell
-veilid-server --sign-bootstrap-payload --bootstrap-record-lifetime none 'node|...' 'node|...'
+veilid-server --sign-bootstrap-payload --bootstrap-payload-lifetime none 'node|...' 'node|...'
 ```
 
 Each argument is a node line or `@<file>` naming a file of node lines, one per line. The
@@ -175,7 +175,7 @@ with `bootstrap_keys: []` accepts. The command prints the payload line:
 2|<base64>
 ```
 
-- `--bootstrap-record-lifetime` is required: `none` or `0` for a payload that never expires,
+- `--bootstrap-payload-lifetime` is required: `none` or `0` for a payload that never expires,
   or `1y`, `6mo`, `30d` (combinable; a year is 365 days and a month 30). Nodes stop serving
   a payload at its expiration, so a lifetime makes the network depend on someone re-signing
   in time; with `none` the payload is re-signed only when the bootstrap set changes.
@@ -192,11 +192,10 @@ In `routing_table:` on every bootstrap server:
 - `bootstrap_records: ['2|<the payload line, exactly as printed>']`
 
 A bootstrap holds the payload from its config as soon as it starts and serves it once it has
-published its node info, and joins the network from the payload's nodes without resolving
-`bootstrap`. A node with an empty
-`bootstrap_records` learns the payload from the bootstraps. A newer payload replaces an older
-one wherever it arrives, so adding or replacing a bootstrap means a new node line, a new
-signing, and a paste into every bootstrap.
+published its node info. When it joins, it asks the payload's nodes as well as its `bootstrap`
+entries. A node with an empty `bootstrap_records` learns the payload from the bootstraps. A newer
+payload replaces an older one wherever it arrives, so adding or replacing a bootstrap means a new
+node line, a new signing, and a paste into every bootstrap.
 
 ### Start the Veilid service
 

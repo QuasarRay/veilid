@@ -235,6 +235,8 @@ pub(crate) struct StorageManager {
     /// The table store's free space failed to measure last time, so the failure is logged once
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     storage_pool_unmeasured: AtomicBool,
+    /// The remote record store's limit failed to update last time, so the failure warns once
+    storage_limits_stale: AtomicBool,
 
     // Background processes
     /// Persists the manager metadata when its schedule says so
@@ -367,6 +369,7 @@ impl StorageManager {
             freeze_recovery: Mutex::new(FreezeRecovery::new(platform_may_freeze())),
             #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             storage_pool_unmeasured: AtomicBool::new(false),
+            storage_limits_stale: AtomicBool::new(false),
 
             save_metadata_task: TickTask::new(
                 "save_metadata_task",

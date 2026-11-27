@@ -72,11 +72,29 @@ impl NetworkManager {
         newest
     }
 
-    /// What the config says this node serves, payload and legacy lines, with no lookup
-    pub fn config_bootstrap_cache(&self) -> BootstrapCache {
-        let cache = self
-            .config_bootstrap_payload()
-            .map(|payload| BootstrapCache::from_payload(&payload, None))
+    /// The config's `bootstrap` entries that name something to ask; the rest are warned about
+    pub fn config_bootstrap_entries(&self) -> Vec<String> {
+        let entries = self.config().network.routing_table.bootstrap.clone();
+        entries
+            .into_iter()
+            .filter(|entry| match check_bootstrap_entry(entry) {
+                Ok(()) => true,
+                Err(e) => {
+                    veilid_log!(self warn "Ignoring invalid bootstrap entry {}: {}", entry, e);
+                    false
+                }
+            })
+            .collect()
+    }
+
+    /// What the config says this node serves, the configured payload and legacy lines, with no
+    /// lookup
+    pub fn config_bootstrap_cache(
+        &self,
+        payload: Option<&SignedBootstrapPayload>,
+    ) -> BootstrapCache {
+        let cache = payload
+            .map(|payload| BootstrapCache::from_payload(payload, None))
             .unwrap_or_default();
         #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
         let cache = {
@@ -86,17 +104,5 @@ impl NetworkManager {
             cache
         };
         cache
-    }
-
-    /// The configured payload's nodes, asked directly as a bootstrap source
-    pub fn config_bootstrap(&self) -> Vec<BootstrapNode> {
-        let Some(payload) = self.config_bootstrap_payload() else {
-            return vec![];
-        };
-        if payload.payload().is_expired(Timestamp::now()) {
-            veilid_log!(self warn "The configured bootstrap payload has expired");
-            return vec![];
-        }
-        payload.payload().bootstrap_nodes().to_vec()
     }
 }

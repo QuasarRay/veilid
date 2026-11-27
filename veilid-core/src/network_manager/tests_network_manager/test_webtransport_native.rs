@@ -90,7 +90,8 @@ fn spawn_echo_server(
     registry: VeilidComponentRegistry,
     cert: &ManagedCertificate,
 ) -> io::Result<(SocketAddr, quinn::Endpoint)> {
-    let server_config = build_server_config(cert, QuicMtuLimit::default())?;
+    let server_config =
+        build_server_config(cert, QuicMtuLimit::default(), QuicIdleTimeout::default())?;
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -166,7 +167,9 @@ pub async fn serve_wt_echo_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).expect("server config");
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default())
+            .expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -245,7 +248,9 @@ pub async fn serve_wt_stress_for_browser() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).expect("server config");
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default())
+            .expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
@@ -526,7 +531,10 @@ pub async fn test_shared_port_demux_coexistence() {
 
     let endpoint = quinn::Endpoint::new_with_abstract_socket(
         webtransport_endpoint_config(),
-        Some(build_server_config(&cert, QuicMtuLimit::default()).unwrap()),
+        Some(
+            build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default())
+                .unwrap(),
+        ),
         demux,
         veilid_quinn_runtime(),
     )
@@ -605,7 +613,8 @@ pub async fn test_accept_session_classifies_and_roundtrips() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -696,7 +705,8 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -725,8 +735,12 @@ pub async fn test_accept_session_prefers_stream_over_queued_datagram() {
         *server_classified.lock().unwrap() = Some(conn.flow().protocol_type());
     });
 
-    let client_config =
-        build_client_config(vec![cert.hash], QuicMtuLimit::default()).expect("client config");
+    let client_config = build_client_config(
+        vec![cert.hash],
+        QuicMtuLimit::default(),
+        QuicIdleTimeout::default(),
+    )
+    .expect("client config");
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
     let client = web_transport_quinn::Client::new(client_ep, client_config);
@@ -771,7 +785,8 @@ pub async fn test_connect_reuses_supplied_client_endpoint() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -861,7 +876,8 @@ pub async fn test_accept_wildcard_bind_resolves_local_ip() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
@@ -951,7 +967,8 @@ pub async fn test_flush_and_close_delivers_before_drop() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -1026,7 +1043,8 @@ pub async fn test_dropped_connection_closes_session() {
     )
     .expect("generate cert");
 
-    let server_config = build_server_config(&cert, QuicMtuLimit::default()).unwrap();
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), QuicIdleTimeout::default()).unwrap();
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -1131,9 +1149,13 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
         CertificateDer::from(ca_cert.der().to_vec()),
     ];
     let leaf_key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
-    let server_config =
-        build_server_config_from_chain(cert_chain, leaf_key_der, QuicMtuLimit::default())
-            .expect("server config");
+    let server_config = build_server_config_from_chain(
+        cert_chain,
+        leaf_key_der,
+        QuicMtuLimit::default(),
+        QuicIdleTimeout::default(),
+    )
+    .expect("server config");
 
     let endpoint = test_server_endpoint(
         server_config,
@@ -1168,8 +1190,12 @@ pub async fn test_webtransport_ca_signed_roundtrip() {
     root_store
         .add(CertificateDer::from(ca_cert.der().to_vec()))
         .expect("add ca root");
-    let client_config = build_client_config_with_root_store(root_store, QuicMtuLimit::default())
-        .expect("ca client config");
+    let client_config = build_client_config_with_root_store(
+        root_store,
+        QuicMtuLimit::default(),
+        QuicIdleTimeout::default(),
+    )
+    .expect("ca client config");
 
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
@@ -1266,9 +1292,12 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
 
             let mut root_store = RootCertStore::empty();
             root_store.add(ca_root).expect("add ca root");
-            let client_config =
-                build_client_config_with_root_store(root_store, QuicMtuLimit::default())
-                    .expect("ca client config");
+            let client_config = build_client_config_with_root_store(
+                root_store,
+                QuicMtuLimit::default(),
+                QuicIdleTimeout::default(),
+            )
+            .expect("ca client config");
             let client_ep =
                 veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
                     .expect("client endpoint");
@@ -1279,15 +1308,25 @@ pub async fn test_webtransport_ca_resolver_serves_ip_cert_for_ip_literal() {
         }
     };
 
-    let with_ip = build_ca_server_config(hostname_ck.clone(), Some(ip_ck), QuicMtuLimit::default())
-        .expect("config with ip");
+    let with_ip = build_ca_server_config(
+        hostname_ck.clone(),
+        Some(ip_ck),
+        QuicMtuLimit::default(),
+        QuicIdleTimeout::default(),
+    )
+    .expect("config with ip");
     assert!(
         connect_ip_literal(with_ip).await,
         "IP-literal handshake should succeed when the IP-SAN cert is served for no-SNI"
     );
 
-    let without_ip = build_ca_server_config(hostname_ck, None, QuicMtuLimit::default())
-        .expect("config hostname only");
+    let without_ip = build_ca_server_config(
+        hostname_ck,
+        None,
+        QuicMtuLimit::default(),
+        QuicIdleTimeout::default(),
+    )
+    .expect("config hostname only");
     assert!(
         !connect_ip_literal(without_ip).await,
         "IP-literal handshake should fail when only the DNS-SAN hostname cert is served"
@@ -1334,7 +1373,8 @@ pub async fn test_webtransport_live_cert_swap() {
     .expect("cert B");
     assert_ne!(cert_a.hash, cert_b.hash, "test needs distinct certs");
     endpoint.set_server_config(Some(
-        build_server_config(&cert_b, QuicMtuLimit::default()).expect("server config B"),
+        build_server_config(&cert_b, QuicMtuLimit::default(), QuicIdleTimeout::default())
+            .expect("server config B"),
     ));
 
     let di_b =
@@ -1422,8 +1462,13 @@ pub async fn test_webtransport_ca_cert_file_reload() {
         let cert_chain = NativeNetwork::load_certs(cert_path).expect("read cert chain");
         let mut keys = NativeNetwork::load_keys(key_path).expect("read keys");
         assert!(!keys.is_empty(), "no private key in {}", key_path.display());
-        build_server_config_from_chain(cert_chain, keys.remove(0), QuicMtuLimit::default())
-            .expect("server config from files")
+        build_server_config_from_chain(
+            cert_chain,
+            keys.remove(0),
+            QuicMtuLimit::default(),
+            QuicIdleTimeout::default(),
+        )
+        .expect("server config from files")
     }
 
     let registry = mock_registry::init("wt_ca_reload").await;
@@ -1480,9 +1525,11 @@ pub async fn test_webtransport_ca_cert_file_reload() {
         {
             return false;
         }
-        let Ok(client_config) =
-            build_client_config_with_root_store(root_store, QuicMtuLimit::default())
-        else {
+        let Ok(client_config) = build_client_config_with_root_store(
+            root_store,
+            QuicMtuLimit::default(),
+            QuicIdleTimeout::default(),
+        ) else {
             return false;
         };
         let Ok(client_ep) =
@@ -1582,7 +1629,8 @@ pub async fn test_webtransport_shared_server_endpoint_connects_out() {
     )
     .expect("cert A");
     let a_endpoint = test_server_endpoint(
-        build_server_config(&cert_a, QuicMtuLimit::default()).expect("server config A"),
+        build_server_config(&cert_a, QuicMtuLimit::default(), QuicIdleTimeout::default())
+            .expect("server config A"),
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
     )
     .expect("server endpoint A");
@@ -1621,7 +1669,8 @@ fn spawn_parking_server(
     cert: &ManagedCertificate,
     transport: quinn::TransportConfig,
 ) -> io::Result<SocketAddr> {
-    let mut server_config = build_server_config(cert, QuicMtuLimit::default())?;
+    let mut server_config =
+        build_server_config(cert, QuicMtuLimit::default(), QuicIdleTimeout::default())?;
     server_config.transport_config(Arc::new(transport));
     let endpoint = test_server_endpoint(
         server_config,
@@ -1832,6 +1881,7 @@ fn spawn_demux_echo(
     let server_config = build_server_config(
         cert,
         QuicMtuLimit::for_address_type(&registry, AddressType::IPV4),
+        QuicIdleTimeout::default(),
     )?;
     let endpoint = quinn::Endpoint::new_with_abstract_socket(
         webtransport_endpoint_config(),
@@ -1963,8 +2013,13 @@ pub async fn test_handshake_flight_stays_at_the_quic_minimum() {
 
     // Both ends may grow to a full ethernet payload
     let mtu_limit = QuicMtuLimit(1472);
-    let server_config =
-        build_server_config_from_chain(cert_chain, leaf_key_der, mtu_limit).expect("server config");
+    let server_config = build_server_config_from_chain(
+        cert_chain,
+        leaf_key_der,
+        mtu_limit,
+        QuicIdleTimeout::default(),
+    )
+    .expect("server config");
     let endpoint = test_server_endpoint(
         server_config,
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
@@ -2012,7 +2067,8 @@ pub async fn test_handshake_flight_stays_at_the_quic_minimum() {
         .add(CertificateDer::from(root_cert.der().to_vec()))
         .expect("add root");
     let client_config =
-        build_client_config_with_root_store(root_store, mtu_limit).expect("client config");
+        build_client_config_with_root_store(root_store, mtu_limit, QuicIdleTimeout::default())
+            .expect("client config");
     let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .expect("client endpoint");
     let connecting = client_ep
@@ -2144,6 +2200,127 @@ pub async fn test_webtransport_listens_and_punches_without_raw_udp() {
     mock_registry::terminate(registry).await;
 }
 
+/// A session that carries nothing idles out at twice the configured inactivity timeout, not at
+/// quinn's own 30 s default.
+pub async fn test_idle_session_times_out_at_twice_the_inactivity_timeout() {
+    let cert = CertificateManager::generate_certificate(
+        &webtransport_certificate_profile(TimestampDuration::new_secs(7 * 24 * 60 * 60)),
+        Timestamp::now(),
+    )
+    .expect("generate cert");
+    let idle_timeout = QuicIdleTimeout::from_inactivity_timeout_ms(250);
+    let server_config =
+        build_server_config(&cert, QuicMtuLimit::default(), idle_timeout).expect("server config");
+    let endpoint = test_server_endpoint(
+        server_config,
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+    )
+    .expect("server endpoint");
+    let server_addr = endpoint.local_addr().expect("server addr");
+    spawn_detached("wt idle accept", async move {
+        while let Some(incoming) = endpoint.accept().await {
+            spawn_detached("wt idle session", async move {
+                if let Ok(connection) = incoming.await {
+                    connection.closed().await;
+                }
+            });
+        }
+    });
+
+    let client_config = build_client_config(vec![cert.hash], QuicMtuLimit::default(), idle_timeout)
+        .expect("client config");
+    let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        .expect("client endpoint");
+    let connecting = client_ep
+        .connect_with(client_config, server_addr, "127.0.0.1")
+        .expect("connect");
+    let connection = match timeout(10_000, connecting).await {
+        Ok(Ok(connection)) => connection,
+        other => panic!("handshake failed: {:?}", other.map(|r| r.err())),
+    };
+
+    let start = Timestamp::now();
+    let reason = timeout(10_000, connection.closed())
+        .await
+        .expect("an idle session must close long before quinn's default");
+    assert!(
+        matches!(reason, quinn::ConnectionError::TimedOut),
+        "the idle timeout closed it, got {reason:?}"
+    );
+    assert!(
+        TimestampDuration::since(start) >= TimestampDuration::new_ms(400),
+        "the idle timeout is twice the inactivity timeout"
+    );
+}
+
+/// The listener ends a connection that finishes its QUIC handshake but never sends the HTTP/3
+/// SETTINGS and CONNECT, within `connection_initial_timeout_ms` and long before quinn's idle
+/// timeout would.
+pub async fn test_listener_bounds_a_stalled_handshake() {
+    let registry = mock_registry::init_with_config("wt_stalled_handshake", |config| {
+        config.network.protocol.udp.enabled = false;
+        config.network.protocol.webtransport.listen = true;
+        config.network.protocol.webtransport.url = None;
+        config.network.protocol.webtransport.listen_address = "127.0.0.1:0".to_owned();
+    })
+    .await;
+    let initial_timeout_ms = registry
+        .config()
+        .internal()
+        .network
+        .connection_initial_timeout_ms;
+    let idle_timeout = QuicIdleTimeout::for_registry(&registry);
+    assert!(
+        u64::from(initial_timeout_ms) * 2 < idle_timeout.0,
+        "the handshake bound must sit well inside the idle timeout for this test to tell them apart"
+    );
+
+    let net = NativeNetwork::new(registry.clone());
+    net.startup_certificate_manager()
+        .await
+        .expect("cert manager");
+    assert!(matches!(
+        net.bind_webtransport_without_udp().expect("bind"),
+        StartupDisposition::Success
+    ));
+    let server_addr = net
+        .webtransport_bound_addresses()
+        .and_then(|addrs| addrs.first().copied())
+        .expect("a bound WebTransport address");
+    let cert_hashes = net.webtransport_current_advertisement().cert_hashes;
+
+    let client_config = build_client_config(cert_hashes, QuicMtuLimit::default(), idle_timeout)
+        .expect("client config");
+    let client_ep = veilid_quinn_client_endpoint(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        .expect("client endpoint");
+    let connecting = client_ep
+        .connect_with(client_config, server_addr, "127.0.0.1")
+        .expect("connect");
+    let connection = match timeout(10_000, connecting).await {
+        Ok(Ok(connection)) => connection,
+        other => panic!("QUIC handshake failed: {:?}", other.map(|r| r.err())),
+    };
+
+    let start = Timestamp::now();
+    let reason = timeout(
+        u32::try_from(idle_timeout.0).unwrap_or(u32::MAX),
+        connection.closed(),
+    )
+    .await
+    .expect("the listener must close a stalled handshake before quinn's idle timeout");
+    assert!(
+        matches!(reason, quinn::ConnectionError::ApplicationClosed(_)),
+        "the listener closed it, got {reason:?}"
+    );
+    assert!(
+        TimestampDuration::since(start)
+            < TimestampDuration::new_ms(u64::from(initial_timeout_ms) * 2),
+        "closed at the handshake bound"
+    );
+
+    mock_registry::terminate(registry).await;
+}
+
 /// The chaos `mtu-blackhole` preset caps packets at 1380. After the chaos fix a WebTransport
 /// session judged by its QUIC packet size (1200 here) passes a 2000-byte message as several
 /// small packets; before the fix the whole 2000 bytes was judged and the stream stalled.
@@ -2195,6 +2372,8 @@ pub async fn test_all() {
     Box::pin(test_handshake_flight_stays_at_the_quic_minimum()).await;
     Box::pin(test_client_endpoint_discovery_stops_at_the_udp_limit()).await;
     Box::pin(test_webtransport_listens_and_punches_without_raw_udp()).await;
+    Box::pin(test_idle_session_times_out_at_twice_the_inactivity_timeout()).await;
+    Box::pin(test_listener_bounds_a_stalled_handshake()).await;
     #[cfg(feature = "debug-api")]
     Box::pin(test_webtransport_frames_pass_the_mtu_blackhole_preset()).await;
     Box::pin(test_shared_port_demux_coexistence()).await;

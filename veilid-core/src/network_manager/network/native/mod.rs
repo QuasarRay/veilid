@@ -972,8 +972,17 @@ impl NativeNetwork {
 }
 
 impl NativeNetwork {
-    /// Whether config forbids detecting PublicInternet dial info, whatever the network does
+    /// Whether PublicInternet dial info is never re-detected, as the first network state settled
+    /// it; config alone decides before that state exists
     fn public_internet_detection_ruled_out(&self) -> bool {
+        {
+            let inner = self.inner.lock();
+            if inner.network_state.is_some() {
+                return !inner
+                    .routing_domain_detect_address_changes
+                    .contains(&RoutingDomain::PublicInternet);
+            }
+        }
         let config = self.config();
         config.network.privacy.require_inbound_relay
             || config.network.detect_address_changes == Some(false)

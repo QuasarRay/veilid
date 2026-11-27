@@ -13,7 +13,7 @@ use super::*;
 
 #[cfg(any(test, feature = "test-util"))]
 pub(in crate::routing_table) use bootstrap::bootstrap_peers_are_news;
-use bootstrap::BootstrapStandoff;
+use bootstrap::{BootstrapStandoff, ConfigBootstrap};
 pub use state::*;
 
 impl_veilid_log_facility!("rtab");
@@ -80,6 +80,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     ping_validator_public_internet_task: TickTask<EyreReport>,
     /// Background process to keep relays up
     relay_management_task: TickTask<EyreReport>,
+    /// XXX: relay management run-time samples, kept until the lazy snapshot is ruled on
+    relay_management_timing: Mutex<relay_management::RelayManagementTiming>,
     /// Background process to keep private routes up
     private_route_management_task: TickTask<EyreReport>,
 
@@ -98,6 +100,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
     /// When the served payload gets re-checked, set once per cache period
     bootstrap_recheck_at: Mutex<Option<Timestamp>>,
+    /// The bootstrap config as read at attach
+    config_bootstrap: Mutex<ConfigBootstrap>,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
@@ -178,6 +182,7 @@ impl PublicInternetRoutingDomainController {
                 "relay_management_task",
                 RELAY_MANAGEMENT_INTERVAL_SECS,
             ),
+            relay_management_timing: Default::default(),
             private_route_management_task: TickTask::new(
                 "private_route_management_task",
                 PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS,
@@ -189,6 +194,7 @@ impl PublicInternetRoutingDomainController {
             bootstrap_announced_via: Mutex::new(None),
             bootstrap_standoff: Mutex::new(None),
             bootstrap_recheck_at: Mutex::new(None),
+            config_bootstrap: Default::default(),
             no_responsive_since: Default::default(),
         };
         let this = Self {
@@ -250,9 +256,17 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             self.relay_flap_detector.lock().reset();
             self.route_flap_detector.lock().reset();
 
-            // Serve the configured bootstrap records, whether or not we ever bootstrap
-            let config_cache = self.network_manager().config_bootstrap_cache();
+            // Read the bootstrap config once per attach, and serve the configured records
+            // whether or not we ever bootstrap
+            let network_manager = self.network_manager();
+            let payload = network_manager.config_bootstrap_payload();
+            let config_cache = network_manager.config_bootstrap_cache(payload.as_ref());
             self.read_dyn().set_config_bootstrap_cache(config_cache);
+            *self.config_bootstrap.lock() = ConfigBootstrap {
+                payload,
+                entries: network_manager.config_bootstrap_entries(),
+                expiry_reported: false,
+            };
 
             // Publish peer info
             self.publish_peer_info();

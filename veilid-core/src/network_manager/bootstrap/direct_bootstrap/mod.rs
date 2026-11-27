@@ -133,26 +133,6 @@ impl NetworkManager {
             peers.push(Arc::new(pi));
         }
 
-        let unanswered = payload
-            .as_ref()
-            .map(|p| {
-                p.payload()
-                    .bootstrap_nodes()
-                    .iter()
-                    .filter(|bsn| {
-                        !peers
-                            .iter()
-                            .any(|pi| bsn.node_ids().contains_any_from_iter(pi.node_ids().iter()))
-                    })
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        BootstrapPeers {
-            peers,
-            payload,
-            unanswered,
-        }
+        BootstrapPeers { peers, payload }
     }
 }

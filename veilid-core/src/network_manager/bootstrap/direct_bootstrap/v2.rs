@@ -5,9 +5,11 @@ impl_veilid_log_facility!("net");
 /// Bootstrap v2 FOURCC, the reply's first four bytes and the marker a request carries
 pub const B02T_MAGIC: &[u8; 4] = b"B02T";
 
-/// Per-peer size allowance while filling a reply: the largest signatures any kind produces
-/// plus the message framing around them, before the encoded size is checked for real
-const BOOT_V2_PEER_SIZE_ALLOWANCE: usize = 3400;
+/// Unpacked capnp framing around the reply, each peer and each signature: upper bounds while
+/// filling a reply, since packing only shrinks the message
+const BOOT_V2_REPLY_FRAMING: usize = 64;
+const BOOT_V2_PEER_FRAMING: usize = 32;
+const BOOT_V2_SIGNATURE_FRAMING: usize = 24;
 
 impl NetworkManager {
     /// The request a client sends. The legacy magic in front lets a server of the previous
@@ -96,11 +98,15 @@ impl NetworkManager {
         let mut budget = MAX_MESSAGE_SIZE
             .saturating_sub(B02T_MAGIC.len())
             .saturating_sub(payload_bytes.as_ref().map(|b| b.len()).unwrap_or(0))
-            .saturating_sub(BOOT_V2_PEER_SIZE_ALLOWANCE);
+            .saturating_sub(BOOT_V2_REPLY_FRAMING);
         let mut kept = Vec::with_capacity(peers.len().min(MAX_BOOTSTRAP_PEERS));
         for pi in peers {
-            let cost =
-                pi.node_info_message().len() + pi.signatures().len() * BOOT_V2_PEER_SIZE_ALLOWANCE;
+            let cost = BOOT_V2_PEER_FRAMING
+                + pi.node_info_message().len()
+                + pi.signatures()
+                    .iter()
+                    .map(|sig| BOOT_V2_SIGNATURE_FRAMING + sig.ref_value().len())
+                    .sum::<usize>();
             if kept.len() >= MAX_BOOTSTRAP_PEERS || cost > budget {
                 break;
             }

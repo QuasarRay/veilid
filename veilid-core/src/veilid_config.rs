@@ -826,13 +826,15 @@ impl VeilidConfigStorage {
                 );
             }
         }
-        if let Some(limit_mb) = self.limit_mb {
-            if limit_mb == 0 {
-                apibail_generic!("storage limit must be >= 1 in 'storage.limit_mb'");
-            }
+        if self.limit_mb == Some(0) {
+            apibail_generic!("storage limit must be >= 1 in 'storage.limit_mb'");
+        }
+        // The default total counts when no limit is set
+        if let Some(limit_mb) = self.effective_limits().1 {
             if self.minimum_mb > limit_mb {
                 apibail_generic!(
-                    "storage minimum must be <= the storage limit in 'storage.minimum_mb <= storage.limit_mb'"
+                    "storage minimum must be <= the {} MiB storage limit in 'storage.minimum_mb <= storage.limit_mb'",
+                    limit_mb
                 );
             }
         }

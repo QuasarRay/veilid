@@ -31,12 +31,6 @@ aimd-dht = ["veilid-core/aimd-dht"]
 # not a default here, so it composes with the defaults:
 #   cargo build -p veilid-wasm --features mock-api --target wasm32-unknown-unknown
 mock-api = ["veilid-core/mock-api"]
-enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
-# Needs --cfg=web_sys_unstable_apis, which the workspace .cargo/config.toml sets for the
-# wasm target.
-enable-protocol-webtransport = ["veilid-core/enable-protocol-webtransport"]
-enable-bootstrap-v0 = ["veilid-core/enable-bootstrap-v0"]
-enable-bootstrap-v1 = ["veilid-core/enable-bootstrap-v1"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 footgun-config = ["veilid-core/footgun-config"]
 unstable-tunnels = ["veilid-core/unstable-tunnels"]

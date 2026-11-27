@@ -22,8 +22,15 @@ impl StorageManager {
                 veilid_log!(self error "Error flushing remote record store during flush task: {}", e);
             }
         }
-        if let Err(e) = self.update_storage_limits().await {
-            veilid_log!(self debug "Unable to update the remote record store's limit: {}", e);
+        match self.update_storage_limits().await {
+            Ok(_) => self.storage_limits_stale.store(false, Ordering::Release),
+            Err(e) => {
+                if self.storage_limits_stale.swap(true, Ordering::AcqRel) {
+                    veilid_log!(self debug "Unable to update the remote record store's limit: {}", e);
+                } else {
+                    veilid_log!(self warn "Unable to update the remote record store's limit, which stays as it was: {}", e);
+                }
+            }
         }
         Ok(())
     }

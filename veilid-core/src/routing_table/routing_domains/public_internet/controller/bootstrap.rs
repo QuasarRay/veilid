@@ -15,6 +15,17 @@ impl BootstrapStandoff {
     }
 }
 
+/// What the config gives the bootstrap task, read once per attach so bad lines warn once
+#[derive(Debug, Default)]
+pub(super) struct ConfigBootstrap {
+    /// The newest trusted payload in `bootstrap_records`
+    pub payload: Option<SignedBootstrapPayload>,
+    /// The `bootstrap` entries that name something to ask
+    pub entries: Vec<String>,
+    /// Set once the payload's expiry has been warned about
+    pub expiry_reported: bool,
+}
+
 /// The dial infos one bootstrap entry expands to, grouped by protocol in the order to try them
 pub(in crate::routing_table) struct BootstrapTarget {
     /// What the config said
@@ -55,9 +66,7 @@ impl PublicInternetRoutingDomainController {
 
         // Nothing to ask, or standing off as this node's only bootstrap
         let routing_table = self.routing_table();
-        let network_manager = self.network_manager();
-        let bootstraps = self.config().network.routing_table.bootstrap.clone();
-        let config_nodes = network_manager.config_bootstrap();
+        let (bootstraps, config_nodes) = self.config_bootstrap_sources();
         let epoch = routing_table.loss_epoch(None);
         let standing_off = self
             .bootstrap_standoff
@@ -90,8 +99,16 @@ impl PublicInternetRoutingDomainController {
                 targets.push(target);
             }
         }
-        // The configured payload's nodes are asked directly, on their own dial infos
+        // The configured payload's nodes are asked directly, on their own dial infos; this node
+        // among them is one of its own bootstraps
+        let mut own_node_seen = false;
+        let mut asked = HashSet::<NodeId>::new();
         for bsn in &config_nodes {
+            if routing_table.matches_own_node_id(bsn.node_ids()) {
+                own_node_seen = true;
+                continue;
+            }
+            asked.extend(bsn.node_ids().iter().cloned());
             targets.push(BootstrapTarget {
                 entry: format!("payload node {}", bsn.node_ids()),
                 groups: self.protocol_groups(bsn.dial_infos()),
@@ -121,16 +138,17 @@ impl PublicInternetRoutingDomainController {
             }
         }
 
-        // Nodes a payload named but no reply carried are asked directly, once
+        // The newest payload's nodes that no reply carried are asked directly, once
         let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<BootstrapPeers>>>::new();
-        for bsn in core::mem::take(&mut found.unanswered) {
-            if found
-                .peers
-                .iter()
-                .any(|pi| bsn.node_ids().contains_any_from_iter(pi.node_ids().iter()))
-            {
+        for bsn in found.unanswered_payload_nodes() {
+            if routing_table.matches_own_node_id(bsn.node_ids()) {
+                own_node_seen = true;
                 continue;
             }
+            if bsn.node_ids().iter().any(|node_id| asked.contains(node_id)) {
+                continue;
+            }
+            asked.extend(bsn.node_ids().iter().cloned());
             let groups = self.protocol_groups(bsn.dial_infos());
             let node_ids = bsn.node_ids().clone();
             unord.push(pin_dyn_future!(async {
@@ -142,10 +160,7 @@ impl PublicInternetRoutingDomainController {
         loop {
             match unord.next().timeout_at(stop_token.clone()).await {
                 Ok(Some(res)) => match res {
-                    Ok(mut peers) => {
-                        peers.unanswered.clear();
-                        found.extend(peers);
-                    }
+                    Ok(peers) => found.extend(peers),
                     Err(e) => {
                         veilid_log!(self debug "Bootstrap error: {}", e);
                     }
@@ -158,7 +173,6 @@ impl PublicInternetRoutingDomainController {
         // Dedup the peers and notice our own node among them
         let mut bootstrapped_peer_id_set = HashSet::<NodeId>::new();
         let mut bootstrapped_peers = vec![];
-        let mut own_node_seen = false;
         for peer in found.peers {
             if peer.routing_domain() != RoutingDomain::PublicInternet {
                 continue;
@@ -312,6 +326,30 @@ impl PublicInternetRoutingDomainController {
         Ok(())
     }
 
+    /// The configured entries, and the configured payload's nodes while it is unexpired
+    fn config_bootstrap_sources(&self) -> (Vec<String>, Vec<BootstrapNode>) {
+        let (entries, payload, newly_expired) = {
+            let mut config_bootstrap = self.config_bootstrap.lock();
+            let mut payload = config_bootstrap.payload.clone();
+            let mut newly_expired = false;
+            if payload
+                .as_ref()
+                .is_some_and(|payload| payload.payload().is_expired(Timestamp::now()))
+            {
+                payload = None;
+                newly_expired = !core::mem::replace(&mut config_bootstrap.expiry_reported, true);
+            }
+            (config_bootstrap.entries.clone(), payload, newly_expired)
+        };
+        if newly_expired {
+            veilid_log!(self warn "The configured bootstrap payload has expired");
+        }
+        let nodes = payload
+            .map(|payload| payload.payload().bootstrap_nodes().to_vec())
+            .unwrap_or_default();
+        (entries, nodes)
+    }
+
     /// Ask one bootstrap over its dial infos, a protocol group at a time: every address of a
     /// group at once, the next group only when none of them answered the way this node speaks
     async fn direct_bootstrap_ordered(
@@ -359,7 +397,15 @@ impl PublicInternetRoutingDomainController {
         entry: String,
     ) -> Option<BootstrapTarget> {
         let dial_info_converter = BootstrapDialInfoConverter::default();
-        if let Ok(mut dial_infos) = dial_info_converter.try_vec_from_url(&entry).await {
+        // Entries were checked at attach, so a url that fails here did not resolve
+        if entry.contains("://") {
+            let mut dial_infos = match dial_info_converter.try_vec_from_url(&entry).await {
+                Ok(dial_infos) => dial_infos,
+                Err(e) => {
+                    veilid_log!(self debug "Could not resolve bootstrap {}: {}", entry, e);
+                    return None;
+                }
+            };
             let outbound_protocols = self.read_dyn().outbound_protocols();
             dial_infos.retain(|dial_info| outbound_protocols.contains(dial_info.protocol_type()));
             if dial_infos.is_empty() {
@@ -371,10 +417,7 @@ impl PublicInternetRoutingDomainController {
                 entry,
             });
         }
-        let Some((host, port)) = split_bootstrap_entry(&entry) else {
-            veilid_log!(self warn "Invalid bootstrap entry: {}", entry);
-            return None;
-        };
+        let (host, port) = split_bootstrap_entry(&entry)?;
         let mut groups = Vec::new();
         for url in self.bootstrap_urls(&host, port) {
             match dial_info_converter.try_vec_from_url(&url).await {

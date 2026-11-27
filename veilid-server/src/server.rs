@@ -1,5 +1,6 @@
 use crate::client_api;
 use crate::logs::*;
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 use crate::ptr_lookup::ptr_lookup;
 use crate::settings::*;
 use crate::tools::*;
@@ -299,23 +300,27 @@ async fn dump_bootstrap_records(
     keypairs: &KeyPairGroup,
 ) -> EyreResult<()> {
     let addresses = wait_for_bootstrap_addresses(veilid_api).await?;
-    let mut ptr_names = Vec::new();
-    for address in &addresses {
-        match ptr_lookup(*address).await {
-            Ok(name) => ptr_names.push(name),
-            Err(e) => eprintln!("No reverse DNS name for {}: {}", address, e),
+    let mut command = vec!["bootstraprecords".to_owned()];
+    // Only the legacy lines name this host
+    #[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
+    {
+        let mut ptr_names = Vec::new();
+        for address in &addresses {
+            match ptr_lookup(*address).await {
+                Ok(name) => ptr_names.push(name),
+                Err(e) => eprintln!("No reverse DNS name for {}: {}", address, e),
+            }
         }
+        let (hostname, warning) =
+            choose_legacy_hostname(&addresses, &ptr_names, operator_hostname)?;
+        if let Some(warning) = warning {
+            eprintln!("Warning: {}", warning);
+        }
+        command.push("--hostname".to_owned());
+        command.push(hostname);
     }
-    let (hostname, warning) = choose_legacy_hostname(&addresses, &ptr_names, operator_hostname)?;
-    if let Some(warning) = warning {
-        eprintln!("Warning: {}", warning);
-    }
-
-    let mut command = vec![
-        "bootstraprecords".to_owned(),
-        "--hostname".to_owned(),
-        hostname,
-    ];
+    #[cfg(not(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1")))]
+    let _ = (addresses, operator_hostname);
     if !keypairs.is_empty() {
         command.push(keypairs.to_string());
     }
@@ -401,6 +406,7 @@ async fn bootstrap_addresses(veilid_api: &VeilidAPI) -> EyreResult<Vec<IpAddr>> 
 
 /// The hostname for the legacy record lines: the operator's choice (warned about when it is not
 /// an address of this node or a PTR name), else the one agreed PTR name, else the lone address
+#[cfg(any(feature = "enable-bootstrap-v0", feature = "enable-bootstrap-v1"))]
 pub(crate) fn choose_legacy_hostname(
     addresses: &[IpAddr],
     ptr_names: &[String],

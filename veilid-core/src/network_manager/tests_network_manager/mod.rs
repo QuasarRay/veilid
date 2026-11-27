@@ -68,10 +68,11 @@ pub async fn test_all() {
     test_bootstrap::test_boot_v2_payload_round_trip().await;
     test_bootstrap::test_boot_v2_request_forms().await;
     test_bootstrap::test_boot_v2_response_round_trip().await;
+    test_bootstrap::test_boot_v2_response_fills_to_size().await;
     test_bootstrap::test_boot_v2_accept_rules().await;
     test_bootstrap::test_bootstrap_cache().await;
     test_bootstrap::test_bootstrap_recheck_with_nothing_to_serve().await;
-    test_bootstrap::test_record_lifetime_parse();
+    test_bootstrap::test_payload_lifetime_parse();
     test_bootstrap::test_bootstrap_entry_forms().await;
     test_bootstrap::test_config_bootstrap_payload().await;
     test_bootstrap::test_bootstrap_capability_needs_direct_dial_info().await;

@@ -2,6 +2,20 @@ use super::*;
 
 impl_veilid_log_facility!("net");
 
+/// Reliable nodes first, then the ones this node has known longest
+fn bootstrap_node_order(
+    a_entry: &Option<BucketEntrySnapshot>,
+    b_entry: &Option<BucketEntrySnapshot>,
+) -> cmp::Ordering {
+    let (Some(a), Some(b)) = (a_entry.as_ref(), b_entry.as_ref()) else {
+        return a_entry.is_some().cmp(&b_entry.is_some()).reverse();
+    };
+    b.is_reliable()
+        .cmp(&a.is_reliable())
+        .then_with(|| a.time_added.cmp(&b.time_added))
+        .then_with(|| a.node_ids.cmp(&b.node_ids))
+}
+
 impl NetworkManager {
     /// Up to `max_per_type` directly reachable nodes per protocol and address family for one
     /// crypto kind, the reliable and longest-known ones first
@@ -22,7 +36,6 @@ impl NetworkManager {
             ProtocolType::WTD,
         ];
         let node_count = protocol_types.len() * 2 * max_per_type;
-        let mut counts = BTreeMap::<(ProtocolType, AddressType), usize>::new();
 
         let filter = Box::new(
             move |opt_snap: &Option<BucketEntrySnapshot>, cur_ts: Timestamp| {
@@ -60,46 +73,45 @@ impl NetworkManager {
                 }
 
                 // Must have connectivity capabilities
-                if !node_info.has_all_capabilities(CONNECTIVITY_CAPABILITIES) {
-                    return false;
-                }
-
-                // Keep a node while it adds coverage of some protocol and address family
-                let mut keep = false;
-                for did in node_info.dial_info_detail_list() {
-                    let key = (did.dial_info.protocol_type(), did.dial_info.address_type());
-                    if !protocol_types.contains(&key.0) {
-                        continue;
-                    }
-                    let count = counts.entry(key).or_default();
-                    if *count < max_per_type {
-                        *count += 1;
-                        keep = true;
-                    }
-                }
-                keep
+                node_info.has_all_capabilities(CONNECTIVITY_CAPABILITIES)
             },
         ) as RoutingTableEntryFilter;
         let filters = VecDeque::from([filter]);
 
-        // Reliable nodes first, then the ones this node has known longest
+        // In preference order, keep a node while it adds coverage of some protocol and address
+        // family
+        let pre_sort_filter = Box::new(
+            move |nodes: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
+                nodes.sort_unstable_by(bootstrap_node_order);
+                let mut counts = BTreeMap::<(ProtocolType, AddressType), usize>::new();
+                nodes.retain(|opt_snap| {
+                    let Some(pi) = opt_snap
+                        .as_ref()
+                        .and_then(|snap| snap.get_peer_info(RoutingDomain::PublicInternet))
+                    else {
+                        return false;
+                    };
+                    let mut keep = false;
+                    for did in pi.node_info().dial_info_detail_list() {
+                        let key = (did.dial_info.protocol_type(), did.dial_info.address_type());
+                        if !protocol_types.contains(&key.0) {
+                            continue;
+                        }
+                        let count = counts.entry(key).or_default();
+                        if *count < max_per_type {
+                            *count += 1;
+                            keep = true;
+                        }
+                    }
+                    keep
+                });
+            },
+        ) as RoutingTableEntryPreSortFilter;
         let sort = Box::new(
             |a_entry: &Option<BucketEntrySnapshot>,
              b_entry: &Option<BucketEntrySnapshot>,
-             _cur_ts: Timestamp| {
-                let (Some(a), Some(b)) = (a_entry.as_ref(), b_entry.as_ref()) else {
-                    return a_entry.is_some().cmp(&b_entry.is_some()).reverse();
-                };
-                b.is_reliable()
-                    .cmp(&a.is_reliable())
-                    .then_with(|| a.time_added.cmp(&b.time_added))
-                    .then_with(|| a.node_ids.cmp(&b.node_ids))
-            },
+             _cur_ts: Timestamp| bootstrap_node_order(a_entry, b_entry),
         ) as RoutingTableEntrySort;
-
-        let pre_sort_filter =
-            Box::new(|_all_entries: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {})
-                as RoutingTableEntryPreSortFilter;
 
         let cur_ts = Timestamp::now();
         self.routing_table()

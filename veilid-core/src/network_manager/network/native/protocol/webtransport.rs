@@ -86,6 +86,36 @@ impl QuicMtuLimit {
     }
 }
 
+/// How long, in milliseconds, a QUIC session may pass no packets before quinn closes it.
+/// Twice `connection_inactivity_timeout_ms`, so veilid's own inactivity close comes first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::network_manager) struct QuicIdleTimeout(pub u64);
+
+impl Default for QuicIdleTimeout {
+    /// From the default config's inactivity timeout
+    fn default() -> Self {
+        Self::from_inactivity_timeout_ms(
+            VeilidConfigInternalNetwork::default().connection_inactivity_timeout_ms,
+        )
+    }
+}
+
+impl QuicIdleTimeout {
+    pub fn from_inactivity_timeout_ms(inactivity_timeout_ms: u32) -> Self {
+        Self(u64::from(inactivity_timeout_ms) * 2)
+    }
+
+    pub fn for_registry(registry: &VeilidComponentRegistry) -> Self {
+        Self::from_inactivity_timeout_ms(
+            registry
+                .config()
+                .internal()
+                .network
+                .connection_inactivity_timeout_ms,
+        )
+    }
+}
+
 /// Bound what one WebTransport peer can pin, on both the sessions we accept and the ones we
 /// dial. quinn's defaults allow 100 peer-initiated streams of each kind against an unbounded
 /// connection receive window, and the accept path reads at most one stream per session.
@@ -93,7 +123,10 @@ impl QuicMtuLimit {
 /// Every session starts at QUIC's 1200 minimum, which any path carries, and discovers its own
 /// path up to the interface limit: a first flight sized for this host's interface is lost
 /// whole on a path with a smaller MTU, and the dial times out before quinn falls back.
-fn webtransport_transport_config(mtu_limit: QuicMtuLimit) -> Arc<quinn::TransportConfig> {
+fn webtransport_transport_config(
+    mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
+) -> Arc<quinn::TransportConfig> {
     let mut mtu_discovery = quinn::MtuDiscoveryConfig::default();
     mtu_discovery.upper_bound(mtu_limit.0);
     let mut transport = quinn::TransportConfig::default();
@@ -107,7 +140,12 @@ fn webtransport_transport_config(mtu_limit: QuicMtuLimit) -> Arc<quinn::Transpor
             quinn::VarInt::from_u64(WT_CONNECTION_RECEIVE_WINDOW).unwrap_or(quinn::VarInt::MAX),
         )
         .initial_mtu(SAFE_TRANSPORT_MTU)
-        .mtu_discovery_config(Some(mtu_discovery));
+        .mtu_discovery_config(Some(mtu_discovery))
+        .max_idle_timeout(Some(
+            quinn::VarInt::from_u64(idle_timeout.0)
+                .unwrap_or(quinn::VarInt::MAX)
+                .into(),
+        ));
     Arc::new(transport)
 }
 
@@ -246,6 +284,7 @@ pub(in crate::network_manager) fn webtransport_endpoint_config() -> quinn::Endpo
 pub(in crate::network_manager) fn build_client_config(
     allowed_hashes: Vec<[u8; 32]>,
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ClientConfig> {
     let provider = crypto_provider();
     let verifier = CertificateHashVerifier::new(allowed_hashes, provider.clone());
@@ -259,7 +298,7 @@ pub(in crate::network_manager) fn build_client_config(
 
     let quic_crypto = QuicClientConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(mtu_limit));
+    config.transport_config(webtransport_transport_config(mtu_limit, idle_timeout));
     Ok(config)
 }
 
@@ -279,9 +318,10 @@ fn ca_quic_crypto() -> io::Result<Arc<QuicClientConfig>> {
 
 pub(in crate::network_manager) fn cached_client_config_ca(
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ClientConfig> {
     let mut config = quinn::ClientConfig::new(ca_quic_crypto()?);
-    config.transport_config(webtransport_transport_config(mtu_limit));
+    config.transport_config(webtransport_transport_config(mtu_limit, idle_timeout));
     Ok(config)
 }
 
@@ -300,10 +340,11 @@ fn quic_client_crypto_with_root_store(root_store: RootCertStore) -> io::Result<Q
 pub(in crate::network_manager) fn build_client_config_with_root_store(
     root_store: RootCertStore,
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ClientConfig> {
     let quic_crypto = quic_client_crypto_with_root_store(root_store)?;
     let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(mtu_limit));
+    config.transport_config(webtransport_transport_config(mtu_limit, idle_timeout));
     Ok(config)
 }
 
@@ -311,6 +352,7 @@ pub(in crate::network_manager) fn build_server_config_from_chain(
     cert_chain: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ServerConfig> {
     let provider = crypto_provider();
     let mut crypto = rustls::ServerConfig::builder_with_provider(provider)
@@ -323,23 +365,25 @@ pub(in crate::network_manager) fn build_server_config_from_chain(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(mtu_limit));
+    config.transport_config(webtransport_transport_config(mtu_limit, idle_timeout));
     Ok(config)
 }
 
 pub(in crate::network_manager) fn build_server_config(
     cert: &ManagedCertificate,
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ServerConfig> {
     let cert_chain = vec![CertificateDer::from(cert.certificate_der.clone())];
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.private_key_der.clone()));
-    build_server_config_from_chain(cert_chain, key, mtu_limit)
+    build_server_config_from_chain(cert_chain, key, mtu_limit, idle_timeout)
 }
 
 pub(in crate::network_manager) fn build_ca_server_config(
     hostname: Arc<CertifiedKey>,
     ip: Option<Arc<CertifiedKey>>,
     mtu_limit: QuicMtuLimit,
+    idle_timeout: QuicIdleTimeout,
 ) -> io::Result<quinn::ServerConfig> {
     let resolver = Arc::new(TlsServerCertResolver::new(hostname, ip));
     let provider = crypto_provider();
@@ -352,7 +396,7 @@ pub(in crate::network_manager) fn build_ca_server_config(
 
     let quic_crypto = QuicServerConfig::try_from(crypto).map_err(to_io_error_other)?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
-    config.transport_config(webtransport_transport_config(mtu_limit));
+    config.transport_config(webtransport_transport_config(mtu_limit, idle_timeout));
     Ok(config)
 }
 
@@ -542,7 +586,7 @@ impl WebTransportNetworkConnection {
                 let len = message.len() as u32;
                 let mut stream = send.lock().await;
                 if let Err(e) = stream.write_all(&len.to_be_bytes()).await {
-                    veilid_log!(self debug
+                    veilid_log!(self debug target: "protocol",
                         "WebTransport: stream length write failed {:?}: {}", self.flow, e);
                     return Ok(NetworkResult::NoConnection(to_io_error_other(e)));
                 }
@@ -580,7 +624,7 @@ impl WebTransportNetworkConnection {
                             Err(web_transport_quinn::SessionError::SendDatagramError(
                                 web_transport_quinn::quinn::SendDatagramError::ConnectionLost(e),
                             )) => {
-                                veilid_log!(registry debug
+                                veilid_log!(registry debug target: "protocol",
                                     "WebTransport: datagram send failed, connection lost {:?}: {}", flow, e);
                                 Ok(NetworkResult::NoConnection(to_io_error_other(e)))
                             }
@@ -611,7 +655,7 @@ impl WebTransportNetworkConnection {
                 let mut stream = recv.lock().await;
                 let mut len_buf = [0u8; STREAM_LEN_PREFIX];
                 if let Err(e) = stream.read_exact(&mut len_buf).await {
-                    veilid_log!(self debug
+                    veilid_log!(self debug target: "protocol",
                         "WebTransport: stream length read failed {:?}: {}", self.flow, e);
                     return Ok(NetworkResult::NoConnection(to_io_error_other(e)));
                 }
@@ -644,7 +688,7 @@ impl WebTransportNetworkConnection {
                         match self.session.read_datagram().await {
                             Ok(data) => data,
                             Err(e) => {
-                                veilid_log!(self debug
+                                veilid_log!(self debug target: "protocol",
                                     "WebTransport: datagram read failed {:?}: {}", self.flow, e);
                                 return Ok(NetworkResult::NoConnection(to_io_error_other(e)));
                             }
@@ -771,10 +815,11 @@ pub(in crate::network_manager) async fn connect_connection(
     let remote = dial_info.to_socket_addr();
 
     let mtu_limit = QuicMtuLimit::for_remote(&registry, &remote);
+    let idle_timeout = QuicIdleTimeout::for_registry(&registry);
     let client_config = match dial_mode {
-        WebTransportDialMode::CaSigned => cached_client_config_ca(mtu_limit)?,
+        WebTransportDialMode::CaSigned => cached_client_config_ca(mtu_limit, idle_timeout)?,
         WebTransportDialMode::PinnedSelfSigned(cert_hashes) => {
-            build_client_config(cert_hashes, mtu_limit)?
+            build_client_config(cert_hashes, mtu_limit, idle_timeout)?
         }
     };
     let endpoint = match opt_client_endpoint {
@@ -837,7 +882,7 @@ pub(in crate::network_manager) async fn connect_connection(
         WebTransportNetworkConnection::new_datagram(registry, flow, Direction::Out, session, None)
     };
 
-    veilid_log!(conn debug
+    veilid_log!(conn debug target: "protocol",
         "WebTransport: {} session to {} path mtu {} datagram budget {}",
         if is_stream { "WTS" } else { "WTD" }, remote, conn.path_mtu(), conn.datagram_budget());
 

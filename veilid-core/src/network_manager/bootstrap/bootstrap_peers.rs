@@ -7,15 +7,12 @@ pub struct BootstrapPeers {
     pub peers: Vec<Arc<PeerInfo>>,
     /// The payload the source handed over, once it passed the trust rules
     pub payload: Option<SignedBootstrapPayload>,
-    /// Payload nodes with no peer in the reply, to be asked directly
-    pub unanswered: Vec<BootstrapNode>,
 }
 
 impl BootstrapPeers {
     /// Fold another source's result in
     pub fn extend(&mut self, other: BootstrapPeers) {
         self.peers.extend(other.peers);
-        self.unanswered.extend(other.unanswered);
         if other.payload.as_ref().is_some_and(|op| {
             self.payload
                 .as_ref()
@@ -23,5 +20,24 @@ impl BootstrapPeers {
         }) {
             self.payload = other.payload;
         }
+    }
+
+    /// The payload's nodes that none of the peers answers for
+    pub fn unanswered_payload_nodes(&self) -> Vec<BootstrapNode> {
+        let Some(payload) = self.payload.as_ref() else {
+            return vec![];
+        };
+        payload
+            .payload()
+            .bootstrap_nodes()
+            .iter()
+            .filter(|bsn| {
+                !self
+                    .peers
+                    .iter()
+                    .any(|pi| bsn.node_ids().contains_any_from_iter(pi.node_ids().iter()))
+            })
+            .cloned()
+            .collect()
     }
 }

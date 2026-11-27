@@ -268,6 +268,50 @@ pub async fn test_boot_v2_response_round_trip() {
     mock_registry::terminate(registry).await;
 }
 
+/// A reply is filled by the size its peers really encode to, not a worst-case signature
+pub async fn test_boot_v2_response_fills_to_size() {
+    let registry = mock_registry::init("boot_v2_response_fill").await;
+    {
+        let routing_table = registry.routing_table();
+        let network_manager = registry.network_manager();
+        let crypto = registry.crypto();
+
+        let named: Vec<_> = (1..=40)
+            .map(|last_octet| {
+                let pi = fresh_peer_info(&routing_table, &crypto, test_dial_info(last_octet), None);
+                register(&routing_table, &pi);
+                pi
+            })
+            .collect();
+        let now = Timestamp::now();
+        let signed = payload_for(
+            &named,
+            &crypto,
+            &mock_keypairs()[..1],
+            now,
+            Some(now.later(TEST_LIFETIME)),
+        );
+        serve_payload(&routing_table, &signed);
+
+        let reply = network_manager
+            .boot_v2_response()
+            .expect("should build reply");
+        assert!(reply.len() <= MAX_MESSAGE_SIZE);
+        let decoded = network_manager
+            .decode_boot_v2_response(&reply[4..])
+            .expect("should decode reply");
+        let ids: Vec<NodeIdGroup> = decoded
+            .peers
+            .iter()
+            .map(|pi| pi.node_ids().clone())
+            .collect();
+        for pi in &named {
+            assert!(ids.contains(pi.node_ids()), "{} of 40 peers", ids.len());
+        }
+    }
+    mock_registry::terminate(registry).await;
+}
+
 /// With keys, the payload must verify and every peer must be one of its nodes; without keys
 /// everything offered is taken; a payload older than the one held is refused either way
 pub async fn test_boot_v2_accept_rules() {
@@ -303,7 +347,7 @@ pub async fn test_boot_v2_accept_rules() {
         assert_eq!(accepted.payload.as_ref(), Some(&good));
         assert_eq!(accepted.peers.len(), 1);
         assert_eq!(accepted.peers[0].node_ids(), named.node_ids());
-        assert!(accepted.unanswered.is_empty());
+        assert!(accepted.unanswered_payload_nodes().is_empty());
 
         // A payload naming a node the reply did not carry leaves it to be asked
         let absent = payload_for(
@@ -317,8 +361,9 @@ pub async fn test_boot_v2_accept_rules() {
             payload: Some(absent.bytes().clone()),
             peers: vec![UnverifiedPeerInfo::from_verified(&named)],
         });
-        assert_eq!(accepted.unanswered.len(), 1);
-        assert_eq!(accepted.unanswered[0].node_ids(), stranger.node_ids());
+        let unanswered = accepted.unanswered_payload_nodes();
+        assert_eq!(unanswered.len(), 1);
+        assert_eq!(unanswered[0].node_ids(), stranger.node_ids());
 
         // The wrong signing key, an unsigned payload, an expired one, or none: nothing is trusted
         let wrong_key = payload_for(
@@ -490,24 +535,24 @@ pub async fn test_bootstrap_recheck_with_nothing_to_serve() {
     mock_registry::terminate(registry).await;
 }
 
-pub fn test_record_lifetime_parse() {
+pub fn test_payload_lifetime_parse() {
     const DAY: u64 = 86_400_000_000;
-    assert_eq!(parse_record_lifetime("none"), Some(None));
-    assert_eq!(parse_record_lifetime("0"), Some(None));
+    assert_eq!(parse_payload_lifetime("none"), Some(None));
+    assert_eq!(parse_payload_lifetime("0"), Some(None));
     assert_eq!(
-        parse_record_lifetime("30d"),
+        parse_payload_lifetime("30d"),
         Some(Some(TimestampDuration::new(30 * DAY)))
     );
     assert_eq!(
-        parse_record_lifetime("1y6mo"),
+        parse_payload_lifetime("1y6mo"),
         Some(Some(TimestampDuration::new((365 + 180) * DAY)))
     );
     assert_eq!(
-        parse_record_lifetime(" 2Y "),
+        parse_payload_lifetime(" 2Y "),
         Some(Some(TimestampDuration::new(730 * DAY)))
     );
     for bad in ["", "5m", "1y2", "d", "1x", "-1d", "1h"] {
-        assert_eq!(parse_record_lifetime(bad), None, "{bad:?}");
+        assert_eq!(parse_payload_lifetime(bad), None, "{bad:?}");
     }
 }
 
@@ -567,10 +612,10 @@ pub async fn test_config_bootstrap_payload() {
         assert_eq!(payload.to_line(), newer_line);
 
         // The configured payload's nodes are what this node asks directly
-        assert_eq!(network_manager.config_bootstrap().len(), 1);
+        assert_eq!(payload.payload().bootstrap_nodes().len(), 1);
 
         // And it is what this node serves before it ever bootstraps
-        let cache = network_manager.config_bootstrap_cache();
+        let cache = network_manager.config_bootstrap_cache(Some(&payload));
         assert_eq!(
             cache.payload_timestamp(),
             Some(payload.payload().timestamp())
@@ -898,6 +943,24 @@ pub async fn test_bootstrap_entry_forms() {
             expected.map(|(host, port)| (host.to_owned(), port)),
             "{entry:?}"
         );
+    }
+
+    // The attach-time check takes what a round can expand, without any lookup
+    for entry in [
+        "bootstrap.test",
+        "bootstrap.test:443",
+        "tcp://18.218.0.160:5150",
+        "ws://bootstrap.test/ws",
+    ] {
+        check_bootstrap_entry(entry).expect(entry);
+    }
+    for entry in [
+        "bootstrap.test:port",
+        "ftp://bootstrap.test",
+        "udp://bootstrap.test",
+        "",
+    ] {
+        assert!(check_bootstrap_entry(entry).is_err(), "{entry:?}");
     }
 
     // An address entry becomes a dial info without any lookup, in either family

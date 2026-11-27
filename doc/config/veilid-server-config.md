@@ -166,7 +166,7 @@ storage:
 | `directory`     | Base directory for the stores. Defaults to `/var/db/veilid-server` where it exists, otherwise the platform's local data directory. A store whose own `directory` is empty uses `<directory>/<store>` (`table_store`, `block_store`, `protected_store`). The IPC directory does not follow it. |
 | `limit_percent` | Share of each filesystem's free space, plus what the shared stores already use there, that the shared stores may use. 1 to 100. |
 | `limit_mb`      | Total the shared stores may use across all filesystems, in MiB. |
-| `minimum_mb`    | Size each shared store may always grow to, in MiB, whatever the limits allow. |
+| `minimum_mb`    | Size each shared store may always grow to, in MiB, whatever the free space allows. It may not exceed the MiB total in force. |
 
 The shared stores hold data for other nodes: the remote DHT record store (when `network.dht.remote_max_storage_space_mb` is 0) and, later, the block store's remote cache (when `block_store.remote_max_storage_space_mb` is 0). With neither limit set, both defaults apply: 25% and 10240 MiB. Setting only one of them drops the other's default, and setting both applies both.
 
@@ -271,10 +271,9 @@ A node with bootstraps configured and no protocol in this list it can dial, give
 `bootstrap_records` holds bootstrap record lines, verbatim: the network's signed payload line
 (`2|...`) as `veilid-server --sign-bootstrap-payload` prints it, and, for nodes running 0.5.x,
 the legacy TXT lines as `veilid-server --dump-bootstrap-records` prints them. The payload names
-the nodes this node joins from, so a node holding it never resolves `bootstrap`, and a node
-that serves answers bootstrap requests with it as soon as it starts; the legacy lines answer
-0.5.x nodes. Leaving the list empty (the default) means the payload comes from the bootstrap
-servers. [BOOTSTRAP-SETUP.md](../../BOOTSTRAP-SETUP.md) walks through producing both.
+nodes this node also joins from, beside its `bootstrap` entries, and a node that serves holds
+it from startup and answers with it once it advertises `BOOT`; the legacy lines answer 0.5.x
+nodes. Leaving the list empty (the default) means the payload comes from the bootstrap servers. [BOOTSTRAP-SETUP.md](../../BOOTSTRAP-SETUP.md) walks through producing both.
 
 An older veilid-server logs a key it does not know and starts normally, so a config file
 carrying these keys is still usable on an older node.

@@ -18,6 +18,39 @@ pub fn split_bootstrap_entry(entry: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port.parse().ok()?))
 }
 
+/// Whether a `bootstrap` entry names something to ask, checked without any lookup: a url
+/// over a protocol this build dials, or a bare `host` or `host:port`
+pub fn check_bootstrap_entry(entry: &str) -> VeilidAPIResult<()> {
+    if entry.contains("://") {
+        split_dial_info_url(entry)?;
+        return Ok(());
+    }
+    if split_bootstrap_entry(entry).is_none() {
+        apibail_parse_error!("not a url, host or host:port", entry);
+    }
+    Ok(())
+}
+
+/// A dial info url split, with the port its scheme defaults to
+fn split_dial_info_url(url: &str) -> VeilidAPIResult<(SplitUrl, u16)> {
+    let split_url = SplitUrl::from_str(url)
+        .map_err(|e| VeilidAPIError::parse_error(format!("unable to split url: {}", e), url))?;
+    let port = match split_url.scheme.as_str() {
+        "udp" | "tcp" => split_url
+            .port
+            .ok_or_else(|| VeilidAPIError::parse_error("Missing port in udp url", url))?,
+        "ws" => split_url.port.unwrap_or(80u16),
+        #[cfg(feature = "enable-protocol-wss")]
+        "wss" => split_url.port.unwrap_or(443u16),
+        #[cfg(feature = "enable-protocol-webtransport")]
+        "wts" => split_url.port.unwrap_or(443u16),
+        _ => {
+            apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
+        }
+    };
+    Ok((split_url, port))
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BootstrapDialInfoConverter {}
 
@@ -27,23 +60,7 @@ impl BootstrapDialInfoConverter {
         url: &'a str,
     ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>> {
         pin_dyn_future!(async move {
-            let split_url = SplitUrl::from_str(url).map_err(|e| {
-                VeilidAPIError::parse_error(format!("unable to split url: {}", e), url)
-            })?;
-
-            let port = match split_url.scheme.as_str() {
-                "udp" | "tcp" => split_url
-                    .port
-                    .ok_or_else(|| VeilidAPIError::parse_error("Missing port in udp url", url))?,
-                "ws" => split_url.port.unwrap_or(80u16),
-                #[cfg(feature = "enable-protocol-wss")]
-                "wss" => split_url.port.unwrap_or(443u16),
-                #[cfg(feature = "enable-protocol-webtransport")]
-                "wts" => split_url.port.unwrap_or(443u16),
-                _ => {
-                    apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
-                }
-            };
+            let (split_url, port) = split_dial_info_url(url)?;
 
             let socket_addrs = match split_url.host {
                 SplitUrlHost::Hostname(_) => resolve_socket_addrs(

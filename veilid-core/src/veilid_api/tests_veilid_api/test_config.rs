@@ -171,7 +171,12 @@ pub fn test_storage_validation() {
     with_storage(None, None, 0).expect("no limits set");
     with_storage(Some(1), None, 0).expect("1 percent");
     with_storage(Some(100), Some(1), 1).expect("100 percent, 1 MiB");
-    with_storage(None, None, 64).expect("a minimum without a MiB limit");
+    with_storage(None, None, 64).expect("a minimum under the default MiB limit");
+    with_storage(Some(25), None, 100_000).expect("a percent limit alone sets no MiB total");
+    assert!(
+        with_storage(None, None, default_storage_limit_mb() + 1).is_err(),
+        "minimum over the default MiB limit"
+    );
     assert!(with_storage(Some(0), None, 0).is_err(), "0 percent");
     assert!(
         with_storage(Some(101), None, 0).is_err(),
